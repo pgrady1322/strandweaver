@@ -1,0 +1,101 @@
+# SmartAssembler Default Configuration
+# This file contains default values for all configuration parameters
+
+# Input configuration
+input:
+  reads: null  # Path to input reads file (FASTQ/FASTA)
+  technology: illumina  # Technology: illumina, ancient, ont, pacbio
+  paired_end: false  # Whether reads are paired-end
+  read1: null  # Path to R1 file (if paired-end)
+  read2: null  # Path to R2 file (if paired-end)
+
+# Error profiling configuration
+profiling:
+  min_quality: 20  # Minimum base quality threshold
+  sample_size: 1000000  # Number of reads to sample for profiling
+  alignment_threads: 4  # Threads for all-vs-all alignment
+  output_format: json  # Output format: json, html, both
+
+# Error correction configuration
+correction:
+  # Ancient DNA specific settings
+  ancient:
+    max_damage_position: 10  # Max position from read ends to check for damage
+    min_damage_frequency: 0.01  # Minimum damage frequency (1%)
+    udg_treated: false  # Whether library is UDG-treated
+    preserve_variants: true  # Conservative correction mode
+    context_aware: true  # Consider sequence context (CpG sites, etc.)
+    
+  # Illumina specific settings
+  illumina:
+    kmer_size: 31  # K-mer size for error correction
+    min_kmer_coverage: 3  # Minimum k-mer coverage
+    quality_threshold: 20  # Quality score threshold
+    use_paired_info: true  # Use paired-end information
+    
+  # ONT specific settings
+  ont:
+    homopolymer_threshold: 5  # Homopolymer length threshold
+    min_alignment_quality: 10  # Minimum alignment quality
+    consensus_rounds: 3  # Number of consensus rounds
+    
+  # PacBio HiFi specific settings
+  pacbio:
+    min_ccs_passes: 3  # Minimum CCS passes
+    consensus_algorithm: arrow  # Consensus algorithm: arrow, pbdagcon
+    min_accuracy: 0.99  # Minimum read accuracy
+
+# Assembly configuration
+assembly:
+  min_overlap: 1000  # Minimum overlap length (bp)
+  min_coverage: 5  # Minimum coverage threshold
+  max_coverage: 1000  # Maximum coverage (to filter repeats)
+  graph_type: string  # Graph type: string, debruijn, hybrid
+  
+  # Graph simplification settings
+  simplification:
+    remove_tips: true  # Remove dead-end branches
+    tip_length: 1000  # Maximum tip length to remove (bp)
+    pop_bubbles: true  # Pop bubbles (resolve variants)
+    min_bubble_identity: 0.95  # Minimum identity for bubble popping
+    prune_low_coverage: true  # Remove low-coverage edges
+    min_edge_coverage: 3  # Minimum edge coverage
+    
+  # String graph specific
+  string_graph:
+    transitive_reduction: true  # Perform transitive reduction
+    
+  # De Bruijn graph specific
+  debruijn_graph:
+    kmer_size: 55  # K-mer size for de Bruijn graph
+    bloom_filter: true  # Use Bloom filter for k-mer counting
+
+# AI finishing configuration
+ai_finishing:
+  provider: claude  # AI provider: claude, heuristic
+  model: claude-3-5-sonnet-20241022  # Claude model
+  max_tokens: 4096  # Maximum tokens per request
+  temperature: 0.1  # Temperature (lower = more deterministic)
+  fallback_to_heuristic: true  # Fallback if AI unavailable
+  interactive: false  # Ask user for ambiguous cases
+  min_confidence: 0.7  # Minimum confidence to accept AI decision
+  cache_decisions: true  # Cache similar graph patterns
+  cost_limit: null  # Maximum API cost (USD, null = no limit)
+
+# Output configuration
+output:
+  directory: ./strandweaver_output  # Output directory
+  save_intermediates: true  # Save intermediate files
+  formats:
+    - fasta  # Assembly in FASTA format
+    - gfa    # Assembly graph in GFA format
+    - stats  # Assembly statistics
+  compress: false  # Compress output files
+  
+# Execution configuration
+execution:
+  threads: 1  # Number of threads
+  memory_gb: 16  # Memory limit (GB)
+  log_level: INFO  # Log level: DEBUG, INFO, WARNING, ERROR
+  checkpoint_frequency: 1  # Checkpoint after each major step (1 = always)
+  temp_dir: null  # Temporary directory (null = system default)

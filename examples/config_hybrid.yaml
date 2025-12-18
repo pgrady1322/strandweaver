@@ -1,0 +1,188 @@
+# StrandWeaver Configuration - Hybrid Assembly
+# Illumina + ONT + PacBio HiFi + Hi-C scaffolding
+
+# ============================================================================
+# AI/ML Settings (ALL ENABLED for hybrid)
+# ============================================================================
+ai:
+  enabled: true
+  use_classical_fallback: true
+  
+  correction:
+    adaptive_kmer:
+      enabled: true
+      model_path: null
+      min_confidence: 0.7
+    base_error_classifier:
+      enabled: true
+      model_path: null
+      min_confidence: 0.8
+  
+  assembly:
+    edge_ai:
+      enabled: true
+      model_path: null
+      edge_threshold: 0.5
+    path_gnn:
+      enabled: true
+      model_path: null
+      min_path_score: 0.6
+    diploid_ai:
+      enabled: true  # Important for phasing
+      model_path: null
+      phase_confidence: 0.7
+    ul_routing_ai:
+      enabled: true  # For ultra-long reads
+      model_path: null
+      anchor_threshold: 0.6
+    sv_ai:
+      enabled: true
+      model_path: null
+      sv_confidence: 0.75
+  
+  claude:
+    enabled: false
+
+# ============================================================================
+# Hardware Settings (Consider GPU for hybrid)
+# ============================================================================
+hardware:
+  use_gpu: false  # Set to true for faster processing
+  gpu_device: 0
+  threads: null  # Use all available
+  memory_limit_gb: null
+
+# ============================================================================
+# Pipeline Control
+# ============================================================================
+pipeline:
+  steps:
+    - profile
+    - correct
+    - assemble
+    - finish
+  checkpoint_interval: per_step
+
+# ============================================================================
+# Error Profiling
+# ============================================================================
+profiling:
+  sample_size: 100000
+  technology_detection:
+    enabled: true
+    confidence_threshold: 0.8
+  ancient_dna:
+    detect_damage: true
+
+# ============================================================================
+# Error Correction (Multi-technology)
+# ============================================================================
+correction:
+  illumina:
+    kmer_size: 31
+    min_kmer_count: 2
+    error_rate: 0.01
+    use_ai_kmer_selection: true
+  
+  ont:
+    error_rate: 0.10
+    homopolymer_correction: true
+    use_ai_error_model: true
+  
+  pacbio:
+    error_rate: 0.01  # HiFi
+    use_ai_error_model: true
+  
+  max_iterations: 3
+  convergence_threshold: 0.001
+
+# ============================================================================
+# Assembly (Hybrid strategy)
+# ============================================================================
+assembly:
+  graph:
+    type: auto  # Auto-select based on data
+    kmer_size: null
+    min_overlap: 50
+    min_coverage: 2
+    use_edge_ai: true
+  
+  olc:
+    enabled: auto  # Use for Illumina
+    min_overlap_length: 40
+    min_identity: 0.95
+  
+  dbg:
+    enabled: true
+    adaptive_k: true
+    k_range: [21, 127]
+    k_step: 10
+    coverage_cutoff: auto
+    use_path_gnn: true
+  
+  string_graph:
+    enabled: auto  # Use if ultra-long reads present
+    min_read_length: 50000
+    use_ul_routing_ai: true
+  
+  diploid:
+    mode: auto  # Detect ploidy
+    use_diploid_ai: true
+    min_allele_frequency: 0.25
+  
+  sv_detection:
+    enabled: true
+    use_sv_ai: true
+    min_sv_size: 50
+  
+  contigs:
+    min_length: 1000  # Higher for hybrid
+    min_coverage: 2
+    quality_threshold: 20
+
+# ============================================================================
+# Scaffolding (Hi-C enabled)
+# ============================================================================
+scaffolding:
+  enabled: true
+  
+  hic:
+    enabled: true  # Chromosome-scale scaffolding
+    min_mapq: 30
+    contact_threshold: 5
+    resolution: 10000
+  
+  ultralong:
+    enabled: auto
+    min_read_length: 50000
+    min_anchors: 2
+
+# ============================================================================
+# Finishing
+# ============================================================================
+finishing:
+  enabled: true
+  gap_filling:
+    enabled: true
+    max_gap_size: 100000  # Larger gaps possible with long reads
+  polishing:
+    enabled: true
+    rounds: 3  # Extra round for hybrid
+    use_original_reads: true
+  decontamination:
+    enabled: false
+
+# ============================================================================
+# Output
+# ============================================================================
+output:
+  format: fasta
+  compression: gzip
+  include_quality: true
+  include_metadata: true
+  visualization:
+    generate_bandage_files: true
+    graph_format: gfa
+  logging:
+    level: INFO
+    log_file: strandweaver.log

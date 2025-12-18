@@ -1,0 +1,267 @@
+diff --git a/generate_real_training_data.py b/generate_real_training_data.py
+index 3eb71f1..6b99c88 100644
+--- a/generate_real_training_data.py
++++ b/generate_real_training_data.py
+@@ -27,8 +27,8 @@ import argparse
+ # Add strandweaver to path
+ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
+ 
+-from strandweaver.assembly.overlap_layout_consensus import ContigBuilder
+-from strandweaver.assembly.debruijn_graph import build_dbg_from_long_reads
++from strandweaver.assembly_core.illumina_olc_contig_module import ContigBuilder
++from strandweaver.assembly_core.dbg_engine_module import build_dbg_from_long_reads
+ from strandweaver.io.fastq import read_fastq
+ from strandweaver.io.read import SeqRead
+ from strandweaver.read_correction.feature_extraction import FeatureExtractor
+diff --git a/scripts/verify_gpu_setup.py b/scripts/verify_gpu_setup.py
+index 7191a5f..c986d94 100755
+--- a/scripts/verify_gpu_setup.py
++++ b/scripts/verify_gpu_setup.py
+@@ -77,8 +77,8 @@ def check_cupy():
+ def check_strandweaver_gpu():
+     """Check StrandWeaver GPU components."""
+     try:
+-        from strandweaver.assembly.gpu_core import GPUKmerCounter, get_gpu_info
+-        from strandweaver.assembly.gpu_core import (
++        from strandweaver.utils.gpu_core import GPUKmerCounter, get_gpu_info
++        from strandweaver.utils.gpu_core import (
+             GPUGraphBuilder,
+             GPUKmerExtractor,
+             GPUSequenceAligner
+diff --git a/strandweaver/cli.py b/strandweaver/cli.py
+index 70d9c3f..8e08707 100644
+--- a/strandweaver/cli.py
++++ b/strandweaver/cli.py
+@@ -843,7 +843,7 @@ def correct(ctx, input, technology, output, profile, pre_corrected, threads,
+     if use_gpu:
+         click.echo(f"  GPU acceleration: Requested (threshold={gpu_threshold} reads)")
+         try:
+-            from .assembly.gpu_core import get_gpu_info
++            from .utils.gpu_core import get_gpu_info
+             gpu_info = get_gpu_info()
+             click.echo(f"    {gpu_info}")
+         except ImportError:
+diff --git a/strandweaver/read_correction/adaptive_kmer.py b/strandweaver/read_correction/adaptive_kmer.py
+index 9ceb4d0..830e412 100644
+--- a/strandweaver/read_correction/adaptive_kmer.py
++++ b/strandweaver/read_correction/adaptive_kmer.py
+@@ -76,7 +76,7 @@ class AdaptiveKmerPredictor:
+     - Polish k: Optimized for base quality improvement
+     
+     Example:
+-        from strandweaver.ai import FeatureExtractor, AdaptiveKmerPredictor
++        from strandweaver.read_correction import FeatureExtractor, AdaptiveKmerPredictor
+         
+         # Extract features
+         extractor = FeatureExtractor()
+diff --git a/strandweaver/read_correction/errorsmith_module.py b/strandweaver/read_correction/errorsmith_module.py
+index b837046..82eae3a 100644
+--- a/strandweaver/read_correction/errorsmith_module.py
++++ b/strandweaver/read_correction/errorsmith_module.py
+@@ -23,7 +23,7 @@ Architecture:
+     Section 6: Visualization and Reporting
+ 
+ Usage:
+-    from strandweaver.correction import get_corrector, CorrectionStats
++    from strandweaver.read_correction import get_corrector, CorrectionStats
+     
+     # Create technology-specific corrector
+     corrector = get_corrector("ont", error_profile, k_size=21)
+diff --git a/strandweaver/training/full_corpus_generator.py b/strandweaver/training/full_corpus_generator.py
+index 3c12ca3..7b115fd 100644
+--- a/strandweaver/training/full_corpus_generator.py
++++ b/strandweaver/training/full_corpus_generator.py
+@@ -57,7 +57,7 @@ from strandweaver.training.read_simulator import (
+ )
+ 
+ # Phase 5.3 Module Imports - Graph Assembly
+-from strandweaver.assembly.data_structures import (
++from strandweaver.assembly_core.data_structures import (
+     DeBruijnGraphBuilder,
+     KmerGraphConfig,
+     KmerGraph,
+diff --git a/strandweaver/training/validator.py b/strandweaver/training/validator.py
+index cf8be95..b12b142 100644
+--- a/strandweaver/training/validator.py
++++ b/strandweaver/training/validator.py
+@@ -13,8 +13,8 @@ import numpy as np
+ from dataclasses import dataclass
+ 
+ from strandweaver.read_correction.feature_extraction import FeatureExtractor
+-from strandweaver.ai.training.model_trainer import KmerModelTrainer
+-from strandweaver.ai.training.data_generator import TrainingDataGenerator
++from strandweaver.training.model_trainer import KmerModelTrainer
++from strandweaver.training.data_generator import TrainingDataGenerator
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/strandweaver/utils/gpu_core.py b/strandweaver/utils/gpu_core.py
+index 7e78b73..f571b7b 100644
+--- a/strandweaver/utils/gpu_core.py
++++ b/strandweaver/utils/gpu_core.py
+@@ -1280,7 +1280,7 @@ class GPUContactMapBuilder:
+         Returns:
+             Tuple of (HiCContactMap, contact_matrix as numpy array)
+         """
+-        from strandweaver.assembly.strandtether import HiCContactMap
++        from strandweaver.assembly_core.strandtether_module import HiCContactMap
+         
+         if not hic_pairs:
+             return HiCContactMap(), np.array([])
+@@ -1367,7 +1367,7 @@ class GPUContactMapBuilder:
+         
+         Uses vectorized operations to extract non-zero entries.
+         """
+-        from strandweaver.assembly.strandtether import HiCContactMap
++        from strandweaver.assembly_core.strandtether_module import HiCContactMap
+         
+         # Reverse mapping: index -> node_id
+         idx_to_node = {idx: node for node, idx in node_mapping.items()}
+@@ -1437,7 +1437,7 @@ class GPUSpectralPhaser:
+         Returns:
+             Dict mapping node_id -> HiCNodePhaseInfo
+         """
+-        from strandweaver.assembly.strandtether import HiCNodePhaseInfo
++        from strandweaver.assembly_core.strandtether_module import HiCNodePhaseInfo
+         
+         if contact_matrix.size == 0:
+             return {}
+@@ -1469,7 +1469,7 @@ class GPUSpectralPhaser:
+         
+         Uses vectorized operations to compute phase scores.
+         """
+-        from strandweaver.assembly.strandtether import HiCNodePhaseInfo
++        from strandweaver.assembly_core.strandtether_module import HiCNodePhaseInfo
+         
+         # Reverse mapping
+         idx_to_node = {idx: node for node, idx in node_mapping.items()}
+@@ -1887,7 +1887,7 @@ class GPUAnchorFinder:
+                          if kmer in all_kmers}
+         
+         # Phase 3: Create anchors
+-        from strandweaver.assembly.data_structures import Anchor
++        from strandweaver.assembly_core.data_structures import Anchor
+         
+         all_anchors = {}
+         
+@@ -1924,7 +1924,7 @@ class GPUAnchorFinder:
+         kmer_index: Dict[str, List[Tuple[int, int]]]
+     ) -> Dict[str, List[Any]]:
+         """Sequential anchor finding fallback."""
+-        from strandweaver.assembly.data_structures import Anchor
++        from strandweaver.assembly_core.data_structures import Anchor
+         
+         all_anchors = {}
+         
+diff --git a/test_gnn_integration.py b/test_gnn_integration.py
+index b3189d8..e95e911 100644
+--- a/test_gnn_integration.py
++++ b/test_gnn_integration.py
+@@ -28,6 +28,7 @@ def test_gnn_models_module():
+     logger.info("Testing GNN models module...")
+     
+     try:
++        # Note: gnn_models moved to assembly_utils, gnn_path_predictor has duplicate in assembly_core
+         from strandweaver.assembly_utils.gnn_models import (
+             GNNConfig, EdgeConvLayer, PathGNNModel,
+             SimpleGNN, MediumGNN, DeepGNN, GNNTrainer
+diff --git a/tests/test_ai_training.py b/tests/test_ai_training.py
+index a74956c..8405bca 100644
+--- a/tests/test_ai_training.py
++++ b/tests/test_ai_training.py
+@@ -16,7 +16,7 @@ import tempfile
+ import shutil
+ import numpy as np
+ 
+-from strandweaver.ai.training import (
++from strandweaver.training import (
+     TrainingDataGenerator,
+     KmerModelTrainer,
+     TrainingSample,
+diff --git a/tests/test_assembly_core.py b/tests/test_assembly_core.py
+index 761e27b..ac4c220 100644
+--- a/tests/test_assembly_core.py
++++ b/tests/test_assembly_core.py
+@@ -9,7 +9,7 @@ Tests all components:
+ """
+ 
+ import pytest
+-from strandweaver.assembly.data_structures import (
++from strandweaver.assembly_core.data_structures import (
+     # Data structures
+     KmerGraphConfig, KmerNode, KmerEdge, KmerGraph,
+     LongEdge, ULReadMapping,
+diff --git a/tests/test_contig_builder.py b/tests/test_contig_builder.py
+index 7b42b97..652e4a5 100644
+--- a/tests/test_contig_builder.py
++++ b/tests/test_contig_builder.py
+@@ -10,7 +10,7 @@ from pathlib import Path
+ import tempfile
+ 
+ from strandweaver.io import SeqRead, ReadTechnology
+-from strandweaver.assembly.overlap_layout_consensus import (
++from strandweaver.assembly_core.illumina_olc_contig_module import (
+     ContigBuilder,
+     Overlap,
+     OverlapGraph,
+diff --git a/tests/test_error_profiling.py b/tests/test_error_profiling.py
+index b1795d0..a995137 100644
+--- a/tests/test_error_profiling.py
++++ b/tests/test_error_profiling.py
+@@ -11,7 +11,7 @@ import random
+ from pathlib import Path
+ 
+ from strandweaver.io import SeqRead, ReadTechnology, write_fastq
+-from strandweaver.errors import (
++from strandweaver.read_correction import (
+     ErrorProfiler,
+     KmerAnalyzer,
+     ErrorPatternAnalyzer,
+diff --git a/tests/test_gpu_acceleration.py b/tests/test_gpu_acceleration.py
+index 630773d..6d700bd 100644
+--- a/tests/test_gpu_acceleration.py
++++ b/tests/test_gpu_acceleration.py
+@@ -11,7 +11,7 @@ import unittest
+ import tempfile
+ from pathlib import Path
+ 
+-from strandweaver.assembly.gpu_core import (
++from strandweaver.utils.gpu_core import (
+     GPUKmerCounter,
+     get_gpu_info
+ )
+@@ -168,7 +168,7 @@ class TestGPUIntegration(unittest.TestCase):
+     
+     def test_ont_corrector_with_gpu_option(self):
+         """Test ONT corrector with GPU option (should fallback to CPU on Mac)."""
+-        from strandweaver.correction import ONTCorrector
++        from strandweaver.read_correction import ONTCorrector
+         from strandweaver.io import ReadTechnology
+         
+         # Create corrector with GPU enabled
+diff --git a/tests/test_gpu_assembly.py b/tests/test_gpu_assembly.py
+index 87d74de..655d7c3 100644
+--- a/tests/test_gpu_assembly.py
++++ b/tests/test_gpu_assembly.py
+@@ -9,7 +9,7 @@ Tests all GPU operations with both GPU and CPU fallback modes.
+ 
+ import unittest
+ import numpy as np
+-from strandweaver.assembly.gpu_accelerators import (
++from strandweaver.utils.gpu_core import (
+     GPUSequenceAligner,
+     GPUKmerExtractor,
+     GPUHiCMatrix,
+diff --git a/tests/test_paired_end.py b/tests/test_paired_end.py
+index ced7ed3..745cb92 100644
+--- a/tests/test_paired_end.py
++++ b/tests/test_paired_end.py
+@@ -10,7 +10,7 @@ from pathlib import Path
+ import tempfile
+ 
+ from strandweaver.io import SeqRead, ReadTechnology, read_fastq
+-from strandweaver.assembly.overlap_layout_consensus import (
++from strandweaver.assembly_core.illumina_olc_contig_module import (
+     ContigBuilder,
+     PairedEndInfo,
+     build_contigs_from_reads

@@ -1,0 +1,21 @@
+# Optional GPU acceleration dependencies
+# Install these for NVIDIA GPU support (10-100x speedup on large datasets)
+
+# Choose ONE based on your CUDA version:
+
+# For CUDA 11.x (check with: nvidia-smi)
+cupy-cuda11x>=11.0.0
+
+# OR for CUDA 12.x
+# cupy-cuda12x>=12.0.0
+
+# Installation instructions:
+# 1. Check CUDA version: nvidia-smi
+# 2. Install matching CuPy:
+#    pip install cupy-cuda11x  # for CUDA 11
+#    pip install cupy-cuda12x  # for CUDA 12
+#
+# 3. Verify GPU works:
+#    python -c "import cupy; print(cupy.cuda.Device().name)"
+#
+# If GPU is not available, the software will automatically fall back to CPU.
