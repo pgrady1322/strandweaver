@@ -2,22 +2,21 @@
 Training Data Generation Infrastructure
 
 This module provides tools for generating synthetic training data for ML models:
-- Synthetic genome generation (diploid with SVs)
-- Read simulation (Illumina, HiFi, ONT, UL, Hi-C)
-- Ground-truth labeling
+- Synthetic data generation (genomes + reads + ground truth) - CONSOLIDATED
 - Feature extraction
 - Dataset writing
 
 Author: StrandWeaver Training Infrastructure
-Version: 0.1.0
+Version: 0.3.0
 Date: December 2025
 Phase: 5.3 - ML Training Data Generation
 """
 
 from __future__ import annotations
 
-# Genome simulation
-from .genome_simulator import (
+# PHASE 1 CONSOLIDATION: Synthetic Data Generation (genome + reads + ground truth)
+from .synthetic_data_generator import (
+    # Genome simulation
     GenomeConfig,
     SVType,
     StructuralVariant,
@@ -25,10 +24,7 @@ from .genome_simulator import (
     generate_random_sequence,
     generate_haploid_genome,
     generate_diploid_genome,
-)
-
-# Read simulation
-from .read_simulator import (
+    # Read simulation
     IlluminaConfig,
     HiFiConfig,
     ONTConfig,
@@ -42,10 +38,7 @@ from .read_simulator import (
     simulate_hic_reads,
     write_fastq,
     write_paired_fastq,
-)
-
-# Ground-truth labeling
-from .truth_labeler import (
+    # Ground-truth labeling
     EdgeLabel,
     NodeHaplotype,
     ReadAlignment,
@@ -60,7 +53,7 @@ from .truth_labeler import (
 )
 
 # Training feature extraction
-from .feature_builder import (
+from .main_training_workflow import (
     OverlapFeatures,
     GNNGraphTensors,
     DiploidNodeFeatures,
@@ -88,8 +81,9 @@ from .dataset_writer import (
     load_npz_shard,
 )
 
-# ML model interfaces
-from .ml_interfaces import (
+# PHASE 3 CONSOLIDATION: ML Training System (interfaces + models + training)
+from .ml_training_system import (
+    # Model Interfaces
     BaseMLModel,
     EdgeAIModel,
     PathGNNModel,
@@ -104,6 +98,7 @@ from .ml_interfaces import (
     GraphTensors,
     ModelRegistry,
     create_model,
+    # Training Infrastructure
     TrainingConfig,
     TrainingMetrics,
     ModelTrainer,
@@ -111,7 +106,7 @@ from .ml_interfaces import (
 )
 
 # Training corpus orchestration - Complete pipeline with graph assembly
-from .full_corpus_generator import (
+from .main_training_workflow import (
     generate_training_corpus,
     ScenarioConfig,
     SCENARIOS,
@@ -120,7 +115,7 @@ from .full_corpus_generator import (
     estimate_generation_time,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # Genome simulation

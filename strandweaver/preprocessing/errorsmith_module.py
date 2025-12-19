@@ -23,7 +23,7 @@ Architecture:
     Section 6: Visualization and Reporting
 
 Usage:
-    from strandweaver.read_correction import get_corrector, CorrectionStats
+    from strandweaver.preprocessing import get_corrector, CorrectionStats
     
     # Create technology-specific corrector
     corrector = get_corrector("ont", error_profile, k_size=21)
@@ -68,7 +68,8 @@ except ImportError:
     np = None
 
 # StrandWeaver imports
-from ..io import SeqRead, ReadTechnology, read_fastq, write_fastq
+from ..io_utils import SeqRead, read_fastq, write_fastq
+from .read_classification_utility import ReadTechnology
 
 
 # Set publication-quality defaults if available

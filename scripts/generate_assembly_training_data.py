@@ -89,7 +89,7 @@ Examples:
     # Setup device
     if args.use_gpu:
         try:
-            from strandweaver.utils.device import get_optimal_device
+            from strandweaver.utils.hardware_management import get_optimal_device
             device_type, device_str = get_optimal_device(prefer_gpu=True)
             logger.info(f"Using device: {device_type.upper()} ({device_str})")
             if device_type == 'cpu':

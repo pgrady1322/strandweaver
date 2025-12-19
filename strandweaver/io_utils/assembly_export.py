@@ -1,19 +1,18 @@
 """
-BandageNG Export Module - GFA and Coverage Export for Graph Visualization
+Assembly Export Module - Export Graphs, Contigs, and Paths
 
-This module provides functionality to export assembly graphs (DBG or String Graph)
-and coverage data in formats compatible with BandageNG, a graph visualization tool.
+This module handles all assembly output operations including:
+- Graph exports (GFA format for visualization)
+- Assembly sequence exports (contigs, scaffolds as FASTA)
+- Coverage and statistics exports (CSV, JSON)
+- Path exports (scaffold paths, contig mappings)
 
-BandageNG Integration:
-- Export graphs as GFA (Graphical Fragment Assembly) format
-- Export coverage tracks as CSV files for overlay visualization
-- Support multiple data types: long reads, ultralong reads, Hi-C contacts
-
-The exported files allow users to:
-1. Visualize the assembly graph structure
-2. Inspect coverage/support from different sequencing data types
-3. Manually edit paths/scaffolds
-4. Export corrected paths for re-import into the assembly pipeline
+Sections:
+1. Graph Protocol and GFA Export (BandageNG integration)
+2. Coverage CSV Export
+3. Assembly Sequence Export (NEW - contigs/scaffolds)
+4. Assembly Statistics Export (NEW - N50, L50, metrics)
+5. Path Export (NEW - scaffold paths as TSV)
 
 Author: StrandWeaver Development Team
 Date: December 2025
@@ -474,3 +473,234 @@ def get_reverse_node_mapping(graph: GraphLike) -> dict[str, int]:
         generate_unitig_name(node_id): node_id
         for node_id in graph.nodes
     }
+
+
+# ============================================================================
+#                    ASSEMBLY SEQUENCE EXPORT (NEW)
+# ============================================================================
+
+def write_contigs_fasta(
+    contigs: list[tuple[str, str]],
+    output_path: str | Path,
+    line_width: int = 80
+) -> None:
+    """
+    Export assembled contigs to FASTA format.
+    
+    Args:
+        contigs: List of (contig_id, sequence) tuples
+        output_path: Path to output FASTA file
+        line_width: Number of bases per line (0 = no wrapping)
+    
+    Example:
+        >>> contigs = [
+        ...     ('contig_1', 'ACGTACGT...'),
+        ...     ('contig_2', 'TGCATGCA...')
+        ... ]
+        >>> write_contigs_fasta(contigs, 'assembly.fasta')
+    """
+    output_path = Path(output_path)
+    logger.info(f"Writing {len(contigs)} contigs to {output_path}")
+    
+    with open(output_path, 'w') as f:
+        for contig_id, sequence in contigs:
+            f.write(f">{contig_id}\n")
+            
+            # Write sequence with line wrapping if specified
+            if line_width > 0:
+                for i in range(0, len(sequence), line_width):
+                    f.write(sequence[i:i+line_width] + "\n")
+            else:
+                f.write(sequence + "\n")
+    
+    logger.info(f"Exported {len(contigs)} contigs ({sum(len(s) for _, s in contigs):,} bp)")
+
+
+def write_scaffolds_fasta(
+    scaffolds: list[tuple[str, list[str], list[str]]],
+    output_path: str | Path,
+    gap_char: str = 'N',
+    gap_size: int = 100,
+    line_width: int = 80
+) -> None:
+    """
+    Export scaffolds to FASTA format with gaps between contigs.
+    
+    Args:
+        scaffolds: List of (scaffold_id, contig_sequences, orientations) tuples
+        output_path: Path to output FASTA file
+        gap_char: Character to use for gaps (typically 'N')
+        gap_size: Number of gap characters between contigs
+        line_width: Number of bases per line (0 = no wrapping)
+    
+    Example:
+        >>> scaffolds = [
+        ...     ('chr1', ['ACGT...', 'TGCA...'], ['+', '+']),
+        ...     ('chr2', ['GGCC...', 'AATT...'], ['+', '-'])
+        ... ]
+        >>> write_scaffolds_fasta(scaffolds, 'scaffolds.fasta')
+    """
+    output_path = Path(output_path)
+    logger.info(f"Writing {len(scaffolds)} scaffolds to {output_path}")
+    
+    gap_sequence = gap_char * gap_size
+    
+    with open(output_path, 'w') as f:
+        for scaffold_id, sequences, orientations in scaffolds:
+            f.write(f">{scaffold_id}\n")
+            
+            # Build scaffold sequence
+            scaffold_seq_parts = []
+            for seq, orient in zip(sequences, orientations):
+                if orient == '-':
+                    # Reverse complement
+                    complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+                    seq = ''.join(complement.get(base, base) for base in reversed(seq))
+                scaffold_seq_parts.append(seq)
+            
+            # Join with gaps
+            scaffold_sequence = gap_sequence.join(scaffold_seq_parts)
+            
+            # Write with line wrapping
+            if line_width > 0:
+                for i in range(0, len(scaffold_sequence), line_width):
+                    f.write(scaffold_sequence[i:i+line_width] + "\n")
+            else:
+                f.write(scaffold_sequence + "\n")
+    
+    logger.info(f"Exported {len(scaffolds)} scaffolds")
+
+
+def export_assembly_stats(
+    graph: GraphLike,
+    output_path: str | Path,
+    contigs: list[tuple[str, str]] | None = None
+) -> dict[str, Any]:
+    """
+    Calculate and export assembly statistics to JSON.
+    
+    Computes standard assembly metrics:
+    - Total length, number of sequences
+    - N50, L50, N90, L90
+    - GC content
+    - Longest/shortest sequences
+    
+    Args:
+        graph: Assembly graph
+        output_path: Path to output JSON file
+        contigs: Optional list of (id, sequence) tuples for sequence-based stats
+    
+    Returns:
+        Dictionary of statistics
+    
+    Example:
+        >>> stats = export_assembly_stats(graph, 'assembly_stats.json', contigs)
+        >>> print(f"N50: {stats['n50']:,} bp")
+    """
+    output_path = Path(output_path)
+    logger.info(f"Calculating assembly statistics...")
+    
+    stats: dict[str, Any] = {}
+    
+    # Graph-based stats
+    stats['num_nodes'] = len(graph.nodes)
+    stats['num_edges'] = len(graph.edges)
+    
+    # Get node lengths
+    node_lengths = [graph.get_node_length(nid) for nid in graph.nodes]
+    node_lengths_sorted = sorted(node_lengths, reverse=True)
+    
+    stats['total_length'] = sum(node_lengths)
+    stats['mean_node_length'] = sum(node_lengths) / len(node_lengths) if node_lengths else 0
+    stats['median_node_length'] = node_lengths_sorted[len(node_lengths_sorted)//2] if node_lengths else 0
+    stats['max_node_length'] = max(node_lengths) if node_lengths else 0
+    stats['min_node_length'] = min(node_lengths) if node_lengths else 0
+    
+    # Calculate N50/L50
+    cumsum = 0
+    half_total = stats['total_length'] / 2
+    for i, length in enumerate(node_lengths_sorted):
+        cumsum += length
+        if cumsum >= half_total:
+            stats['n50'] = length
+            stats['l50'] = i + 1
+            break
+    
+    # Calculate N90/L90
+    cumsum = 0
+    ninety_pct = stats['total_length'] * 0.9
+    for i, length in enumerate(node_lengths_sorted):
+        cumsum += length
+        if cumsum >= ninety_pct:
+            stats['n90'] = length
+            stats['l90'] = i + 1
+            break
+    
+    # Contig-based stats (if provided)
+    if contigs:
+        contig_lengths = [len(seq) for _, seq in contigs]
+        stats['num_contigs'] = len(contigs)
+        stats['total_contig_length'] = sum(contig_lengths)
+        
+        # Calculate GC content
+        total_gc = 0
+        total_bases = 0
+        for _, seq in contigs:
+            total_gc += seq.upper().count('G') + seq.upper().count('C')
+            total_bases += len(seq)
+        stats['gc_content'] = (total_gc / total_bases * 100) if total_bases > 0 else 0
+    
+    # Write to JSON
+    import json
+    with open(output_path, 'w') as f:
+        json.dump(stats, f, indent=2)
+    
+    logger.info(f"Assembly statistics exported to {output_path}")
+    logger.info(f"  Total length: {stats['total_length']:,} bp")
+    logger.info(f"  N50: {stats.get('n50', 0):,} bp")
+    logger.info(f"  L50: {stats.get('l50', 0):,}")
+    
+    return stats
+
+
+def export_paths_tsv(
+    paths: list[tuple[str, list[int], list[str]]],
+    output_path: str | Path,
+    node_name_func: callable = generate_unitig_name
+) -> None:
+    """
+    Export scaffold paths to TSV format.
+    
+    Format matches BandageNG TSV for round-trip compatibility:
+    chrom\tpath\tnotes
+    
+    Args:
+        paths: List of (scaffold_id, node_ids, orientations) tuples
+        output_path: Path to output TSV file
+        node_name_func: Function to convert node_id to external name
+    
+    Example:
+        >>> paths = [
+        ...     ('chr1', [1, 2, 3], ['+', '+', '-']),
+        ...     ('chr2', [4, 5], ['+', '+'])
+        ... ]
+        >>> export_paths_tsv(paths, 'scaffold_paths.tsv')
+    """
+    output_path = Path(output_path)
+    logger.info(f"Exporting {len(paths)} paths to {output_path}")
+    
+    with open(output_path, 'w') as f:
+        f.write("# Scaffold paths\n")
+        f.write("# Format: scaffold_id\tpath\tnotes\n")
+        f.write("scaffold_id\tpath\tnotes\n")
+        
+        for scaffold_id, node_ids, orientations in paths:
+            # Convert to unitig names with orientations
+            path_str = ','.join(
+                f"{node_name_func(nid)}{orient}"
+                for nid, orient in zip(node_ids, orientations)
+            )
+            f.write(f"{scaffold_id}\t{path_str}\t\n")
+    
+    logger.info(f"Exported {len(paths)} scaffold paths")
+

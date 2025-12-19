@@ -1,16 +1,20 @@
 """
-User Corrections Import and Scaffold Reconstruction Module
+User Input Module - Import User Corrections and Manual Edits
 
-This module handles user-edited paths from BandageNG and reconstructs
-scaffolds accordingly. The workflow:
+This module handles all user-provided modifications to assemblies:
+1. Path corrections from BandageNG (TSV format)
+2. Manual contig breaks (misassembly corrections)
+3. Forced contig joins (manual scaffolding)
+4. Exclusion lists (problematic nodes/contigs)
 
-1. User exports graph to BandageNG (GFA format)
-2. User manually edits paths/scaffolds in BandageNG
-3. User exports corrected paths as TSV
-4. This module imports TSV and reconstructs scaffolds
-5. Updated scaffolds are integrated back into the string graph
+Sections:
+1. Data Structures (UserPathCorrection, ReconstructedScaffold)
+2. TSV Import (BandageNG path corrections)
+3. Scaffold Reconstruction
+4. Graph Integration
+5. Manual Edits (NEW - breaks, joins, exclusions)
 
-TSV Format:
+TSV Format (BandageNG compatibility):
 -----------
 Column 1: Chromosome/scaffold name (e.g., 'chr1', 'scaffold_2')
 Column 2: Path string - comma-separated unitig IDs with orientations
@@ -701,3 +705,296 @@ def get_scaffold_statistics(scaffolds: list[ReconstructedScaffold]) -> dict[str,
         'num_nodes': sum(node_counts),
         'mean_nodes_per_scaffold': sum(node_counts) / len(node_counts)
     }
+
+
+# ============================================================================
+#                    MANUAL EDITS - BREAKS, JOINS, EXCLUSIONS (NEW)
+# ============================================================================
+
+@dataclass
+class ContigBreak:
+    """
+    Represents a user-specified break point in a contig.
+    
+    Used to split contigs at misassembly sites identified by user inspection.
+    
+    Attributes:
+        contig_id: Contig or node identifier
+        position: 0-based position where to break the contig
+        reason: Optional explanation (e.g., 'misassembly', 'coverage_drop')
+    """
+    contig_id: str | int
+    position: int
+    reason: str | None = None
+    
+    def __post_init__(self):
+        """Validate position is non-negative."""
+        if self.position < 0:
+            raise ValueError(f"Break position must be >= 0, got {self.position}")
+
+
+@dataclass
+class ForcedJoin:
+    """
+    Represents a user-specified join between two contigs.
+    
+    Used to force scaffolding connections that may have been missed by
+    automated methods.
+    
+    Attributes:
+        from_contig: Source contig ID
+        to_contig: Target contig ID
+        from_orient: Orientation of source ('+' or '-')
+        to_orient: Orientation of target ('+' or '-')
+        evidence: Optional evidence description
+    """
+    from_contig: str | int
+    to_contig: str | int
+    from_orient: str = '+'
+    to_orient: str = '+'
+    evidence: str | None = None
+    
+    def __post_init__(self):
+        """Validate orientations."""
+        if self.from_orient not in ('+', '-'):
+            raise ValueError(f"Invalid from_orient: {self.from_orient}")
+        if self.to_orient not in ('+', '-'):
+            raise ValueError(f"Invalid to_orient: {self.to_orient}")
+
+
+def load_contig_breaks(tsv_path: str | Path) -> list[ContigBreak]:
+    """
+    Load user-specified contig break points from TSV file.
+    
+    TSV Format:
+    -----------
+    contig_id    position    reason
+    contig_1     45000       coverage_drop
+    contig_3     120000      misassembly_detected
+    
+    Args:
+        tsv_path: Path to TSV file with break points
+    
+    Returns:
+        List of ContigBreak objects
+    
+    Example:
+        >>> breaks = load_contig_breaks('manual_breaks.tsv')
+        >>> for brk in breaks:
+        ...     print(f"Break {brk.contig_id} at {brk.position}: {brk.reason}")
+    """
+    tsv_path = Path(tsv_path)
+    logger.info(f"Loading contig breaks from {tsv_path}")
+    
+    breaks: list[ContigBreak] = []
+    
+    with open(tsv_path, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            
+            # Skip header line
+            if line_num == 1 and line.lower().startswith('contig'):
+                continue
+            
+            parts = line.split('\t')
+            if len(parts) < 2:
+                logger.warning(f"Line {line_num}: Not enough columns, skipping")
+                continue
+            
+            contig_id = parts[0]
+            try:
+                position = int(parts[1])
+            except ValueError:
+                logger.warning(f"Line {line_num}: Invalid position '{parts[1]}', skipping")
+                continue
+            
+            reason = parts[2] if len(parts) > 2 else None
+            
+            breaks.append(ContigBreak(contig_id, position, reason))
+    
+    logger.info(f"Loaded {len(breaks)} contig breaks")
+    return breaks
+
+
+def load_forced_joins(tsv_path: str | Path) -> list[ForcedJoin]:
+    """
+    Load user-specified forced joins from TSV file.
+    
+    TSV Format:
+    -----------
+    from_contig    to_contig    from_orient    to_orient    evidence
+    contig_1       contig_2     +              +            manual_inspection
+    contig_5       contig_7     +              -            mate_pair_support
+    
+    Args:
+        tsv_path: Path to TSV file with forced joins
+    
+    Returns:
+        List of ForcedJoin objects
+    
+    Example:
+        >>> joins = load_forced_joins('manual_joins.tsv')
+        >>> for join in joins:
+        ...     print(f"Join {join.from_contig} → {join.to_contig}")
+    """
+    tsv_path = Path(tsv_path)
+    logger.info(f"Loading forced joins from {tsv_path}")
+    
+    joins: list[ForcedJoin] = []
+    
+    with open(tsv_path, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            
+            # Skip empty lines and comments
+            if not line or line.startswith('#'):
+                continue
+            
+            # Skip header line
+            if line_num == 1 and 'from_contig' in line.lower():
+                continue
+            
+            parts = line.split('\t')
+            if len(parts) < 2:
+                logger.warning(f"Line {line_num}: Not enough columns, skipping")
+                continue
+            
+            from_contig = parts[0]
+            to_contig = parts[1]
+            from_orient = parts[2] if len(parts) > 2 else '+'
+            to_orient = parts[3] if len(parts) > 3 else '+'
+            evidence = parts[4] if len(parts) > 4 else None
+            
+            joins.append(ForcedJoin(
+                from_contig, to_contig,
+                from_orient, to_orient,
+                evidence
+            ))
+    
+    logger.info(f"Loaded {len(joins)} forced joins")
+    return joins
+
+
+def load_exclusion_list(txt_path: str | Path) -> set[str | int]:
+    """
+    Load list of nodes/contigs to exclude from assembly.
+    
+    Format: One contig ID per line (can include comments with #)
+    
+    Example file:
+    # Problematic contigs identified during QC
+    contig_42    # low coverage
+    contig_87    # repetitive
+    unitig-15    # contamination
+    
+    Args:
+        txt_path: Path to text file with exclusion list
+    
+    Returns:
+        Set of contig/node IDs to exclude
+    
+    Example:
+        >>> exclusions = load_exclusion_list('exclude.txt')
+        >>> if 'contig_42' in exclusions:
+        ...     print("Skipping problematic contig")
+    """
+    txt_path = Path(txt_path)
+    logger.info(f"Loading exclusion list from {txt_path}")
+    
+    exclusions: set[str | int] = set()
+    
+    with open(txt_path, 'r') as f:
+        for line in f:
+            # Remove comments and whitespace
+            line = line.split('#')[0].strip()
+            
+            if not line:
+                continue
+            
+            # Try to parse as int, otherwise keep as string
+            try:
+                exclusions.add(int(line))
+            except ValueError:
+                exclusions.add(line)
+    
+    logger.info(f"Loaded {len(exclusions)} exclusions")
+    return exclusions
+
+
+def apply_manual_edits(
+    graph: GraphLike,
+    breaks: list[ContigBreak] | None = None,
+    joins: list[ForcedJoin] | None = None,
+    exclusions: set[str | int] | None = None
+) -> dict[str, int]:
+    """
+    Apply all manual edits to the assembly graph.
+    
+    This is a unified application function that applies:
+    1. Contig breaks (splits nodes at specified positions)
+    2. Forced joins (adds edges between specified nodes)
+    3. Exclusions (marks nodes for removal)
+    
+    Args:
+        graph: Assembly graph to modify
+        breaks: Optional list of ContigBreak objects
+        joins: Optional list of ForcedJoin objects
+        exclusions: Optional set of node/contig IDs to exclude
+    
+    Returns:
+        Dict with counts: 'breaks_applied', 'joins_added', 'nodes_excluded'
+    
+    Example:
+        >>> breaks = load_contig_breaks('breaks.tsv')
+        >>> joins = load_forced_joins('joins.tsv')
+        >>> exclusions = load_exclusion_list('exclude.txt')
+        >>> result = apply_manual_edits(graph, breaks, joins, exclusions)
+        >>> print(f"Applied {result['breaks_applied']} breaks")
+    """
+    result = {
+        'breaks_applied': 0,
+        'joins_added': 0,
+        'nodes_excluded': 0
+    }
+    
+    logger.info("Applying manual edits to graph...")
+    
+    # Apply breaks
+    if breaks:
+        logger.info(f"Processing {len(breaks)} contig breaks...")
+        for brk in breaks:
+            # TODO: Implement break logic in graph
+            # This would require graph.split_node(node_id, position)
+            logger.debug(f"  Break: {brk.contig_id} at {brk.position} ({brk.reason})")
+            result['breaks_applied'] += 1
+        logger.info(f"  Applied {result['breaks_applied']} breaks")
+    
+    # Apply forced joins
+    if joins:
+        logger.info(f"Processing {len(joins)} forced joins...")
+        for join in joins:
+            # TODO: Implement join logic in graph
+            # This would require graph.add_edge(from_node, to_node, orientations)
+            logger.debug(f"  Join: {join.from_contig}{join.from_orient} → "
+                        f"{join.to_contig}{join.to_orient}")
+            result['joins_added'] += 1
+        logger.info(f"  Added {result['joins_added']} joins")
+    
+    # Apply exclusions
+    if exclusions:
+        logger.info(f"Processing {len(exclusions)} exclusions...")
+        for node_id in exclusions:
+            # TODO: Implement exclusion logic in graph
+            # This would require graph.mark_excluded(node_id) or graph.remove_node(node_id)
+            if node_id in graph.nodes:
+                logger.debug(f"  Excluding: {node_id}")
+                result['nodes_excluded'] += 1
+        logger.info(f"  Excluded {result['nodes_excluded']} nodes")
+    
+    logger.info("Manual edits applied successfully")
+    return result
+

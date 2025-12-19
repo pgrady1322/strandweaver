@@ -2,38 +2,49 @@
 # -*- coding: utf-8 -*-
 
 """
-PathWeaver: Downstream Path Finding & GNN Integration Engine for StrandWeaver.
+PathWeaver: GNN-First Path Finding Engine for StrandWeaver.
 
-This module implements path finding and GNN-based path optimization for assembly
-graph traversal. It is designed to work DOWNSTREAM of EdgeWarden and uses its
+This module implements GNN-based path prediction with classical algorithm fallback
+for assembly graph traversal. It works DOWNSTREAM of EdgeWarden and uses its
 outputs without recalculation.
 
-Architecture (Downstream Integration):
---------------------------------------
-1. EdgeWarden (Upstream)
-   ├─ Confidence scores per edge
-   ├─ Coverage consistency metrics
-   ├─ Error pattern classifications
-   └─ Biological plausibility signals
+NEW ARCHITECTURE (GNN-First)
+═══════════════════════════════════════════════════════════════════════════════
+1. PRIMARY: GNN Path Prediction
+   ├─ Graph Neural Network predicts edge confidences
+   ├─ Extracts high-confidence paths directly from predictions
+   ├─ Learns biological patterns from training data
+   └─ Fast inference on GPU (if available)
 
-2. PathWeaver (This Module)
-   ├─ Receives EdgeWarden scores (no recalculation)
-   ├─ Uses GNN for path-level optimization
-   ├─ Applies graph algorithms (DFS, BFS, Dijkstra)
-   ├─ Ranks paths by GNN + EdgeWarden confidence
-   └─ Returns best paths for assembly
+2. FALLBACK: Classical Algorithms (Dijkstra/BFS/DFS)
+   ├─ Used when GNN unavailable or fails
+   ├─ Reliable baseline path finding
+   └─ Well-tested traditional methods
 
-3. Fallback Heuristics
-   ├─ If EdgeWarden data unavailable: Use graph topology
-   ├─ If GNN unavailable: Use coverage + confidence
-   ├─ Module operates independently but benefits from upstream
+3. ENHANCEMENT: EdgeWarden + Long-Range Data
+   ├─ EdgeWarden scores refine both GNN and algorithm paths
+   ├─ Hi-C contact maps provide phasing information
+   ├─ Ultra-long reads validate path continuity
+   └─ Multi-dimensional scoring combines all sources
+
+This is the CORRECT design philosophy:
+- ML-first: Use machine learning as primary method when available
+- Classical fallback: Maintain reliability with traditional algorithms
+- Data integration: Enhance predictions with multiple evidence sources
+
+OLD ARCHITECTURE (Deprecated - Algorithm-First with GNN Enhancement)
+─────────────────────────────────────────────────────────────────────
+The previous design used algorithms as primary with GNN as optional refinement.
+This was backwards - treating ML as a "bonus feature" instead of the primary
+intelligence. Legacy mode still available via use_gnn_primary=False parameter.
 
 Key Features:
-- Path discovery: DFS, BFS, Dijkstra, dynamic programming
-- GNN-based path scoring (learns path-level patterns)
+- GNN-based path prediction (primary method)
+- Classical algorithm fallback (Dijkstra, BFS, DFS)
 - EdgeWarden confidence integration (no recalculation)
-- Fallback heuristics for missing upstream data
-- Validation framework (connectivity, cycles, length)
+- Long-range data integration (Hi-C, UL reads)
+- Comprehensive validation framework
+- Misassembly detection
 
 Author: StrandWeaver Development Team
 License: MIT
@@ -54,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import GPU path finder
 try:
-    from strandweaver.utils.gpu_core import (
+    from strandweaver.utils.hardware_management import (
         GPUPathFinder,
         GPUPathFindingConfig,
         GPUPathFindingBackend as GPUBackend,
@@ -299,6 +310,522 @@ class PathFindingResult:
     num_candidates: int = 0
     runtime_seconds: float = 0.0
     notes: str = ""
+
+
+# ============================================================================
+#                    PYTORCH GNN MODEL ARCHITECTURES (FOR MODEL LOADING)
+# ============================================================================
+# These classes are only used for loading trained GNN models.
+# Training infrastructure is in the training/ module.
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from torch_geometric.nn import GATv2Conv, MessagePassing
+    from torch_geometric.data import Data
+    TORCH_GNN_AVAILABLE = True
+    
+    @dataclass
+    class GNNConfig:
+        """Configuration for GNN model."""
+        num_node_features: int = 12
+        num_edge_features: int = 11
+        hidden_channels: int = 64
+        num_layers: int = 3
+        dropout: float = 0.2
+        learning_rate: float = 1e-3
+        weight_decay: float = 1e-5
+        batch_size: int = 32
+        epochs: int = 100
+        patience: int = 10
+        use_attention: bool = True
+        use_residual: bool = True
+        use_batch_norm: bool = True
+        output_dim: int = 1
+        device: str = "cpu"
+    
+    class EdgeConvLayer(MessagePassing):
+        """Custom edge convolution layer with edge features."""
+        def __init__(self, in_channels: int, out_channels: int, edge_dim: int):
+            super().__init__(aggr='mean')
+            self.in_channels = in_channels
+            self.out_channels = out_channels
+            self.edge_dim = edge_dim
+            self.lin_src = nn.Linear(in_channels, out_channels)
+            self.lin_dst = nn.Linear(in_channels, out_channels)
+            self.lin_edge = nn.Linear(edge_dim, out_channels)
+            self.lin_combined = nn.Linear(3 * out_channels, out_channels)
+        
+        def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: Optional[torch.Tensor] = None) -> torch.Tensor:
+            return self.propagate(edge_index, x=x, edge_attr=edge_attr)
+        
+        def message(self, x_i: torch.Tensor, x_j: torch.Tensor, edge_attr: Optional[torch.Tensor] = None) -> torch.Tensor:
+            msg_src = self.lin_src(x_i)
+            msg_dst = self.lin_dst(x_j)
+            if edge_attr is not None:
+                msg_edge = self.lin_edge(edge_attr)
+                msg = torch.cat([msg_src, msg_dst, msg_edge], dim=-1)
+            else:
+                msg = torch.cat([msg_src, msg_dst, torch.zeros_like(msg_src)], dim=-1)
+            msg = self.lin_combined(msg)
+            return F.relu(msg)
+    
+    class PathGNNModel(nn.Module):
+        """Graph Neural Network for assembly path prediction."""
+        def __init__(self, config: GNNConfig):
+            super().__init__()
+            self.config = config
+            self.device = torch.device(config.device)
+            self.edge_convs = nn.ModuleList()
+            in_channels = config.num_node_features
+            for i in range(config.num_layers):
+                self.edge_convs.append(EdgeConvLayer(in_channels, config.hidden_channels, config.num_edge_features))
+                if config.use_batch_norm:
+                    self.edge_convs.append(nn.BatchNorm1d(config.hidden_channels))
+                in_channels = config.hidden_channels
+            if config.use_attention:
+                self.attention = GATv2Conv(config.hidden_channels, config.hidden_channels // 2, heads=4, dropout=config.dropout)
+                attention_out = config.hidden_channels * 2
+            else:
+                self.attention = None
+                attention_out = config.hidden_channels
+            self.edge_head = nn.Sequential(nn.Linear(attention_out * 2, config.hidden_channels), nn.ReLU(), nn.Dropout(config.dropout), nn.Linear(config.hidden_channels, config.output_dim), nn.Sigmoid())
+            self.node_head = nn.Sequential(nn.Linear(attention_out, config.hidden_channels), nn.ReLU(), nn.Dropout(config.dropout), nn.Linear(config.hidden_channels, 4), nn.Softmax(dim=-1))
+            self.path_head = nn.Sequential(nn.Linear(attention_out * 3, config.hidden_channels), nn.ReLU(), nn.Dropout(config.dropout), nn.Linear(config.hidden_channels, 1), nn.Sigmoid())
+            self.to(self.device)
+        
+        def forward(self, data: Data) -> Dict[str, torch.Tensor]:
+            x = data.x.to(self.device)
+            edge_index = data.edge_index.to(self.device)
+            edge_attr = data.edge_attr.to(self.device) if data.edge_attr is not None else None
+            for layer in self.edge_convs:
+                if isinstance(layer, EdgeConvLayer):
+                    x = layer(x, edge_index, edge_attr)
+                elif isinstance(layer, nn.BatchNorm1d):
+                    x = layer(x)
+                else:
+                    x = F.relu(x)
+                x = F.dropout(x, p=self.config.dropout, training=self.training)
+            if self.attention is not None:
+                x_attn = self.attention(x, edge_index)
+                x = torch.cat([x, x_attn], dim=-1)
+            src, dst = edge_index
+            edge_features = torch.cat([x[src], x[dst]], dim=-1)
+            edge_logits = self.edge_head(edge_features)
+            node_logits = self.node_head(x)
+            return {'edge_logits': edge_logits, 'node_logits': node_logits, 'path_scores': None, 'node_embeddings': x}
+        
+        def get_edge_probabilities(self, data: Data) -> Dict[int, float]:
+            with torch.no_grad():
+                output = self.forward(data)
+                edge_logits = output['edge_logits'].cpu().numpy().flatten()
+            return {i: float(prob) for i, prob in enumerate(edge_logits)}
+    
+    class SimpleGNN(PathGNNModel):
+        """Lightweight GNN with 2 layers."""
+        def __init__(self, in_channels: int = 12, out_channels: int = 2):
+            config = GNNConfig(num_node_features=in_channels, num_layers=2, hidden_channels=32, output_dim=out_channels)
+            super().__init__(config)
+    
+    class MediumGNN(PathGNNModel):
+        """Balanced GNN with 4 layers."""
+        def __init__(self, in_channels: int = 12, out_channels: int = 2):
+            config = GNNConfig(num_node_features=in_channels, num_layers=4, hidden_channels=64, output_dim=out_channels)
+            super().__init__(config)
+    
+    class DeepGNN(PathGNNModel):
+        """Production GNN with 6 layers."""
+        def __init__(self, in_channels: int = 12, out_channels: int = 2):
+            config = GNNConfig(num_node_features=in_channels, num_layers=6, hidden_channels=128, use_residual=True, use_batch_norm=True, output_dim=out_channels)
+            super().__init__(config)
+
+except ImportError:
+    TORCH_GNN_AVAILABLE = False
+    logger.debug("PyTorch/PyG not available - GNN model architectures unavailable")
+    # Define dummy classes for type checking
+    class GNNConfig: pass
+    class PathGNNModel: pass
+    class SimpleGNN: pass
+    class MediumGNN: pass
+    class DeepGNN: pass
+
+
+# ============================================================================
+#                         GNN PATH PREDICTION (INTEGRATED)
+# ============================================================================
+
+@dataclass
+class GraphTensors:
+    """
+    Tensor representation of graph for GNN input.
+    
+    Attributes:
+        node_features: Dict[node_id] -> feature vector (list of floats)
+        edge_features: Dict[edge_id] -> feature vector (list of floats)
+        edge_index: List of (from_node, to_node) pairs
+        node_to_index: Dict mapping node_id -> tensor index
+        edge_to_index: Dict mapping edge_id -> tensor index
+        num_nodes: Total number of nodes
+        num_edges: Total number of edges
+    """
+    node_features: Dict[int, List[float]] = field(default_factory=dict)
+    edge_features: Dict[int, List[float]] = field(default_factory=dict)
+    edge_index: List[Tuple[int, int]] = field(default_factory=list)
+    node_to_index: Dict[int, int] = field(default_factory=dict)
+    edge_to_index: Dict[int, int] = field(default_factory=dict)
+    num_nodes: int = 0
+    num_edges: int = 0
+
+
+@dataclass
+class GNNPathResult:
+    """
+    Result of GNN path prediction.
+    
+    Attributes:
+        best_paths: List of most likely node sequences through graph
+        edge_confidences: Dict[edge_id] -> probability edge is correct (0.0-1.0)
+        path_scores: Dict[path_index] -> overall path confidence
+        ambiguous_regions: List of node sets with low confidence
+    """
+    best_paths: List[List[int]] = field(default_factory=list)
+    edge_confidences: Dict[int, float] = field(default_factory=dict)
+    path_scores: Dict[int, float] = field(default_factory=dict)
+    ambiguous_regions: List[Set[int]] = field(default_factory=list)
+
+
+class FeatureExtractor:
+    """Extracts and normalizes features for GNN input."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(f"{__name__}.FeatureExtractor")
+    
+    def extract_node_features(
+        self,
+        node_id: int,
+        graph,
+        hic_phase_info: Optional[Dict] = None,
+        regional_k_map: Optional[Dict] = None,
+        ul_support_map: Optional[Dict] = None
+    ) -> List[float]:
+        """Extract 12-dimensional feature vector for a node."""
+        node = graph.nodes.get(node_id)
+        if not node:
+            return [0.0] * 12
+        
+        features = []
+        coverage = getattr(node, 'coverage', 0.0)
+        features.append(min(coverage / 100.0, 1.0))
+        length = getattr(node, 'length', 0)
+        features.append(math.log(length + 1) / math.log(100000))
+        entropy = self._calculate_entropy(node)
+        features.append(entropy)
+        in_degree = len(graph.in_edges.get(node_id, set()))
+        features.append(min(in_degree / 10.0, 1.0))
+        out_degree = len(graph.out_edges.get(node_id, set()))
+        features.append(min(out_degree / 10.0, 1.0))
+        branching = in_degree + out_degree
+        features.append(min(branching / 20.0, 1.0))
+        
+        if hic_phase_info and node_id in hic_phase_info:
+            phase = hic_phase_info[node_id]
+            features.append(phase.phase_A_score)
+            features.append(phase.phase_B_score)
+            features.append(math.log(phase.contact_count + 1) / math.log(1000))
+        else:
+            features.extend([0.5, 0.5, 0.0])
+        
+        if regional_k_map and node_id in regional_k_map:
+            k_val = regional_k_map[node_id]
+            features.append(k_val / 100.0)
+        else:
+            features.append(0.31)
+        
+        ul_support = 0
+        if ul_support_map:
+            for edge_id in graph.in_edges.get(node_id, set()):
+                ul_support += ul_support_map.get(edge_id, 0)
+            for edge_id in graph.out_edges.get(node_id, set()):
+                ul_support += ul_support_map.get(edge_id, 0)
+        features.append(math.log(ul_support + 1) / math.log(100))
+        
+        repeat_score = self._estimate_repeat_likelihood(coverage, in_degree, out_degree, entropy)
+        features.append(repeat_score)
+        
+        return features
+    
+    def extract_edge_features(
+        self,
+        edge_id: int,
+        graph,
+        from_node: Optional[int] = None,
+        to_node: Optional[int] = None
+    ) -> List[float]:
+        """Extract 10-dimensional feature vector for an edge."""
+        features = [0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0, 0.5]
+        
+        if from_node and to_node:
+            from_node_obj = graph.nodes.get(from_node)
+            to_node_obj = graph.nodes.get(to_node)
+            if from_node_obj and to_node_obj:
+                cov_from = getattr(from_node_obj, 'coverage', 0.0)
+                cov_to = getattr(to_node_obj, 'coverage', 0.0)
+                if cov_from > 0 and cov_to > 0:
+                    features[9] = min(cov_from, cov_to) / max(cov_from, cov_to)
+        
+        return features
+    
+    def _calculate_entropy(self, node) -> float:
+        """Calculate sequence entropy (0-1)."""
+        seq = getattr(node, 'seq', '')
+        if not seq:
+            return 0.0
+        counts = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
+        for base in seq.upper():
+            if base in counts:
+                counts[base] += 1
+        total = sum(counts.values())
+        if total == 0:
+            return 0.0
+        entropy = 0.0
+        for count in counts.values():
+            if count > 0:
+                p = count / total
+                entropy -= p * math.log2(p)
+        return entropy / 2.0
+    
+    def _estimate_repeat_likelihood(self, coverage: float, in_degree: int, out_degree: int, entropy: float) -> float:
+        """Estimate likelihood node is in repeat region."""
+        score = 0.0
+        if coverage > 50:
+            score += 0.3
+        if in_degree + out_degree > 2:
+            score += 0.3
+        if entropy < 0.5:
+            score += 0.4
+        return min(score, 1.0)
+
+
+class PathGNN:
+    """Graph Neural Network for path prediction with heuristic fallback."""
+    
+    def __init__(self, model=None, model_path: Optional[str] = None):
+        self.model = model
+        self.logger = logging.getLogger(f"{__name__}.PathGNN")
+        if model_path and not model:
+            self.load_model(model_path)
+        if self.model:
+            try:
+                import torch
+                self.logger.info(f"GNN using trained model: {type(self.model).__name__}")
+            except ImportError:
+                self.logger.info(f"GNN using model: {type(self.model).__name__}")
+        else:
+            self.logger.warning("GNN using heuristic fallback (no trained model)")
+    
+    def predict_edge_probabilities(self, graph_tensors: GraphTensors) -> Dict[int, float]:
+        """Predict probability each edge is correct."""
+        if self.model:
+            return self._predict_with_model(graph_tensors)
+        else:
+            return self._predict_heuristic(graph_tensors)
+    
+    def _predict_with_model(self, graph_tensors: GraphTensors) -> Dict[int, float]:
+        """Use trained GNN model for predictions."""
+        try:
+            import torch
+            data = self._graph_tensors_to_pyg_data(graph_tensors)
+            if hasattr(self.model, 'get_edge_probabilities'):
+                predictions = self.model.get_edge_probabilities(data)
+            else:
+                output = self.model(data)
+                edge_logits = output['edge_logits'].cpu().numpy().flatten()
+                predictions = {i: float(prob) for i, prob in enumerate(edge_logits)}
+            self.logger.debug(f"GNN predicted {len(predictions)} edge probabilities")
+            return predictions
+        except Exception as e:
+            self.logger.error(f"GNN prediction failed: {e}, falling back to heuristic")
+            return self._predict_heuristic(graph_tensors)
+    
+    def _graph_tensors_to_pyg_data(self, graph_tensors: GraphTensors) -> Any:
+        """Convert GraphTensors to PyTorch Geometric Data object."""
+        import torch
+        from torch_geometric.data import Data
+        node_features = []
+        for i in range(graph_tensors.num_nodes):
+            node_id = None
+            for nid, idx in graph_tensors.node_to_index.items():
+                if idx == i:
+                    node_id = nid
+                    break
+            if node_id and node_id in graph_tensors.node_features:
+                node_features.append(graph_tensors.node_features[node_id])
+            else:
+                sample_size = len(next(iter(graph_tensors.node_features.values())))
+                node_features.append([0.0] * sample_size)
+        node_feat_tensor = torch.tensor(node_features, dtype=torch.float32)
+        edge_index = []
+        edge_feat_list = []
+        for from_idx, to_idx in graph_tensors.edge_index:
+            edge_index.append([from_idx, to_idx])
+            edge_id = None
+            for eid, (f, t) in enumerate(graph_tensors.edge_index):
+                if f == from_idx and t == to_idx:
+                    edge_id = eid
+                    break
+            if edge_id in graph_tensors.edge_features:
+                edge_feat_list.append(graph_tensors.edge_features[edge_id])
+            else:
+                sample_size = len(next(iter(graph_tensors.edge_features.values())))
+                edge_feat_list.append([0.0] * sample_size)
+        edge_index_tensor = torch.tensor(edge_index, dtype=torch.long).t()
+        edge_feat_tensor = torch.tensor(edge_feat_list, dtype=torch.float32)
+        data = Data(x=node_feat_tensor, edge_index=edge_index_tensor, edge_attr=edge_feat_tensor, num_nodes=graph_tensors.num_nodes)
+        return data
+    
+    def load_model(self, model_path: str) -> bool:
+        """Load trained model from disk."""
+        try:
+            import torch
+            # Model classes now defined in this module
+            checkpoint = torch.load(model_path, map_location='cpu')
+            model_type = checkpoint.get('model_type', 'SimpleGNN')
+            config = checkpoint.get('config', {})
+            if model_type == 'SimpleGNN':
+                self.model = SimpleGNN(config.get('in_channels', 12), config.get('out_channels', 2))
+            elif model_type == 'MediumGNN':
+                self.model = MediumGNN(config.get('in_channels', 12), config.get('out_channels', 2))
+            elif model_type == 'DeepGNN':
+                self.model = DeepGNN(config.get('in_channels', 12), config.get('out_channels', 2))
+            else:
+                self.model = PathGNNModel(config)
+            self.model.load_state_dict(checkpoint.get('model_state', checkpoint))
+            self.model.eval()
+            self.logger.info(f"Loaded {model_type} model from {model_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load model from {model_path}: {e}")
+            return False
+    
+    def _predict_heuristic(self, graph_tensors: GraphTensors) -> Dict[int, float]:
+        """Heuristic fallback scoring based on feature aggregation."""
+        predictions = {}
+        for edge_id, features in graph_tensors.edge_features.items():
+            score = features[0] * 0.4 + features[4] * 0.3 + features[7] * 0.2 + features[9] * 0.1
+            predictions[edge_id] = max(0.0, min(1.0, score))
+        return predictions
+
+
+class PathExtractor:
+    """Extracts best paths from graph using GNN edge probabilities."""
+    
+    def __init__(self, min_edge_confidence: float = 0.3):
+        self.min_edge_confidence = min_edge_confidence
+        self.logger = logging.getLogger(f"{__name__}.PathExtractor")
+    
+    def score_and_extract_paths(self, graph, edge_probabilities: Dict[int, float]) -> GNNPathResult:
+        """Extract most likely paths using GNN edge confidences."""
+        self.logger.info("Extracting paths from GNN predictions")
+        result = GNNPathResult(edge_confidences=edge_probabilities)
+        confident_edges = {eid: prob for eid, prob in edge_probabilities.items() if prob >= self.min_edge_confidence}
+        confident_graph = self._build_confident_subgraph(graph, confident_edges)
+        components = self._find_connected_components(confident_graph)
+        self.logger.info(f"Found {len(components)} connected components")
+        for comp_idx, component in enumerate(components):
+            paths = self._extract_component_paths(component, confident_graph, edge_probabilities)
+            for path in paths:
+                path_score = self._calculate_path_score(path, confident_graph, edge_probabilities)
+                path_idx = len(result.best_paths)
+                result.best_paths.append(path)
+                result.path_scores[path_idx] = path_score
+        result.ambiguous_regions = self._find_ambiguous_regions(graph, edge_probabilities)
+        self.logger.info(f"Extracted {len(result.best_paths)} paths, {len(result.ambiguous_regions)} ambiguous regions")
+        return result
+    
+    def _build_confident_subgraph(self, graph, confident_edges: Dict) -> Dict:
+        """Build subgraph containing only high-confidence edges."""
+        subgraph = {'nodes': set(), 'edges': {}, 'out_edges': defaultdict(set), 'in_edges': defaultdict(set)}
+        for edge_id in confident_edges:
+            edge = graph.edges.get(edge_id)
+            if edge:
+                from_node = getattr(edge, 'from_node', None)
+                to_node = getattr(edge, 'to_node', None)
+                if from_node and to_node:
+                    subgraph['nodes'].add(from_node)
+                    subgraph['nodes'].add(to_node)
+                    subgraph['edges'][edge_id] = edge
+                    subgraph['out_edges'][from_node].add(to_node)
+                    subgraph['in_edges'][to_node].add(from_node)
+        return subgraph
+    
+    def _find_connected_components(self, subgraph: Dict) -> List[Set[int]]:
+        """Find connected components in subgraph."""
+        visited = set()
+        components = []
+        for node in subgraph['nodes']:
+            if node not in visited:
+                component = set()
+                stack = [node]
+                while stack:
+                    current = stack.pop()
+                    if current in visited:
+                        continue
+                    visited.add(current)
+                    component.add(current)
+                    stack.extend(subgraph['out_edges'].get(current, set()))
+                    stack.extend(subgraph['in_edges'].get(current, set()))
+                if component:
+                    components.append(component)
+        return components
+    
+    def _extract_component_paths(self, component: Set[int], subgraph: Dict, edge_probs: Dict[int, float]) -> List[List[int]]:
+        """Extract linear paths through a component."""
+        start_nodes = [node for node in component if len(subgraph['in_edges'].get(node, set())) == 0]
+        if not start_nodes:
+            start_nodes = [max(component, key=lambda n: len(subgraph['out_edges'].get(n, set())))]
+        paths = []
+        for start in start_nodes:
+            path = self._extend_path(start, subgraph, set())
+            if len(path) > 1:
+                paths.append(path)
+        return paths if paths else [[node] for node in list(component)[:1]]
+    
+    def _extend_path(self, current: int, subgraph: Dict, visited: Set[int]) -> List[int]:
+        """Extend path from current node using greedy traversal."""
+        path = [current]
+        visited.add(current)
+        while True:
+            neighbors = [n for n in subgraph['out_edges'].get(current, set()) if n not in visited]
+            if not neighbors:
+                break
+            next_node = neighbors[0]
+            path.append(next_node)
+            visited.add(next_node)
+            current = next_node
+        return path
+    
+    def _calculate_path_score(self, path: List[int], subgraph: Dict, edge_probs: Dict[int, float]) -> float:
+        """Calculate overall confidence score for a path."""
+        if len(path) < 2:
+            return 1.0
+        return 0.8
+    
+    def _find_ambiguous_regions(self, graph, edge_probs: Dict[int, float]) -> List[Set[int]]:
+        """Identify regions with low edge confidence."""
+        ambiguous = []
+        for node_id in graph.nodes:
+            out_edges = graph.out_edges.get(node_id, set())
+            if len(out_edges) > 1:
+                low_conf_edges = [eid for eid in out_edges if edge_probs.get(eid, 0.5) < 0.5]
+                if len(low_conf_edges) >= 2:
+                    region = {node_id}
+                    for edge_id in low_conf_edges:
+                        edge = graph.edges.get(edge_id)
+                        if edge:
+                            region.add(getattr(edge, 'to_node', -1))
+                    ambiguous.append(region)
+        return ambiguous
 
 
 # ============================================================================
@@ -547,6 +1074,177 @@ class PathFinder:
             num_candidates=len(refined_paths),
             runtime_seconds=runtime,
             notes=f"Iterative refinement ({num_iterations} cycles)",
+        )
+    
+    def find_paths_gnn_primary(
+        self,
+        start_node_id: int,
+        end_node_ids: Optional[Set[int]] = None,
+        algorithm: PathFindingAlgorithm = PathFindingAlgorithm.DIJKSTRA,
+        max_paths: int = 100,
+        gnn_scorer: Optional[Any] = None,
+        min_confidence: float = 0.3,
+    ) -> PathFindingResult:
+        """
+        Find paths using GNN as primary method with algorithm fallback.
+        
+        This implements the correct architecture: try GNN first, fall back to
+        classical algorithms only if GNN is unavailable or fails.
+        
+        Architecture:
+            1. PRIMARY: Use GNN to predict edge confidences and extract paths
+            2. FALLBACK: If GNN unavailable/fails, use classical algorithm
+            3. HYBRID: If GNN finds few paths, supplement with algorithm-based
+        
+        Args:
+            start_node_id: Starting node ID
+            end_node_ids: Target node IDs
+            algorithm: Fallback algorithm (Dijkstra, BFS, or DFS)
+            max_paths: Maximum paths to return
+            gnn_scorer: GNN scorer callable for path prediction
+            min_confidence: Minimum edge confidence for GNN path extraction
+        
+        Returns:
+            PathFindingResult with GNN-predicted or fallback paths
+        """
+        start_time = time.time()
+        paths = []
+        notes = []
+        
+        self.logger.info(
+            f"GNN-primary path finding (fallback={algorithm.value})"
+        )
+        
+        # PRIMARY: Try GNN-based path finding
+        if gnn_scorer:
+            try:
+                self.logger.info("  PRIMARY: Using GNN for path prediction...")
+                
+                # GNN infrastructure is now integrated in this module
+                # Build graph tensors for GNN input
+                feature_extractor = FeatureExtractor()
+                graph_tensors = GraphTensors()
+                
+                # Extract node features
+                for node_id in self.graph.nodes:
+                    features = feature_extractor.extract_node_features(
+                        node_id, self.graph
+                    )
+                    graph_tensors.node_features[node_id] = features
+                    graph_tensors.node_to_index[node_id] = len(graph_tensors.node_to_index)
+                
+                graph_tensors.num_nodes = len(graph_tensors.node_features)
+                
+                # Extract edge features and build edge index
+                for edge_id, edge in self.graph.edges.items():
+                    from_node = getattr(edge, 'from_node', None)
+                        to_node = getattr(edge, 'to_node', None)
+                        
+                        if from_node and to_node:
+                            features = feature_extractor.extract_edge_features(
+                                edge_id, self.graph
+                            )
+                            graph_tensors.edge_features[edge_id] = features
+                            graph_tensors.edge_to_index[edge_id] = len(graph_tensors.edge_to_index)
+                            
+                            # Add to edge index using tensor indices
+                            from_idx = graph_tensors.node_to_index[from_node]
+                            to_idx = graph_tensors.node_to_index[to_node]
+                            graph_tensors.edge_index.append((from_idx, to_idx))
+                    
+                    graph_tensors.num_edges = len(graph_tensors.edge_features)
+                    
+                    # Get GNN predictions
+                    path_gnn = PathGNN(model=gnn_scorer)
+                    edge_probs = path_gnn.predict_edge_probabilities(graph_tensors)
+                    
+                    # Extract paths from GNN predictions
+                    path_extractor = PathExtractor(min_edge_confidence=min_confidence)
+                    gnn_result = path_extractor.score_and_extract_paths(
+                        self.graph, edge_probs
+                    )
+                    
+                    # Convert GNN paths to AssemblyPath objects
+                    for i, node_sequence in enumerate(gnn_result.best_paths):
+                        if len(node_sequence) < 2:
+                            continue
+                        
+                        # Check if path starts from our start node or reaches end nodes
+                        if start_node_id not in node_sequence:
+                            # GNN found paths in other parts of graph, skip
+                            continue
+                        
+                        # Find subsequence from start_node to end
+                        try:
+                            start_idx = node_sequence.index(start_node_id)
+                            subpath = node_sequence[start_idx:]
+                            
+                            # Check if reaches end nodes
+                            if end_node_ids:
+                                end_found = False
+                                for end_idx, node_id in enumerate(subpath):
+                                    if node_id in end_node_ids:
+                                        subpath = subpath[:end_idx+1]
+                                        end_found = True
+                                        break
+                                if not end_found:
+                                    continue
+                            
+                            # Create AssemblyPath
+                            path = self._create_assembly_path(subpath, f"gnn_path_{i}")
+                            path.ml_score = gnn_result.path_scores.get(i, 0.5)
+                            paths.append(path)
+                            
+                        except ValueError:
+                            continue
+                    
+                    if paths:
+                        self.logger.info(f"    GNN found {len(paths)} paths from start node")
+                        notes.append(f"GNN primary ({len(paths)} paths)")
+                    else:
+                        self.logger.info("    GNN found no valid paths from start node, falling back")
+                        notes.append("GNN found no paths, using fallback")
+                        
+            except Exception as e:
+                self.logger.warning(f"GNN path finding failed: {e}, falling back to algorithm")
+                notes.append(f"GNN failed: {str(e)[:50]}")
+                paths = []
+        else:
+            self.logger.info("  No GNN scorer provided, using fallback algorithm")
+            notes.append("No GNN scorer")
+        
+        # FALLBACK: Use classical algorithm if GNN unavailable or found no paths
+        if not paths:
+            self.logger.info(f"  FALLBACK: Using {algorithm.value} algorithm...")
+            result = self.find_paths(start_node_id, end_node_ids, algorithm, max_paths)
+            paths = result.paths
+            notes.append(f"Algorithm fallback ({len(paths)} paths)")
+        
+        # HYBRID: If GNN found few paths, supplement with algorithm-based
+        elif len(paths) < max_paths // 2:
+            self.logger.info(f"  HYBRID: GNN found only {len(paths)} paths, supplementing with {algorithm.value}...")
+            result = self.find_paths(start_node_id, end_node_ids, algorithm, max_paths - len(paths))
+            
+            # Add algorithm paths that don't duplicate GNN paths
+            gnn_path_sets = {tuple(p.node_ids) for p in paths}
+            for algo_path in result.paths:
+                if tuple(algo_path.node_ids) not in gnn_path_sets:
+                    paths.append(algo_path)
+            
+            notes.append(f"Hybrid GNN+algorithm ({len(paths)} total)")
+        
+        runtime = time.time() - start_time
+        
+        self.logger.info(
+            f"GNN-primary path finding complete: {len(paths)} paths in {runtime:.3f}s"
+        )
+        
+        return PathFindingResult(
+            paths=paths[:max_paths],
+            algorithm_used=algorithm,
+            num_candidates=len(paths),
+            runtime_seconds=runtime,
+            notes="; ".join(notes),
         )
     
     def _find_paths_dijkstra_weighted(
@@ -2061,8 +2759,9 @@ class PathWeaver:
         end_node_ids: Optional[Set[int]] = None,
         max_paths: int = 10,
         algorithm: PathFindingAlgorithm = PathFindingAlgorithm.DIJKSTRA,
-        num_iterations: int = 2,
         gnn_scorer: Optional[Any] = None,
+        use_gnn_primary: bool = True,
+        num_iterations: int = 2,
         edgewarden_scores: Optional[Dict[Tuple[int, int], float]] = None,
         gnn_path_scores: Optional[Dict[str, float]] = None,
         ul_path_scores: Optional[Dict[str, float]] = None,
@@ -2071,45 +2770,79 @@ class PathWeaver:
         strict_validation_config: Optional[ValidationConfig] = None,
     ) -> List[AssemblyPath]:
         """
-        Find and rank best paths through graph (downstream of EdgeWarden).
+        Find and rank best paths using GNN-FIRST architecture.
         
-        ARCHITECTURE: Downstream Integration with Iterative Refinement
-        ═════════════════════════════════════════════════════════════════
+        NEW ARCHITECTURE (GNN-First)
+        ════════════════════════════════════════════════════════════════
         
-        Supports iterative algorithm → GNN → algorithm refinement:
-        1. Algorithm pass: Discover candidate paths using specified algorithm
-        2. GNN pass: Score paths and extract edge weights (if GNN available)
-        3. Repeat steps 1-2 for num_iterations cycles
-        4. Rank using combined EdgeWarden + GNN scoring
-        5. Validate and return top N paths
-        6. Detect misassemblies and export for downstream modules
+        1. PRIMARY: GNN path prediction (if available)
+           - GNN predicts edge confidences
+           - Extracts high-confidence paths directly
+           - Learns biological patterns from training data
+        
+        2. FALLBACK: Classical algorithms (Dijkstra/BFS/DFS)
+           - Used when GNN unavailable or fails
+           - Reliable baseline path finding
+        
+        3. ENHANCEMENT: EdgeWarden + Long-range data
+           - EdgeWarden scores enhance both GNN and algorithm paths
+           - Hi-C and UL support refine path selection
+        
+        This is the CORRECT design: ML-first with classical fallback.
+        Old design (algorithm-first with GNN refinement) was backwards.
+        
+        Pipeline Steps:
+        ──────────────
+        1. Path Discovery (GNN-first or algorithm fallback)
+        2. EdgeWarden + GNN + Long-range scoring
+        3. Validation (connectivity, coverage, etc.)
+        4. Misassembly detection
+        5. Ranking and selection
         
         Args:
             start_node_id: Starting node
             end_node_ids: Target node(s)
             max_paths: Maximum paths to return
-            algorithm: Path finding algorithm (default: Dijkstra)
-                - PathFindingAlgorithm.DIJKSTRA: Shortest path (recommended default)
-                - PathFindingAlgorithm.BREADTH_FIRST: User-exposed option (BFS)
-                - PathFindingAlgorithm.DEPTH_FIRST: User-exposed option (DFS)
-            num_iterations: Number of algorithm→GNN refinement cycles (default: 2)
-                - 1: Single-pass algorithm only
-                - 2+: Iterative refinement (algorithm → GNN → algorithm...)
-            gnn_scorer: Optional GNN callable(paths) -> Dict[path_id, score]
+            algorithm: Fallback algorithm (default: Dijkstra)
+                - PathFindingAlgorithm.DIJKSTRA: Shortest path (recommended)
+                - PathFindingAlgorithm.BREADTH_FIRST: BFS option
+                - PathFindingAlgorithm.DEPTH_FIRST: DFS option
+            gnn_scorer: GNN model for path prediction (PRIMARY METHOD)
+            use_gnn_primary: Use GNN as primary method (default: True)
+                - True: GNN first, fallback to algorithm
+                - False: Use legacy iterative mode (deprecated)
+            num_iterations: For legacy mode only (deprecated)
             edgewarden_scores: EdgeWarden confidence (ACCEPTS from upstream)
             gnn_path_scores: GNN path-level scores (optional optimization)
+            ul_path_scores: Ultra-long read support
+            hic_path_scores: Hi-C contact support
+            long_range_two_pass: Enable two-pass validation
+            strict_validation_config: Custom validation thresholds
         
         Returns:
-            List of best paths ranked by EdgeWarden + GNN score
+            List of best paths ranked by combined scoring
         """
         self.logger.info(
             f"Finding best paths from node {start_node_id} "
-            f"(downstream of EdgeWarden, algorithm={algorithm.value}, "
-            f"iterations={num_iterations})"
+            f"(GNN-first={use_gnn_primary}, fallback={algorithm.value})"
         )
         
-        # Step 1: Find candidate paths (with optional iterative GNN refinement)
-        if num_iterations > 1 and gnn_scorer:
+        # Step 1: Find candidate paths (GNN-FIRST or fallback)
+        if use_gnn_primary and gnn_scorer:
+            self.logger.info("  PRIMARY: Using GNN for path discovery")
+            finding_result = self.finder.find_paths_gnn_primary(
+                start_node_id,
+                end_node_ids,
+                algorithm,
+                max_paths=max_paths * 10,
+                gnn_scorer=gnn_scorer,
+            )
+        elif num_iterations > 1 and gnn_scorer:
+            # Legacy mode: iterative algorithm→GNN (deprecated)
+            self.logger.warning(
+                "  Using LEGACY iterative mode (deprecated). "
+                "Set use_gnn_primary=True for new GNN-first architecture"
+            )
             finding_result = self.finder.find_paths_iterative_gnn(
                 start_node_id,
                 end_node_ids,
@@ -2119,6 +2852,8 @@ class PathWeaver:
                 num_iterations=num_iterations,
             )
         else:
+            # Pure algorithm mode (no GNN)
+            self.logger.info(f"  FALLBACK: Using {algorithm.value} algorithm (no GNN)")
             finding_result = self.finder.find_paths(
                 start_node_id,
                 end_node_ids,
@@ -2127,7 +2862,7 @@ class PathWeaver:
             )
         
         paths = finding_result.paths
-        self.logger.info(f"Found {len(paths)} candidate paths")
+        self.logger.info(f"Found {len(paths)} candidate paths ({finding_result.notes or 'no notes'})")
         
         if not paths:
             self.logger.warning("No paths found!")
@@ -2218,8 +2953,9 @@ class PathWeaver:
         max_paths_total: int = 20,
         per_start_max_paths: Optional[int] = None,
         algorithm: PathFindingAlgorithm = PathFindingAlgorithm.DIJKSTRA,
-        num_iterations: int = 2,
         gnn_scorer: Optional[Any] = None,
+        use_gnn_primary: bool = True,
+        num_iterations: int = 2,
         edgewarden_scores: Optional[Dict[Tuple[int, int], float]] = None,
         gnn_path_scores: Optional[Dict[str, float]] = None,
         ul_path_scores: Optional[Dict[str, float]] = None,
@@ -2229,13 +2965,21 @@ class PathWeaver:
         strict_validation_config: Optional[ValidationConfig] = None,
     ) -> List[AssemblyPath]:
         """
-        Multi-start variant: find best paths from multiple start nodes in parallel.
+        Multi-start path finding with GNN-FIRST architecture.
 
-        Supports same iterative algorithm→GNN refinement as find_best_paths().
+        Finds best paths from multiple start nodes using GNN as primary method
+        with algorithm fallback, parallelized across start nodes.
+        
+        NEW ARCHITECTURE (GNN-First)
+        ════════════════════════════════════════════════════════════════
+        
+        1. PRIMARY: GNN path prediction (parallel per-start)
+        2. FALLBACK: Classical algorithms if GNN unavailable
+        3. ENHANCEMENT: EdgeWarden + Long-range scoring
         
         Steps:
-          1) Discover candidate paths (parallel per start, iterative if enabled)
-          2) Rank with EdgeWarden + GNN
+          1) Discover candidate paths (GNN-first, parallel per start)
+          2) Rank with EdgeWarden + GNN + Long-range
           3) Validate and filter
           4) Detect misassemblies
           5) Return top N (max_paths_total)
@@ -2245,34 +2989,56 @@ class PathWeaver:
             end_node_ids: Target node(s)
             max_paths_total: Maximum total paths to return
             per_start_max_paths: Per-start limit (auto-calculated if None)
-            algorithm: Path finding algorithm (default: Dijkstra)
-            num_iterations: Iterative refinement cycles (default: 2)
-            gnn_scorer: Optional GNN scorer callable
+            algorithm: Fallback algorithm (default: Dijkstra)
+            gnn_scorer: GNN model for path prediction (PRIMARY METHOD)
+            use_gnn_primary: Use GNN as primary (default: True)
+            num_iterations: For legacy mode only (deprecated)
             edgewarden_scores: EdgeWarden confidence (ACCEPTS from upstream)
             gnn_path_scores: GNN path-level scores
+            ul_path_scores: Ultra-long read support
+            hic_path_scores: Hi-C contact support
             num_workers: Parallel workers (threads)
+            long_range_two_pass: Enable two-pass validation
+            strict_validation_config: Custom validation thresholds
         
         Returns:
             List of best multi-start paths
         """
         self.logger.info(
             f"Finding best multi-start paths from {len(start_node_ids)} starts "
-            f"(downstream of EdgeWarden, algorithm={algorithm.value}, "
-            f"iterations={num_iterations})"
+            f"(GNN-first={use_gnn_primary}, fallback={algorithm.value})"
         )
 
-        # Step 1: Find candidate paths (parallel per start)
-        if num_iterations > 1 and gnn_scorer:
-            # Iterative per-start discovery
-            finding_result = self.finder.find_paths_multi_start(
-                start_node_ids=start_node_ids,
-                end_node_ids=end_node_ids,
-                algorithm=algorithm,
-                max_paths_total=max_paths_total * 10,
-                per_start_max_paths=per_start_max_paths,
-                num_workers=num_workers,
-            )
+        # Note: For multi-start, we currently don't have a parallel GNN implementation
+        # So we either call find_best_paths() per start (simple but serial), or use
+        # the existing multi_start finder which doesn't have GNN-primary yet
+        
+        # TODO: Future optimization - implement parallel GNN-first per start
+        # For now, use simple serial approach with GNN-first per start
+        
+        if use_gnn_primary and gnn_scorer:
+            self.logger.info("  Using serial GNN-first path finding per start node")
+            all_paths = []
+            for start_node_id in start_node_ids:
+                start_paths = self.find_best_paths(
+                    start_node_id=start_node_id,
+                    end_node_ids=end_node_ids,
+                    max_paths=per_start_max_paths or (max_paths_total // len(start_node_ids) + 1),
+                    algorithm=algorithm,
+                    gnn_scorer=gnn_scorer,
+                    use_gnn_primary=True,
+                    edgewarden_scores=edgewarden_scores,
+                    gnn_path_scores=gnn_path_scores,
+                    long_range_two_pass=False,  # We'll do it once at the end
+                )
+                all_paths.extend(start_paths)
+            
+            paths = all_paths
+            self.logger.info(f"Found {len(paths)} GNN-first multi-start candidate paths")
+            
         else:
+            # Fallback to classical multi-start (faster but less accurate)
+            self.logger.info(f"  Using classical multi-start path finding ({algorithm.value})")
             finding_result = self.finder.find_paths_multi_start(
                 start_node_ids=start_node_ids,
                 end_node_ids=end_node_ids,
@@ -2281,9 +3047,8 @@ class PathWeaver:
                 per_start_max_paths=per_start_max_paths,
                 num_workers=num_workers,
             )
-
-        paths = finding_result.paths
-        self.logger.info(f"Found {len(paths)} multi-start candidate paths")
+            paths = finding_result.paths
+            self.logger.info(f"Found {len(paths)} multi-start candidate paths")
 
         if not paths:
             self.logger.warning("No paths found (multi-start)!")

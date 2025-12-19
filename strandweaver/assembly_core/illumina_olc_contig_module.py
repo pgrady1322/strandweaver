@@ -26,16 +26,16 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import os
 
-from strandweaver.io import SeqRead, read_fastq, write_fasta
-from strandweaver.read_correction import KmerSpectrum
-from strandweaver.utils.gpu_core import (
+from strandweaver.io_utils import SeqRead, read_fastq, write_fasta
+from strandweaver.preprocessing import KmerSpectrum
+from strandweaver.utils.hardware_management import (
     GPUSequenceAligner,
     GPUOverlapDetector
 )
 
 # Import AI k-mer predictor
 try:
-    from strandweaver.read_correction import AdaptiveKmerPredictor
+    from strandweaver.preprocessing import AdaptiveKmerPredictor
     AI_AVAILABLE = True
 except ImportError:
     AI_AVAILABLE = False

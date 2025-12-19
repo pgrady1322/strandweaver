@@ -28,10 +28,11 @@ from typing import Dict, List, Optional, Iterator, Tuple, Set, TYPE_CHECKING
 from collections import Counter, defaultdict
 from datetime import datetime
 
-from ..io import read_fastq, write_fastq, ReadCollection, ReadTechnology, SeqRead
+from ..io_utils import read_fastq, write_fastq, ReadCollection, SeqRead
+from .read_classification_utility import ReadTechnology
 
 if TYPE_CHECKING:
-    from ..io import NanoporeMetadata
+    from .read_classification_utility import NanoporeMetadata
 
 
 class ErrorType(Enum):

@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass
 
-from strandweaver.read_correction.feature_extraction import FeatureExtractor
+from strandweaver.preprocessing.kweaver_module import FeatureExtractor
 from strandweaver.training.model_trainer import KmerModelTrainer
 from strandweaver.training.data_generator import TrainingDataGenerator
 

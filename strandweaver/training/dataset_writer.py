@@ -337,7 +337,7 @@ def write_sharded_dataset(
     # Create subdirectories for each model type
     overlap_dir = output_dir / "overlap_classifier"
     gnn_dir = output_dir / "gnn_path_predictor"
-    diploid_dir = output_dir / "diploid_disentangler"
+    haplotype_dir = output_dir / "haplotype_detangler"
     ul_dir = output_dir / "ul_routing"
     sv_dir = output_dir / "sv_detection"
     
@@ -482,7 +482,7 @@ def write_sharded_dataset(
         f.write(f"│   └── shard_*.{format}\n")
         f.write(f"├── gnn_path_predictor/\n")
         f.write(f"│   └── graph_tensors.npz\n")
-        f.write(f"├── diploid_disentangler/\n")
+        f.write(f"├── haplotype_detangler/\n")
         f.write(f"│   └── shard_*.{format}\n")
         f.write(f"├── ul_routing/\n")
         f.write(f"│   └── shard_*.{format}\n")

@@ -23,7 +23,10 @@ from .illumina_olc_contig_module import (
 from .dbg_engine_module import (
     build_dbg_from_long_reads,
     DBGGraph,
-    DBGNode
+    DBGNode,
+    KmerGraph,
+    KmerNode,
+    KmerEdge
 )
 
 from .string_graph_engine_module import (
@@ -36,17 +39,13 @@ from .edgewarden_module import EdgeWarden
 from .pathweaver_module import PathWeaver
 from .threadcompass_module import ThreadCompass
 from .strandtether_module import StrandTether
-from .gnn_path_predictor import PathGNN
-from .ul_routing_ai import ULRouter
-from .sv_detection_ai import SVDetector
-from .diploid_disentangler import DiploidDisentangler
-from .data_structures import (
-    KmerGraph,
-    KmerNode,
-    KmerEdge,
-    ULReadMapper,
-    Anchor
+from .pathweaver_module import (
+    PathGNN, FeatureExtractor, PathExtractor, GraphTensors, GNNPathResult,
+    PathGNNModel, SimpleGNN, MediumGNN, DeepGNN, GNNConfig
 )
+from .ul_routing_ai import ULRouter
+from .svscribe_module import SVDetector
+from .haplotype_detangler_module import HaplotypeDetangler
 
 __all__ = [
     # Assembly functions
@@ -71,7 +70,7 @@ __all__ = [
     "PathGNN",
     "ULRouter",
     "SVDetector",
-    "DiploidDisentangler",
+    "HaplotypeDetangler",
     # Data structures
     "KmerGraph",
     "KmerNode",

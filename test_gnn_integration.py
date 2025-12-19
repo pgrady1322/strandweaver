@@ -28,16 +28,16 @@ def test_gnn_models_module():
     logger.info("Testing GNN models module...")
     
     try:
-        # Note: gnn_models moved to assembly_utils, gnn_path_predictor has duplicate in assembly_core
-        from strandweaver.assembly_utils.gnn_models import (
+        # Note: GNN functionality is now integrated directly into pathweaver_module
+        from strandweaver.assembly_core.pathweaver_module import (
             GNNConfig, EdgeConvLayer, PathGNNModel,
-            SimpleGNN, MediumGNN, DeepGNN, GNNTrainer
+            SimpleGNN, MediumGNN, DeepGNN
         )
-        logger.info("✓ GNN models module imports successfully")
+        logger.info("✓ GNN models now integrated in pathweaver_module")
         
         # Test config creation
         config = GNNConfig()
-        logger.info(f"✓ GNNConfig created: {config.num_layers} layers, {config.hidden_dim} hidden units")
+        logger.info(f"✓ GNNConfig created: {config.num_layers} layers, {config.hidden_channels} hidden channels")
         
         return True
     except ImportError as e:
@@ -50,7 +50,7 @@ def test_path_gnn_class():
     logger.info("Testing PathGNN class...")
     
     try:
-        from strandweaver.assembly_core.gnn_path_predictor import PathGNN, GraphTensors
+        from strandweaver.assembly_core.pathweaver_module import PathGNN, GraphTensors
         
         # Create instance without model (heuristic mode)
         gnn = PathGNN()
@@ -83,7 +83,7 @@ def test_gnn_inference_structure():
     logger.info("Testing GNN inference structure...")
     
     try:
-        from strandweaver.assembly_core.gnn_path_predictor import PathGNN, FeatureExtractor, PathExtractor, GNNPathResult
+        from strandweaver.assembly_core.pathweaver_module import PathGNN, FeatureExtractor, PathExtractor, GNNPathResult
         
         # Check FeatureExtractor
         fe = FeatureExtractor()
@@ -121,9 +121,9 @@ def check_pipeline_integration():
     logger.info("Checking pipeline integration...")
     
     try:
-        # Check that PathGNN can be imported from assembly context
-        from strandweaver.assembly_core.gnn_path_predictor import PathGNN
-        logger.info(f"✓ PathGNN importable from assembly context")
+        # Check that PathGNN can be imported from pathweaver_module (now integrated)
+        from strandweaver.assembly_core.pathweaver_module import PathGNN
+        logger.info(f"✓ PathGNN importable from pathweaver_module")
         
         # Check that training module exists and is importable
         from strandweaver import training

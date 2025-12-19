@@ -1,39 +1,28 @@
 """
 Assembly Utilities module for StrandWeaver.
 
-This module provides utility functions and AI models for assembly tasks:
-- GNN models for path prediction
+This module provides utility functions for assembly tasks:
 - Graph cleanup and validation
 - Misassembly detection
 - Overlap filtering with AI
 - General assembly utilities
+
+Note: GNN models now integrated into pathweaver_module in assembly_core.
+Note: PreprocessingCoordinator now integrated into PipelineOrchestrator in utils.
 """
 
-from .gnn_models import (
-    PathGNNModel,
-    SimpleGNN,
-    MediumGNN,
-    DeepGNN
-)
-
-from .gnn_path_predictor import (
-    PathGNN,
-    GraphTensors,
-    FeatureExtractor,
-    PathExtractor,
-    GNNPathResult
-)
+# GNN models consolidated into pathweaver_module
+# from ..assembly_core.pathweaver_module import (
+#     PathGNNModel, SimpleGNN, MediumGNN, DeepGNN, GNNConfig,
+#     PathGNN, GraphTensors, FeatureExtractor, PathExtractor, GNNPathResult
+# )
 
 from .graph_cleanup import GraphCleaner
 from .misassembly_detector import MisassemblyDetector
-from .overlap_ai_filter import OverlapFilter
-from .utilities import (
-    PreprocessingCoordinator,
-    AssemblyUtils
-)
+# overlap_ai_filter archived - use EdgeWarden from assembly_core instead
 
 __all__ = [
-    # GNN Models
+    # GNN Models (now in pathweaver_module)
     "PathGNNModel",
     "SimpleGNN",
     "MediumGNN",
@@ -48,6 +37,4 @@ __all__ = [
     "GraphCleaner",
     "MisassemblyDetector",
     "OverlapFilter",
-    "PreprocessingCoordinator",
-    "AssemblyUtils",
 ]

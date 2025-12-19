@@ -9,6 +9,12 @@ This module implements a robust DBG engine that:
 - Consumes dynamic k-mer values from the ML regional-k module
 - Builds a compacted de Bruijn graph (unitig representation)
 - Annotates nodes with ML-recommended k values for regional genome complexity
+- GPU-accelerated k-mer extraction and graph building (Apple Silicon MPS)
+- Advanced graph compaction (linear path merging)
+
+Consolidated from:
+- Original dbg_engine_module.py
+- data_structures.py (Part 1: DBG structures and builder)
 """
 
 from dataclasses import dataclass, field
@@ -16,79 +22,166 @@ from typing import Dict, Set, List, Optional, Tuple, Any
 from collections import defaultdict, Counter
 import logging
 
-from strandweaver.utils.gpu_core import GPUKmerExtractor, GPUGraphBuilder
+from strandweaver.utils.hardware_management import GPUKmerExtractor, GPUGraphBuilder
 
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# Configuration
+# ============================================================================
+
 @dataclass
-class DBGNode:
-    """
-    Node in the de Bruijn graph (represents a unitig).
+class KmerGraphConfig:
+    """Configuration for k-mer graph construction."""
+    k: int  # K-mer size
+    min_kmer_count: int = 2  # Minimum k-mer frequency to include
+    canonical: bool = True  # Treat reverse complements as same k-mer
     
-    Attributes:
-        id: Unique node identifier
-        seq: Nucleotide sequence of the unitig
-        coverage: Average k-mer coverage across this unitig
-        length: Length of the unitig sequence
-        recommended_k: ML-suggested k-mer size for this region (optional)
-        metadata: Additional regional information (GC content, repeat class, etc.)
+    def __post_init__(self):
+        """Validate configuration."""
+        if self.k < 7:
+            raise ValueError(f"k must be >= 7, got {self.k}")
+        if self.k % 2 == 0:
+            logger.warning(f"Even k-mer size {self.k} may cause palindrome issues. Odd k recommended.")
+        if self.min_kmer_count < 1:
+            raise ValueError(f"min_kmer_count must be >= 1, got {self.min_kmer_count}")
+
+
+# ============================================================================
+# Core Data Structures (Unified DBG + K-mer Graph)
+# ============================================================================
+
+@dataclass
+class KmerNode:
+    """
+    Node in the compacted de Bruijn graph.
+    
+    After compaction, nodes represent unitigs (maximal non-branching paths).
+    Before compaction, each node is a (k-1)-mer.
     """
     id: int
-    seq: str
-    coverage: float
-    length: int
-    recommended_k: Optional[int] = None
-    metadata: Dict = field(default_factory=dict)
+    seq: str  # Sequence of the node (k-1-mer or compacted unitig)
+    coverage: float  # Average k-mer coverage
+    length: int  # Length of sequence in bases
+    recommended_k: Optional[int] = None  # ML-suggested k-mer size for this region
+    metadata: Dict = field(default_factory=dict)  # Additional regional information
+    
+    def __post_init__(self):
+        """Validate node data."""
+        if self.length != len(self.seq):
+            logger.warning(f"Node {self.id}: length {self.length} != seq length {len(self.seq)}")
+            self.length = len(self.seq)
     
     def __hash__(self):
         return hash(self.id)
 
 
 @dataclass
-class DBGEdge:
+class KmerEdge:
     """
     Edge in the de Bruijn graph.
     
-    Attributes:
-        id: Unique edge identifier
-        from_id: Source node ID
-        to_id: Target node ID
-        coverage: Number of k-mers supporting this edge
-        overlap_len: Length of overlap between nodes (k-1)
+    Represents an overlap between two (k-1)-mers, corresponding to a k-mer.
     """
     id: int
-    from_id: int
-    to_id: int
-    coverage: float
-    overlap_len: int = 0
+    from_id: int  # Source node ID
+    to_id: int  # Target node ID
+    coverage: float  # K-mer coverage (number of times this k-mer was seen)
+    overlap_len: int = 0  # Length of overlap between nodes (k-1)
     
     def __hash__(self):
-        return hash(self.id)
+        """Make edges hashable for set operations."""
+        return hash((self.from_id, self.to_id))
+    
+    def __eq__(self, other):
+        """Compare edges by source and target."""
+        if not isinstance(other, KmerEdge):
+            return False
+        return self.from_id == other.from_id and self.to_id == other.to_id
 
 
 @dataclass
-class DBGGraph:
+class KmerGraph:
     """
-    Complete de Bruijn graph structure.
+    Compacted de Bruijn graph representation.
     
-    Attributes:
-        nodes: Map of node_id -> DBGNode
-        edges: Map of edge_id -> DBGEdge
-        out_edges: Map of node_id -> set of outgoing edge_ids
-        in_edges: Map of node_id -> set of incoming edge_ids
-        base_k: Global/base k-mer size used for graph construction
-        ml_k_enabled: Whether ML regional-k annotation is enabled
+    Uses adjacency lists for efficient graph traversal.
     """
-    nodes: Dict[int, DBGNode] = field(default_factory=dict)
-    edges: Dict[int, DBGEdge] = field(default_factory=dict)
+    nodes: Dict[int, KmerNode] = field(default_factory=dict)
+    edges: Dict[int, KmerEdge] = field(default_factory=dict)
     out_edges: Dict[int, Set[int]] = field(default_factory=lambda: defaultdict(set))
     in_edges: Dict[int, Set[int]] = field(default_factory=lambda: defaultdict(set))
-    base_k: int = 31
-    ml_k_enabled: bool = False
+    base_k: int = 31  # Global/base k-mer size used for graph construction
+    ml_k_enabled: bool = False  # Whether ML regional-k annotation is enabled
+    
+    def add_node(self, node: KmerNode):
+        """Add a node to the graph."""
+        self.nodes[node.id] = node
+        if node.id not in self.out_edges:
+            self.out_edges[node.id] = set()
+        if node.id not in self.in_edges:
+            self.in_edges[node.id] = set()
+    
+    def add_edge(self, edge: KmerEdge):
+        """Add an edge to the graph."""
+        self.edges[edge.id] = edge
+        self.out_edges[edge.from_id].add(edge.id)
+        self.in_edges[edge.to_id].add(edge.id)
+    
+    def get_out_neighbors(self, node_id: int) -> List[int]:
+        """Get all nodes reachable from this node."""
+        return [self.edges[eid].to_id for eid in self.out_edges.get(node_id, [])]
+    
+    def get_in_neighbors(self, node_id: int) -> List[int]:
+        """Get all nodes that reach this node."""
+        return [self.edges[eid].from_id for eid in self.in_edges.get(node_id, [])]
+    
+    def is_linear(self, node_id: int) -> bool:
+        """Check if node has exactly one in-edge and one out-edge (linear path)."""
+        return len(self.out_edges.get(node_id, [])) == 1 and len(self.in_edges.get(node_id, [])) == 1
+    
+    def out_degree(self, node_id: int) -> int:
+        """Number of outgoing edges."""
+        return len(self.out_edges.get(node_id, []))
+    
+    def in_degree(self, node_id: int) -> int:
+        """Number of incoming edges."""
+        return len(self.in_edges.get(node_id, []))
 
 
-class DeBruijnGraphBuilder:
+# Legacy compatibility aliases
+DBGNode = KmerNode
+DBGEdge = KmerEdge
+DBGGraph = KmerGraph
+
+
+# ============================================================================
+# UL Read Overlay Structures (For Anchor Export)
+# ============================================================================
+
+@dataclass
+class Anchor:
+    """
+    Exact k-mer match between read and graph node.
+    
+    Anchors are error-free regions that guide the alignment process.
+    """
+    read_start: int  # Start position in read
+    read_end: int  # End position in read
+    node_id: int  # Graph node ID
+    node_start: int  # Start position in node sequence
+    orientation: str = '+'  # '+' for forward, '-' for reverse complement
+    
+    @property
+    def length(self) -> int:
+        """Length of anchor in bases."""
+        return self.read_end - self.read_start
+
+
+# ============================================================================
+# De Bruijn Graph Builder
+# ============================================================================
     """
     Builder class for constructing de Bruijn graphs from long reads.
     

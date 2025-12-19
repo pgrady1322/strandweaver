@@ -22,6 +22,10 @@ Key Features:
 - Haplotype-aware phasing for diploid genomes
 - Multi-contact consistency analysis
 
+Consolidated from:
+- Original strandtether_module.py
+- data_structures.py (Part 3: Hi-C structures and HiCIntegrator)
+
 Author: StrandWeaver Development Team
 License: MIT
 """
@@ -144,6 +148,90 @@ class HiCContactMap:
 
 
 @dataclass
+class NodeHiCInfo:
+    """
+    Hi-C-derived haplotype information for a graph node (legacy compatibility).
+    
+    This is an alias/alternative structure from data_structures.py consolidation.
+    Provides same functionality as HiCNodePhaseInfo with slightly different naming.
+    
+    Scores indicate tendency toward haplotype A or B based on Hi-C contacts.
+    Higher score = stronger association with that haplotype.
+    """
+    node_id: int
+    hapA_score: float  # Score for haplotype A
+    hapB_score: float  # Score for haplotype B
+    total_contacts: int  # Total Hi-C contacts involving this node
+    
+    @property
+    def haplotype(self) -> str:
+        """Return dominant haplotype (A, B, or ambiguous)."""
+        if self.total_contacts == 0:
+            return "unknown"
+        
+        # Require significant difference to call haplotype
+        ratio_threshold = 2.0
+        if self.hapA_score > self.hapB_score * ratio_threshold:
+            return "A"
+        elif self.hapB_score > self.hapA_score * ratio_threshold:
+            return "B"
+        else:
+            return "ambiguous"
+    
+    @property
+    def confidence(self) -> float:
+        """
+        Confidence in haplotype assignment [0.0, 1.0].
+        
+        Based on contact count and score difference.
+        """
+        if self.total_contacts == 0:
+            return 0.0
+        
+        total_score = self.hapA_score + self.hapB_score
+        if total_score == 0:
+            return 0.0
+        
+        # Confidence based on score imbalance
+        max_score = max(self.hapA_score, self.hapB_score)
+        score_confidence = max_score / total_score
+        
+        # Discount by contact count (more contacts = more confident)
+        contact_factor = min(1.0, self.total_contacts / 100.0)
+        
+        return score_confidence * contact_factor
+
+
+@dataclass
+class EdgeHiCInfo:
+    """
+    Hi-C information for a graph edge (legacy compatibility).
+    
+    This is an alias/alternative structure from data_structures.py consolidation.
+    Provides same functionality as HiCEdgeSupport with slightly different naming.
+    
+    Tracks cis vs trans contacts to validate edge correctness.
+    High cis/trans ratio suggests correct join; low ratio suggests mis-join.
+    """
+    edge_id: int
+    cis_contacts: int  # Contacts within same molecule (good)
+    trans_contacts: int  # Contacts between different molecules (bad for assembly)
+    hic_weight: float  # Overall Hi-C support weight
+    
+    @property
+    def cis_trans_ratio(self) -> float:
+        """Ratio of cis to trans contacts (higher = better edge)."""
+        if self.trans_contacts == 0:
+            return float('inf') if self.cis_contacts > 0 else 0.0
+        return self.cis_contacts / self.trans_contacts
+    
+    def is_reliable(self, min_ratio: float = 3.0, min_contacts: int = 5) -> bool:
+        """Check if edge has sufficient Hi-C support."""
+        total = self.cis_contacts + self.trans_contacts
+        return total >= min_contacts and self.cis_trans_ratio >= min_ratio
+
+
+@dataclass
 class HiCJoinScore:
     """Score for a join/edge evaluated via Hi-C."""
     join_id: str
@@ -212,7 +300,7 @@ class StrandTether:
         self.gpu_available = False
         if use_gpu:
             try:
-                from strandweaver.utils.gpu_core import (
+                from strandweaver.utils.hardware_management import (
                     GPUContactMapBuilder, GPUSpectralPhaser
                 )
                 self.gpu_contact_builder = GPUContactMapBuilder(use_gpu=True, backend=gpu_backend)
@@ -853,6 +941,309 @@ class StrandTether:
 
 
 # ============================================================================
+#                    LEGACY Hi-C INTEGRATOR (from data_structures.py)
+# ============================================================================
+
+class HiCIntegrator:
+    """
+    Integrates Hi-C contact data into the assembly graph (legacy interface).
+    
+    Consolidated from data_structures.py Part 3 implementation.
+    
+    Uses Hi-C pairs to:
+    - Assign haplotype scores to nodes via spectral clustering
+    - Validate edges (cis vs trans contacts)
+    - Provide weights for graph simplification
+    
+    Similar to hifiasm's approach but operating on hybrid DBG+string graph.
+    
+    Features GPU acceleration for:
+    - Contact matrix construction (20-40× speedup)
+    - Spectral clustering (15-35× speedup)
+    
+    Note: This class provides a simpler interface than StrandTether for
+    backwards compatibility with code that used data_structures.py.
+    """
+    
+    def __init__(self, use_gpu: bool = True):
+        """
+        Initialize Hi-C integrator.
+        
+        Args:
+            use_gpu: Enable GPU acceleration (default: True)
+        """
+        try:
+            from strandweaver.utils.hardware_management import GPUHiCMatrix, GPUSpectralClustering
+            self.gpu_hic_matrix = GPUHiCMatrix(use_gpu=use_gpu)
+            self.gpu_spectral = GPUSpectralClustering(use_gpu=use_gpu)
+        except ImportError:
+            logger.warning("GPU modules not available, using CPU fallback")
+            self.gpu_hic_matrix = None
+            self.gpu_spectral = None
+    
+    def compute_node_hic_annotations(
+        self,
+        graph: Any,
+        hic_pairs: List[HiCPair]
+    ) -> Dict[int, 'NodeHiCInfo']:
+        """
+        Compute haplotype scores for each node from Hi-C contacts using spectral clustering.
+        
+        Algorithm (based on hifiasm and spectral graph theory):
+        1. Build contact matrix between nodes from Hi-C pairs
+        2. Compute normalized graph Laplacian
+        3. Find Fiedler vector (2nd smallest eigenvector) for 2-way partitioning
+        4. Assign haplotypes based on eigenvector sign
+        5. Calculate confidence scores based on eigenvector magnitude and contact density
+        
+        Args:
+            graph: de Bruijn graph (KmerGraph)
+            hic_pairs: List of Hi-C contact pairs
+            
+        Returns:
+            Dictionary mapping node_id -> NodeHiCInfo
+        """
+        logger.info(f"Computing Hi-C annotations for {len(graph.nodes)} nodes...")
+        
+        # Build contact matrix and count contacts
+        node_contacts = defaultdict(int)
+        contact_matrix_dict = defaultdict(lambda: defaultdict(int))
+        
+        for pair in hic_pairs:
+            node_contacts[pair.read1_node] += 1
+            node_contacts[pair.read2_node] += 1
+            contact_matrix_dict[pair.read1_node][pair.read2_node] += 1
+            contact_matrix_dict[pair.read2_node][pair.read1_node] += 1
+        
+        # Get sorted node IDs for consistent indexing
+        node_ids = sorted(graph.nodes.keys())
+        n_nodes = len(node_ids)
+        node_to_idx = {nid: i for i, nid in enumerate(node_ids)}
+        
+        # Build contact list for GPU processing (if available)
+        contacts = []
+        for pair in hic_pairs:
+            if pair.read1_node in node_to_idx and pair.read2_node in node_to_idx:
+                idx1 = node_to_idx[pair.read1_node]
+                idx2 = node_to_idx[pair.read2_node]
+                contacts.append((idx1, idx2))
+        
+        # Build contact matrix
+        if self.gpu_hic_matrix and len(contacts) > 1000:
+            logger.info(f"Building contact matrix for {n_nodes} nodes (GPU-accelerated)...")
+            contact_matrix = self.gpu_hic_matrix.build_contact_matrix(contacts, n_nodes)
+        else:
+            logger.info(f"Building contact matrix for {n_nodes} nodes (CPU)...")
+            contact_matrix = np.zeros((n_nodes, n_nodes))
+            for idx1, idx2 in contacts:
+                contact_matrix[idx1, idx2] += 1
+                contact_matrix[idx2, idx1] += 1
+        
+        # Perform spectral clustering if we have contacts
+        if contact_matrix.sum() > 0:
+            if self.gpu_spectral and n_nodes > 100:
+                logger.info("Performing GPU-accelerated spectral clustering...")
+                cluster_assignments = self.gpu_spectral.spectral_cluster(contact_matrix, n_clusters=2)
+                haplotype_assignments = {node_ids[i]: int(cluster_assignments[i]) for i in range(len(node_ids))}
+            else:
+                logger.info("Performing CPU spectral clustering...")
+                haplotype_assignments = self._spectral_clustering_cpu(contact_matrix, node_ids, n_clusters=2)
+        else:
+            logger.warning("No Hi-C contacts found, using default assignments")
+            haplotype_assignments = {nid: 0 for nid in node_ids}
+        
+        # Convert clustering to haplotype scores
+        node_hic_info = {}
+        
+        for node_id in graph.nodes:
+            total = node_contacts.get(node_id, 0)
+            haplotype = haplotype_assignments.get(node_id, 0)
+            
+            # Assign scores based on cluster membership
+            if haplotype == 0:
+                hapA_score = total * 0.9
+                hapB_score = total * 0.1
+            else:
+                hapA_score = total * 0.1
+                hapB_score = total * 0.9
+            
+            # For nodes with no contacts, use ambiguous scores
+            if total == 0:
+                hapA_score = 0.5
+                hapB_score = 0.5
+            
+            node_hic_info[node_id] = NodeHiCInfo(
+                node_id=node_id,
+                hapA_score=hapA_score,
+                hapB_score=hapB_score,
+                total_contacts=total
+            )
+        
+        # Log clustering statistics
+        n_hapA = sum(1 for h in haplotype_assignments.values() if h == 0)
+        n_hapB = sum(1 for h in haplotype_assignments.values() if h == 1)
+        logger.info(f"Spectral clustering: {n_hapA} nodes → Haplotype A, {n_hapB} nodes → Haplotype B")
+        logger.info(f"Computed Hi-C info for {len(node_hic_info)} nodes")
+        
+        return node_hic_info
+    
+    def _spectral_clustering_cpu(
+        self,
+        contact_matrix: np.ndarray,
+        node_ids: List[int],
+        n_clusters: int = 2
+    ) -> Dict[int, int]:
+        """
+        Perform spectral clustering on contact matrix (CPU implementation).
+        
+        Uses normalized graph Laplacian and Fiedler vector for 2-way partitioning.
+        """
+        n = contact_matrix.shape[0]
+        
+        if n < 2:
+            return {node_ids[0]: 0} if n == 1 else {}
+        
+        # Build adjacency matrix
+        A = (contact_matrix + contact_matrix.T) / 2.0
+        A += np.eye(n) * 0.01
+        
+        # Compute degree matrix
+        degree = A.sum(axis=1)
+        degree[degree == 0] = 1.0
+        
+        # Compute normalized Laplacian
+        D_inv_sqrt = np.diag(1.0 / np.sqrt(degree))
+        L = np.eye(n) - D_inv_sqrt @ A @ D_inv_sqrt
+        
+        # Compute eigenvalues and eigenvectors
+        try:
+            eigenvalues, eigenvectors = np.linalg.eigh(L)
+        except np.linalg.LinAlgError:
+            logger.warning("Eigendecomposition failed, using fallback clustering")
+            total_contacts = contact_matrix.sum(axis=1)
+            median_contacts = np.median(total_contacts)
+            return {nid: (0 if total_contacts[i] >= median_contacts else 1) 
+                    for i, nid in enumerate(node_ids)}
+        
+        # Sort by eigenvalue
+        sorted_indices = np.argsort(eigenvalues)
+        eigenvectors = eigenvectors[:, sorted_indices]
+        
+        # Use Fiedler vector for 2-way partition
+        fiedler_vector = eigenvectors[:, 1] if n >= 2 else eigenvectors[:, 0]
+        
+        # Partition based on sign
+        assignments = {}
+        for i, node_id in enumerate(node_ids):
+            assignments[node_id] = 0 if fiedler_vector[i] >= 0 else 1
+        
+        return assignments
+    
+    def compute_edge_hic_weights(
+        self,
+        graph: Any,
+        long_edges: List[Any],
+        node_hic: Dict[int, 'NodeHiCInfo'],
+        hic_pairs: List[HiCPair]
+    ) -> Dict[int, 'EdgeHiCInfo']:
+        """
+        Compute Hi-C weights for edges.
+        
+        Validates edges using cis/trans contact ratios.
+        
+        Args:
+            graph: de Bruijn graph
+            long_edges: Long-range edges from UL reads
+            node_hic: Node haplotype information
+            hic_pairs: Hi-C contact pairs
+            
+        Returns:
+            Dictionary mapping edge_id -> EdgeHiCInfo
+        """
+        logger.info("Computing Hi-C weights for edges...")
+        
+        edge_hic_info = {}
+        
+        # Process DBG edges
+        for edge in graph.edges.values():
+            cis, trans = self._count_edge_contacts(
+                edge.from_id, 
+                edge.to_id, 
+                node_hic, 
+                hic_pairs
+            )
+            
+            weight = self._calculate_hic_weight(cis, trans)
+            
+            edge_hic_info[edge.id] = EdgeHiCInfo(
+                edge_id=edge.id,
+                cis_contacts=cis,
+                trans_contacts=trans,
+                hic_weight=weight
+            )
+        
+        # Process long edges
+        for long_edge in long_edges:
+            cis, trans = self._count_edge_contacts(
+                long_edge.from_node,
+                long_edge.to_node,
+                node_hic,
+                hic_pairs
+            )
+            
+            weight = self._calculate_hic_weight(cis, trans)
+            
+            edge_hic_info[long_edge.id] = EdgeHiCInfo(
+                edge_id=long_edge.id,
+                cis_contacts=cis,
+                trans_contacts=trans,
+                hic_weight=weight
+            )
+        
+        logger.info(f"Computed Hi-C weights for {len(edge_hic_info)} edges")
+        return edge_hic_info
+    
+    def _count_edge_contacts(
+        self,
+        from_node: int,
+        to_node: int,
+        node_hic: Dict[int, 'NodeHiCInfo'],
+        hic_pairs: List[HiCPair]
+    ) -> Tuple[int, int]:
+        """Count cis and trans contacts for an edge."""
+        cis = 0
+        trans = 0
+        
+        from_hap = node_hic.get(from_node)
+        to_hap = node_hic.get(to_node)
+        
+        if not from_hap or not to_hap:
+            return (0, 0)
+        
+        for pair in hic_pairs:
+            if ((pair.frag1.node_id == from_node and pair.frag2.node_id == to_node) or
+                (pair.frag1.node_id == to_node and pair.frag2.node_id == from_node)):
+                
+                if from_hap.haplotype == to_hap.haplotype and from_hap.haplotype != "ambiguous":
+                    cis += 1
+                else:
+                    trans += 1
+        
+        return (cis, trans)
+    
+    def _calculate_hic_weight(self, cis_contacts: int, trans_contacts: int) -> float:
+        """Calculate overall Hi-C weight from contact counts."""
+        total = cis_contacts + trans_contacts
+        if total == 0:
+            return 0.0
+        
+        ratio = cis_contacts / (trans_contacts + 1)
+        contact_factor = min(1.0, total / 10.0)
+        
+        return ratio * contact_factor
+
+
+# ============================================================================
 #                    MAIN ENTRY POINTS
 # ============================================================================
 
@@ -937,4 +1328,8 @@ __all__ = [
     'HiCContactMap',
     'HiCJoinScore',
     'compute_hic_phase_and_support',
+    # Legacy structures from data_structures.py consolidation
+    'NodeHiCInfo',
+    'EdgeHiCInfo',
+    'HiCIntegrator',
 ]

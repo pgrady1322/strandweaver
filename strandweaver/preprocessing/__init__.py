@@ -2,13 +2,16 @@
 # -*- coding: utf-8 -*-
 
 """
-Read Correction Module for StrandWeaver.
+Preprocessing Module for StrandWeaver.
 
-Consolidated modules for improved usability:
+Comprehensive preprocessing pipeline including error correction, profiling, 
+read classification, and adaptive k-mer selection.
+
+Consolidated modules:
 - errorsmith_module.py: Technology-aware error correction
 - read_error_profiling_utility.py: Error profiling and k-mer analysis
-- adaptive_kmer.py: AI-powered adaptive k-mer selection
-- feature_extraction.py: Feature extraction for ML models
+- kweaver_module.py: K-Weaver AI-powered adaptive k-mer selector
+- read_classification.py: Read technology classification (moved from io_utils)
 
 Main Components:
     - BaseCorrector: Abstract base class for all correctors
@@ -16,7 +19,8 @@ Main Components:
     - Correction Strategies: K-mer, quality-aware, consensus algorithms
     - Technology-specific correctors: ONT, Illumina, PacBio, Ancient DNA
     - Error profiling and pattern analysis
-    - AI-powered k-mer selection
+    - AI-powered k-mer selection (K-Weaver)
+    - Read technology classification and metadata detection
     - Adapter detection and trimming
     - Visualization and reporting tools
 """
@@ -65,14 +69,42 @@ from .read_error_profiling_utility import (
     ErrorProfiler,
 )
 
-from .adaptive_kmer import (
-    AdaptiveKmerSelector,
+from .kweaver_module import (
+    # Feature extraction
+    FeatureExtractor,
+    ReadFeatures,
+    extract_features_from_file,
+    # K-mer prediction
+    KWeaverPredictor,
+    KmerPrediction,
+    # Backward compatibility
     AdaptiveKmerPredictor,
 )
 
-from .feature_extraction import (
-    FeatureExtractor,
-    ReadFeatures,
+from .read_classification_utility import (
+    # Technology types
+    ReadTechnology,
+    ReadRole,
+    ReadTypeProfile,
+    READ_PROFILES,
+    # Classification
+    classify_read_type,
+    get_read_profile,
+    infer_technology_from_length,
+    parse_technology,
+    validate_technology_specs,
+    auto_detect_technology,
+    detect_technologies,
+    format_technology_summary,
+    # Nanopore metadata
+    FlowCellType,
+    BasecallerType,
+    BasecallerAccuracy,
+    NanoporeMetadata,
+    parse_nanopore_metadata,
+    is_longbow_available,
+    detect_nanopore_metadata_with_longbow,
+    detect_from_fastq_headers,
 )
 
 __all__ = [
@@ -114,9 +146,33 @@ __all__ = [
     'KmerAnalyzer',
     'ErrorProfiler',
     
-    # AI-powered modules
-    'AdaptiveKmerSelector',
-    'AdaptiveKmerPredictor',
+    # AI-powered K-Weaver module
+    'KWeaverPredictor',
+    'KmerPrediction',
     'FeatureExtractor',
     'ReadFeatures',
+    'extract_features_from_file',
+    'AdaptiveKmerPredictor',  # Backward compatibility
+    
+    # Read technology classification (moved from io_utils)
+    'ReadTechnology',
+    'ReadRole',
+    'ReadTypeProfile',
+    'READ_PROFILES',
+    'classify_read_type',
+    'get_read_profile',
+    'infer_technology_from_length',
+    'parse_technology',
+    'validate_technology_specs',
+    'auto_detect_technology',
+    'detect_technologies',
+    'format_technology_summary',
+    'FlowCellType',
+    'BasecallerType',
+    'BasecallerAccuracy',
+    'NanoporeMetadata',
+    'parse_nanopore_metadata',
+    'is_longbow_available',
+    'detect_nanopore_metadata_with_longbow',
+    'detect_from_fastq_headers',
 ]

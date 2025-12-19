@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class DiploidDisentangleResult:
+class HaplotypeDetangleResult:
     """
     Result of diploid graph disentanglement.
     
@@ -228,7 +228,7 @@ class DisentanglerEngine:
         hic_edge_support: Optional[Dict] = None,
         regional_k_map: Optional[Dict] = None,
         ul_support_map: Optional[Dict] = None
-    ) -> DiploidDisentangleResult:
+    ) -> HaplotypeDetangleResult:
         """
         Disentangle diploid graph into haplotype A and B.
         
@@ -249,11 +249,11 @@ class DisentanglerEngine:
             ul_support_map: UL support
         
         Returns:
-            DiploidDisentangleResult
+            HaplotypeDetangleResult
         """
         self.logger.info("Starting diploid disentanglement")
         
-        result = DiploidDisentangleResult()
+        result = HaplotypeDetangleResult()
         
         # Step 1: Score all nodes
         node_scores = {}
@@ -332,7 +332,7 @@ class DisentanglerEngine:
         node_assignments: Dict[int, str],
         ai_annotations: Optional[Dict],
         hic_edge_support: Optional[Dict],
-        result: DiploidDisentangleResult
+        result: HaplotypeDetangleResult
     ) -> Dict[int, str]:
         """
         Propagate haplotype assignments through high-confidence edges.
@@ -405,7 +405,7 @@ class DisentanglerEngine:
         node_assignments: Dict[int, str],
         ai_annotations: Optional[Dict],
         hic_edge_support: Optional[Dict],
-        result: DiploidDisentangleResult
+        result: HaplotypeDetangleResult
     ):
         """Assign edges to haplotypes based on endpoints."""
         for edge_id, edge in graph.edges.items():
@@ -431,7 +431,7 @@ class DisentanglerEngine:
         self,
         graph,
         node_assignments: Dict[int, str],
-        result: DiploidDisentangleResult
+        result: HaplotypeDetangleResult
     ) -> List[Dict[str, Any]]:
         """
         Identify contiguous blocks of haplotype-specific sequence.
@@ -484,7 +484,7 @@ class DisentanglerEngine:
         
         return sorted(blocks, key=lambda b: b['size'], reverse=True)
     
-    def _compute_statistics(self, result: DiploidDisentangleResult) -> Dict[str, Any]:
+    def _compute_statistics(self, result: HaplotypeDetangleResult) -> Dict[str, Any]:
         """Compute summary statistics."""
         total_nodes = (
             len(result.hapA_nodes) + len(result.hapB_nodes) +
@@ -521,7 +521,7 @@ def disentangle_diploid_graph(
     ul_support_map: Optional[Dict] = None,
     min_confidence: float = 0.6,
     repeat_threshold: float = 0.5
-) -> DiploidDisentangleResult:
+) -> HaplotypeDetangleResult:
     """
     Main entry point for diploid graph disentanglement.
     
@@ -539,7 +539,7 @@ def disentangle_diploid_graph(
         repeat_threshold: Threshold for repeat classification
     
     Returns:
-        DiploidDisentangleResult with haplotype assignments
+        HaplotypeDetangleResult with haplotype assignments
     """
     engine = DisentanglerEngine(
         min_confidence=min_confidence,

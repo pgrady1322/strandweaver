@@ -843,7 +843,7 @@ def correct(ctx, input, technology, output, profile, pre_corrected, threads,
     if use_gpu:
         click.echo(f"  GPU acceleration: Requested (threshold={gpu_threshold} reads)")
         try:
-            from .utils.gpu_core import get_gpu_info
+            from .utils.hardware_management import get_gpu_info
             gpu_info = get_gpu_info()
             click.echo(f"    {gpu_info}")
         except ImportError:

@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from strandweaver.io import SeqRead, ReadTechnology
+from strandweaver.io_utils import SeqRead, ReadTechnology
 
 
 def test_quality_calculation():

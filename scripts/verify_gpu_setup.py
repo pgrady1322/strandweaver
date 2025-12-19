@@ -77,8 +77,8 @@ def check_cupy():
 def check_strandweaver_gpu():
     """Check StrandWeaver GPU components."""
     try:
-        from strandweaver.utils.gpu_core import GPUKmerCounter, get_gpu_info
-        from strandweaver.utils.gpu_core import (
+        from strandweaver.utils.hardware_management import GPUKmerCounter, get_gpu_info
+        from strandweaver.utils.hardware_management import (
             GPUGraphBuilder,
             GPUKmerExtractor,
             GPUSequenceAligner

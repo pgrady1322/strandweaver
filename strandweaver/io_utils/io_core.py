@@ -61,7 +61,7 @@ class SeqRead:
     def __post_init__(self):
         """Initialize computed fields."""
         # Import here to avoid circular dependency
-        from .technology_handling_core_module import ReadTechnology, classify_read_type
+        from ..preprocessing.read_classification_utility import ReadTechnology, classify_read_type
         
         # Set default technology if None
         if self.technology is None:
@@ -85,7 +85,7 @@ class SeqRead:
     @property
     def profile(self):
         """Get read type profile."""
-        from .technology_handling_core_module import get_read_profile
+        from ..preprocessing.read_classification_utility import get_read_profile
         return get_read_profile(self.technology)
     
     @property

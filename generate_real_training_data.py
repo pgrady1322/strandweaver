@@ -31,7 +31,7 @@ from strandweaver.assembly_core.illumina_olc_contig_module import ContigBuilder
 from strandweaver.assembly_core.dbg_engine_module import build_dbg_from_long_reads
 from strandweaver.io.fastq import read_fastq
 from strandweaver.io.read import SeqRead
-from strandweaver.read_correction.feature_extraction import FeatureExtractor
+from strandweaver.preprocessing.kweaver_module import FeatureExtractor
 
 
 def read_fastq_file(filepath, limit=None):
