@@ -2620,7 +2620,130 @@ class PathWeaver:
             self.logger.info("Misassembly detection enabled")
         else:
             self.logger.warning("Misassembly detector unavailable - assembly quality may be reduced")
+        
+        # Haplotype protection settings
+        self.variation_protection_threshold = 0.995  # Sequence identity threshold
+        self.never_collapse_heterozygous = True
+        self.preserve_all_haplotype_boundaries = True
+        self.next_node_id = max(graph.nodes.keys()) + 1 if graph.nodes else 1
 
+    # ========================================================================
+    #                    RESOLVE PATHS - MAIN PIPELINE INTERFACE
+    # ========================================================================
+    
+    def resolve_paths(self, graph, min_support: int = 2,
+                     phasing_info: Optional[Any] = None,
+                     edgewarden_scores: Optional[Dict] = None,
+                     read_data: Optional[Dict] = None,
+                     is_first_iteration: bool = True,
+                     preserve_variation: bool = True) -> Any:
+        """
+        Resolve path ambiguities and simplify graph topology (GRAPH STAYS GRAPH).
+        
+        This method performs graph simplification by:
+        1. Identifying branch points and ambiguous regions
+        2. Finding best paths through ambiguous regions
+        3. Merging unambiguous linear chains into unitigs
+        4. Removing low-confidence spurious branches
+        5. Preserving haplotype variation and real biology
+        
+        CRITICAL: This is GRAPH TOPOLOGY SIMPLIFICATION, not sequence extraction.
+        - Graph remains as graph (nodes + edges)
+        - Haplotype boundaries are HARD BOUNDARIES (never collapse across)
+        - SNP-level variation is PROTECTED (>99.5% identity threshold)
+        - Diploid structure maintained (both haplotypes kept)
+        - Only removes errors/artifacts, not real variation
+        
+        Args:
+            graph: DBGGraph or StringGraph to simplify
+            min_support: Minimum support for keeping paths
+            phasing_info: Optional phasing result for haplotype-aware resolution
+            edgewarden_scores: Optional pre-computed edge confidence scores
+            read_data: Optional alignment data for quality-based resolution
+            is_first_iteration: If True, use maximum variation protection
+            preserve_variation: If True, never collapse nodes with haplotype differences
+        
+        Returns:
+            Modified graph with simplified topology (still a graph object)
+        """
+        import time
+        start_time = time.time()
+        
+        self.logger.info("PathWeaver: Resolving graph paths")
+        self.logger.info(f"  Initial nodes: {len(graph.nodes)}")
+        self.logger.info(f"  Initial edges: {len(graph.edges)}")
+        self.logger.info(f"  Phasing-aware: {'Yes' if phasing_info else 'No'}")
+        self.logger.info(f"  First iteration: {'Yes' if is_first_iteration else 'No'}")
+        
+        # Adjust protection settings for first iteration
+        if is_first_iteration:
+            self.variation_protection_threshold = 0.995  # Very strict
+            self.never_collapse_heterozygous = True
+            self.preserve_all_haplotype_boundaries = True
+            self.logger.info("  Protection: MAXIMUM (first iteration)")
+        else:
+            self.variation_protection_threshold = 0.99  # Slightly relaxed
+            self.never_collapse_heterozygous = True
+            self.preserve_all_haplotype_boundaries = True
+            self.logger.info("  Protection: STANDARD (subsequent iteration)")
+        
+        # Track statistics
+        stats = {
+            'branch_points': 0,
+            'ambiguous_regions': 0,
+            'paths_resolved': 0,
+            'unitigs_created': 0,
+            'branches_removed': 0,
+            'variation_protected': 0,
+            'haplotype_boundaries_preserved': 0
+        }
+        
+        # Step 1: Identify branch points
+        branch_points = self._identify_branch_points(graph)
+        stats['branch_points'] = len(branch_points)
+        self.logger.info(f"  Branch points found: {len(branch_points)}")
+        
+        if not branch_points:
+            self.logger.info("  No branch points - graph is already linear")
+            return graph
+        
+        # Step 2: Extract ambiguous regions
+        ambiguous_regions = self._extract_ambiguous_regions(graph, branch_points)
+        stats['ambiguous_regions'] = len(ambiguous_regions)
+        self.logger.info(f"  Ambiguous regions: {len(ambiguous_regions)}")
+        
+        # Step 3: Resolve with haplotype protection
+        if phasing_info:
+            graph, region_stats = self._resolve_with_haplotype_protection(
+                graph, ambiguous_regions, phasing_info, edgewarden_scores, read_data, min_support
+            )
+        else:
+            graph, region_stats = self._resolve_conservatively(
+                graph, ambiguous_regions, edgewarden_scores, read_data, min_support
+            )
+        
+        # Merge statistics
+        stats.update(region_stats)
+        
+        # Step 4: Collapse linear chains (with variation protection)
+        graph, collapse_stats = self._collapse_linear_chains(
+            graph, phasing_info, preserve_variation
+        )
+        stats.update(collapse_stats)
+        
+        elapsed_time = time.time() - start_time
+        
+        # Log final statistics
+        self.logger.info("PathWeaver: Resolution complete")
+        self.logger.info(f"  Final nodes: {len(graph.nodes)} (reduced by {stats['unitigs_created']})")
+        self.logger.info(f"  Final edges: {len(graph.edges)} (removed {stats['branches_removed']})")
+        self.logger.info(f"  Paths resolved: {stats['paths_resolved']}")
+        self.logger.info(f"  Variation protected: {stats['variation_protected']} sites")
+        self.logger.info(f"  Haplotype boundaries preserved: {stats['haplotype_boundaries_preserved']}")
+        self.logger.info(f"  Resolution time: {elapsed_time:.2f}s")
+        
+        return graph
+    
     # ---------------------------------------------------------------------
     # Optional Inputs: Synteny Markers & Boundary Labels
     # ---------------------------------------------------------------------
@@ -2628,6 +2751,453 @@ class PathWeaver:
         """Update the validator's configuration thresholds and enabled rules."""
         self.validator.config = config
         self.logger.info("ValidationConfig updated for PathValidator")
+    
+    # ========================================================================
+    #                    GRAPH RESOLUTION HELPER METHODS
+    # ========================================================================
+    
+    def _identify_branch_points(self, graph) -> List[int]:
+        """Find nodes with multiple outgoing or incoming edges (branch points)."""
+        branch_points = []
+        
+        for node_id in graph.nodes:
+            out_degree = len(graph.out_edges.get(node_id, []))
+            in_degree = len(graph.in_edges.get(node_id, []))
+            
+            # Branch point if degree > 1
+            if out_degree > 1 or in_degree > 1:
+                branch_points.append(node_id)
+        
+        return branch_points
+    
+    def _extract_ambiguous_regions(self, graph, branch_points: List[int]) -> List[Set[int]]:
+        """Group nearby branch points into ambiguous regions."""
+        if not branch_points:
+            return []
+        
+        # Build regions by finding connected components of branch points
+        regions = []
+        visited = set()
+        
+        for branch_node in branch_points:
+            if branch_node in visited:
+                continue
+            
+            # BFS to find connected region
+            region = set()
+            queue = deque([branch_node])
+            
+            while queue:
+                node_id = queue.popleft()
+                if node_id in visited:
+                    continue
+                
+                visited.add(node_id)
+                region.add(node_id)
+                
+                # Add neighbors (limited depth to avoid whole graph)
+                for edge_id in graph.out_edges.get(node_id, []):
+                    if edge_id in graph.edges:
+                        neighbor = graph.edges[edge_id].to_id
+                        if neighbor in branch_points and neighbor not in visited:
+                            queue.append(neighbor)
+                
+                for edge_id in graph.in_edges.get(node_id, []):
+                    if edge_id in graph.edges:
+                        neighbor = graph.edges[edge_id].from_id
+                        if neighbor in branch_points and neighbor not in visited:
+                            queue.append(neighbor)
+            
+            if region:
+                regions.append(region)
+        
+        return regions
+    
+    def _resolve_with_haplotype_protection(
+        self, graph, ambiguous_regions, phasing_info, edgewarden_scores, read_data, min_support
+    ) -> Tuple[Any, Dict]:
+        """Resolve paths while maintaining diploid structure and protecting variation."""
+        stats = {
+            'paths_resolved': 0,
+            'branches_removed': 0,
+            'variation_protected': 0,
+            'haplotype_boundaries_preserved': 0
+        }
+        
+        for region_idx, region in enumerate(ambiguous_regions):
+            self.logger.debug(f"  Resolving region {region_idx + 1}/{len(ambiguous_regions)} ({len(region)} nodes)")
+            
+            # Check if region crosses haplotype boundaries
+            haplotypes_in_region = set()
+            for node_id in region:
+                hap = phasing_info.node_assignments.get(node_id)
+                if hap is not None:
+                    haplotypes_in_region.add(hap)
+            
+            if len(haplotypes_in_region) > 1:
+                # Region crosses haplotypes - PROTECT
+                stats['haplotype_boundaries_preserved'] += 1
+                stats['variation_protected'] += len(region)
+                self.logger.debug(f"    Region crosses {len(haplotypes_in_region)} haplotypes - PROTECTED")
+                continue
+            
+            # Resolve within single haplotype
+            graph, region_stat = self._resolve_single_region(
+                graph, region, edgewarden_scores, read_data, min_support, phasing_info
+            )
+            
+            stats['paths_resolved'] += region_stat.get('paths_resolved', 0)
+            stats['branches_removed'] += region_stat.get('branches_removed', 0)
+        
+        return graph, stats
+    
+    def _resolve_conservatively(
+        self, graph, ambiguous_regions, edgewarden_scores, read_data, min_support
+    ) -> Tuple[Any, Dict]:
+        """Resolve paths conservatively when no phasing info available."""
+        stats = {
+            'paths_resolved': 0,
+            'branches_removed': 0,
+            'variation_protected': 0,
+            'haplotype_boundaries_preserved': 0
+        }
+        
+        for region_idx, region in enumerate(ambiguous_regions):
+            self.logger.debug(f"  Resolving region {region_idx + 1}/{len(ambiguous_regions)} ({len(region)} nodes)")
+            
+            # Use conservative resolution (protect potential variation)
+            graph, region_stat = self._resolve_single_region(
+                graph, region, edgewarden_scores, read_data, min_support, phasing_info=None
+            )
+            
+            stats['paths_resolved'] += region_stat.get('paths_resolved', 0)
+            stats['branches_removed'] += region_stat.get('branches_removed', 0)
+        
+        return graph, stats
+    
+    def _resolve_single_region(
+        self, graph, region: Set[int], edgewarden_scores, read_data, min_support, phasing_info
+    ) -> Tuple[Any, Dict]:
+        """Resolve a single ambiguous region by finding best path."""
+        stats = {'paths_resolved': 0, 'branches_removed': 0}
+        
+        # Find entry and exit nodes
+        entry_nodes = []
+        exit_nodes = []
+        
+        for node_id in region:
+            # Entry: has incoming edges from outside region
+            for edge_id in graph.in_edges.get(node_id, []):
+                if edge_id in graph.edges:
+                    from_node = graph.edges[edge_id].from_id
+                    if from_node not in region:
+                        entry_nodes.append(node_id)
+                        break
+            
+            # Exit: has outgoing edges to outside region
+            for edge_id in graph.out_edges.get(node_id, []):
+                if edge_id in graph.edges:
+                    to_node = graph.edges[edge_id].to_id
+                    if to_node not in region:
+                        exit_nodes.append(node_id)
+                        break
+        
+        if not entry_nodes or not exit_nodes:
+            return graph, stats
+        
+        # Use existing path finding to get best paths
+        all_paths = []
+        for entry in entry_nodes[:3]:  # Limit to avoid combinatorial explosion
+            try:
+                paths = self.find_best_paths(
+                    start_node_id=entry,
+                    end_node_ids=set(exit_nodes),
+                    max_paths=5,
+                    edgewarden_scores=edgewarden_scores,
+                    use_gnn_primary=False,  # Use classical for stability
+                    long_range_two_pass=False
+                )
+                all_paths.extend(paths)
+            except Exception as e:
+                self.logger.debug(f"    Path finding failed for entry {entry}: {e}")
+                continue
+        
+        if not all_paths:
+            return graph, stats
+        
+        # Select best path by score
+        best_path = max(all_paths, key=lambda p: p.total_score)
+        
+        # Remove branches not in best path (if confidence is low)
+        edges_to_remove = []
+        for node_id in region:
+            for edge_id in list(graph.out_edges.get(node_id, [])):
+                if edge_id in graph.edges:
+                    edge = graph.edges[edge_id]
+                    # Check if edge is in best path
+                    edge_in_path = False
+                    for i in range(len(best_path.node_ids) - 1):
+                        if edge.from_id == best_path.node_ids[i] and edge.to_id == best_path.node_ids[i + 1]:
+                            edge_in_path = True
+                            break
+                    
+                    # Remove if not in path and low confidence
+                    if not edge_in_path:
+                        edge_confidence = edgewarden_scores.get((edge.from_id, edge.to_id), 0.5) if edgewarden_scores else 0.5
+                        if edge_confidence < 0.7:  # Conservative threshold
+                            edges_to_remove.append(edge_id)
+        
+        # Remove low-confidence alternative edges
+        for edge_id in edges_to_remove:
+            if edge_id in graph.edges:
+                edge = graph.edges[edge_id]
+                del graph.edges[edge_id]
+                if edge_id in graph.out_edges.get(edge.from_id, []):
+                    graph.out_edges[edge.from_id].remove(edge_id)
+                if edge_id in graph.in_edges.get(edge.to_id, []):
+                    graph.in_edges[edge.to_id].remove(edge_id)
+                stats['branches_removed'] += 1
+        
+        if edges_to_remove:
+            stats['paths_resolved'] += 1
+        
+        return graph, stats
+    
+    def _collapse_linear_chains(
+        self, graph, phasing_info, preserve_variation: bool
+    ) -> Tuple[Any, Dict]:
+        """Merge unambiguous linear chains into unitigs (with variation protection)."""
+        stats = {'unitigs_created': 0, 'variation_protected': 0}
+        
+        # Find linear chains
+        chains = self._find_linear_chains(graph)
+        
+        for chain in chains:
+            if len(chain) < 2:
+                continue
+            
+            # Check if chain can be collapsed (variation protection)
+            can_collapse = True
+            for i in range(len(chain) - 1):
+                node_a = graph.nodes.get(chain[i])
+                node_b = graph.nodes.get(chain[i + 1])
+                
+                if not self._can_collapse_nodes(node_a, node_b, phasing_info, preserve_variation):
+                    can_collapse = False
+                    stats['variation_protected'] += 1
+                    break
+            
+            if can_collapse:
+                # Merge chain into single unitig
+                graph = self._merge_chain_to_unitig(graph, chain)
+                stats['unitigs_created'] += 1
+        
+        return graph, stats
+    
+    def _find_linear_chains(self, graph) -> List[List[int]]:
+        """Find maximal linear chains (nodes with in_degree=1, out_degree=1)."""
+        visited = set()
+        chains = []
+        
+        for node_id in graph.nodes:
+            if node_id in visited:
+                continue
+            
+            # Check if linear (degree 1 in/out)
+            in_degree = len(graph.in_edges.get(node_id, []))
+            out_degree = len(graph.out_edges.get(node_id, []))
+            
+            if in_degree == 1 and out_degree == 1:
+                # Extend chain forward and backward
+                chain = self._extend_chain(graph, node_id, visited)
+                if len(chain) >= 2:
+                    chains.append(chain)
+        
+        return chains
+    
+    def _extend_chain(self, graph, start_node: int, visited: Set[int]) -> List[int]:
+        """Extend linear chain from start node."""
+        chain = [start_node]
+        visited.add(start_node)
+        
+        # Extend forward
+        current = start_node
+        while True:
+            out_edges = graph.out_edges.get(current, [])
+            if len(out_edges) != 1:
+                break
+            
+            edge_id = next(iter(out_edges))
+            if edge_id not in graph.edges:
+                break
+            
+            next_node = graph.edges[edge_id].to_id
+            if next_node in visited:
+                break
+            
+            # Check if next node is also linear
+            if len(graph.in_edges.get(next_node, [])) != 1:
+                break
+            if len(graph.out_edges.get(next_node, [])) > 1:
+                break
+            
+            chain.append(next_node)
+            visited.add(next_node)
+            current = next_node
+        
+        # Extend backward
+        current = start_node
+        while True:
+            in_edges = graph.in_edges.get(current, [])
+            if len(in_edges) != 1:
+                break
+            
+            edge_id = next(iter(in_edges))
+            if edge_id not in graph.edges:
+                break
+            
+            prev_node = graph.edges[edge_id].from_id
+            if prev_node in visited:
+                break
+            
+            # Check if prev node is also linear
+            if len(graph.out_edges.get(prev_node, [])) != 1:
+                break
+            if len(graph.in_edges.get(prev_node, [])) > 1:
+                break
+            
+            chain.insert(0, prev_node)
+            visited.add(prev_node)
+            current = prev_node
+        
+        return chain
+    
+    def _can_collapse_nodes(self, node_a, node_b, phasing_info, preserve_variation: bool) -> bool:
+        """Check if two nodes can be merged (variation protection)."""
+        if not node_a or not node_b:
+            return False
+        
+        # Check 1: Haplotype boundary protection
+        if phasing_info and self.preserve_all_haplotype_boundaries:
+            haplotype_a = phasing_info.node_assignments.get(node_a.id)
+            haplotype_b = phasing_info.node_assignments.get(node_b.id)
+            
+            if haplotype_a is not None and haplotype_b is not None:
+                if haplotype_a != haplotype_b:
+                    return False  # HARD BOUNDARY
+        
+        # Check 2: SNP protection (sequence variation)
+        if preserve_variation and self._has_sequence_variation(node_a, node_b):
+            return False
+        
+        # Check 3: CNV protection (coverage variation)
+        if hasattr(node_a, 'coverage') and hasattr(node_b, 'coverage'):
+            if node_a.coverage > 0 and node_b.coverage > 0:
+                coverage_ratio = node_a.coverage / node_b.coverage
+                if coverage_ratio < 0.5 or coverage_ratio > 2.0:
+                    return False  # Copy number variation
+        
+        return True
+    
+    def _has_sequence_variation(self, node_a, node_b) -> bool:
+        """Detect sequence variation between nodes (SNPs, indels)."""
+        seq_a = getattr(node_a, 'seq', '')
+        seq_b = getattr(node_b, 'seq', '')
+        
+        if not seq_a or not seq_b:
+            return False
+        
+        # Compare overlap region
+        overlap_len = min(len(seq_a), len(seq_b), 100)  # Check first 100bp
+        
+        if overlap_len < 10:
+            return False
+        
+        # Calculate identity
+        matches = sum(1 for i in range(overlap_len) if seq_a[i] == seq_b[i])
+        identity = matches / overlap_len
+        
+        # Strict threshold: protect if < 99.5% identity
+        if identity < self.variation_protection_threshold:
+            return True  # Variation detected
+        
+        return False
+    
+    def _merge_chain_to_unitig(self, graph, chain: List[int]):
+        """Merge linear chain into single unitig node."""
+        # Create new unitig node
+        unitig_id = self.next_node_id
+        self.next_node_id += 1
+        
+        # Concatenate sequences
+        sequences = []
+        total_length = 0
+        total_coverage = 0
+        
+        for node_id in chain:
+            node = graph.nodes.get(node_id)
+            if node:
+                seq = getattr(node, 'seq', '')
+                sequences.append(seq)
+                total_length += len(seq)
+                total_coverage += getattr(node, 'coverage', 0)
+        
+        # Create unitig (use same type as original nodes)
+        first_node = graph.nodes[chain[0]]
+        unitig_seq = ''.join(sequences)
+        avg_coverage = total_coverage / len(chain) if chain else 0
+        
+        # Create new node with merged data
+        # Use the node class from the graph
+        node_class = type(first_node)
+        unitig_node = node_class(
+            id=unitig_id,
+            seq=unitig_seq,
+            coverage=avg_coverage,
+            length=total_length
+        )
+        
+        # Add unitig to graph
+        graph.nodes[unitig_id] = unitig_node
+        
+        # Update edges: redirect to unitig
+        # Incoming edges to first node → point to unitig
+        first_node_id = chain[0]
+        for edge_id in list(graph.in_edges.get(first_node_id, [])):
+            if edge_id in graph.edges:
+                edge = graph.edges[edge_id]
+                edge.to_id = unitig_id
+                graph.in_edges.setdefault(unitig_id, set()).add(edge_id)
+        
+        # Outgoing edges from last node → originate from unitig
+        last_node_id = chain[-1]
+        for edge_id in list(graph.out_edges.get(last_node_id, [])):
+            if edge_id in graph.edges:
+                edge = graph.edges[edge_id]
+                edge.from_id = unitig_id
+                graph.out_edges.setdefault(unitig_id, set()).add(edge_id)
+        
+        # Remove old nodes and edges
+        for node_id in chain:
+            if node_id in graph.nodes:
+                del graph.nodes[node_id]
+            if node_id in graph.in_edges:
+                del graph.in_edges[node_id]
+            if node_id in graph.out_edges:
+                del graph.out_edges[node_id]
+        
+        # Remove internal edges in chain
+        for i in range(len(chain) - 1):
+            from_id, to_id = chain[i], chain[i + 1]
+            edges_to_remove = []
+            for edge_id in graph.edges:
+                edge = graph.edges[edge_id]
+                if edge.from_id == from_id and edge.to_id == to_id:
+                    edges_to_remove.append(edge_id)
+            for edge_id in edges_to_remove:
+                del graph.edges[edge_id]
+        
+        return graph
 
     def _strict_config_from(self, config: ValidationConfig) -> ValidationConfig:
         """Clone a config and force all rules to strict (clears rule_modes)."""

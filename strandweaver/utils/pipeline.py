@@ -42,6 +42,7 @@ from ..assembly_core.string_graph_engine_module import (
     build_string_graph_from_dbg_and_ul,
     StringGraph,
     ULAnchor,
+    LongReadOverlay,
 )
 from ..assembly_core.illumina_olc_contig_module import ContigBuilder
 from ..assembly_core.dbg_engine_module import (
@@ -49,6 +50,11 @@ from ..assembly_core.dbg_engine_module import (
     KmerNode,
     KmerEdge,
 )
+from ..assembly_core.edgewarden_module import EdgeWarden
+from ..assembly_core.pathweaver_module import PathWeaver
+from ..assembly_core.haplotype_detangler_module import HaplotypeDetangler
+from ..assembly_core.threadcompass_module import ThreadCompass
+from ..assembly_core.svscribe_module import SVScribe
 
 
 # ============================================================================
@@ -254,6 +260,7 @@ class PipelineOrchestrator:
             'completed_steps': [],
             'read_files': config['runtime']['reads'],  # Store paths, not reads
             'technologies': config['runtime']['technologies'],
+            'kmer_prediction': None,  # K-Weaver predictions for pipeline stages
             'corrected_files': {},  # {technology: corrected_file_path}
             'assembly_result': None,
             'final_contigs': None,
@@ -318,7 +325,9 @@ class PipelineOrchestrator:
     
     def _execute_step(self, step: str):
         """Execute a single pipeline step."""
-        if step == 'profile':
+        if step == 'kweaver':
+            self._step_kweaver()
+        elif step == 'profile':
             self._step_profile()
         elif step == 'correct':
             self._step_correct()
@@ -329,9 +338,61 @@ class PipelineOrchestrator:
         else:
             raise ValueError(f"Unknown step: {step}")
     
+    def _step_kweaver(self):
+        """K-Weaver: Predict optimal k-mer sizes for all pipeline stages."""
+        self.logger.info("Running K-Weaver k-mer prediction...")
+        
+        from ..preprocessing import KWeaverPredictor, FeatureExtractor
+        
+        # Check if AI models should be used
+        use_ai = self.config['ai']['enabled'] and \
+                 self.config['ai']['correction'].get('adaptive_kmer', {}).get('enabled', False)
+        
+        # Initialize K-Weaver
+        predictor = KWeaverPredictor(use_ml=use_ai)
+        
+        # Extract features from first input file (representative sample)
+        first_file = Path(self.state['read_files'][0])
+        self.logger.info(f"  Extracting features from: {first_file.name}")
+        
+        extractor = FeatureExtractor()
+        features = extractor.extract_from_file(
+            first_file,
+            sample_size=min(100000, self.config['profiling']['sample_size'])
+        )
+        
+        # Predict optimal k-mers for all stages
+        kmer_prediction = predictor.predict(features)
+        
+        # Log predictions
+        self.logger.info("✓ K-mer predictions complete:")
+        self.logger.info(f"  DBG construction: k={kmer_prediction.dbg_k} (confidence: {kmer_prediction.dbg_confidence:.2f})")
+        self.logger.info(f"  UL overlaps: k={kmer_prediction.ul_overlap_k} (confidence: {kmer_prediction.ul_overlap_confidence:.2f})")
+        self.logger.info(f"  Extension: k={kmer_prediction.extension_k} (confidence: {kmer_prediction.extension_confidence:.2f})")
+        self.logger.info(f"  Polish: k={kmer_prediction.polish_k} (confidence: {kmer_prediction.polish_confidence:.2f})")
+        
+        if kmer_prediction.reasoning:
+            self.logger.info(f"  Reasoning: {kmer_prediction.reasoning}")
+        
+        # Save predictions to file
+        kmer_path = self.output_dir / "kmer_predictions.json"
+        with open(kmer_path, 'w') as f:
+            import json
+            json.dump(kmer_prediction.to_dict(), f, indent=2)
+        
+        # Store in state for use throughout pipeline
+        self.state['kmer_prediction'] = kmer_prediction
+        self.logger.info(f"  Saved to: {kmer_path}")
+    
     def _step_profile(self):
         """Error profiling step."""
         self.logger.info("Profiling sequencing errors...")
+        
+        # Get k-mer prediction from K-Weaver (if available)
+        kmer_prediction = self.state.get('kmer_prediction')
+        profile_k = kmer_prediction.dbg_k if kmer_prediction else 21  # Default fallback
+        
+        self.logger.info(f"  Using k={profile_k} for error profiling (from K-Weaver)")
         
         # Sample reads from files (streaming) - don't load all into memory
         sample_size = self.config['profiling']['sample_size']
@@ -360,8 +421,8 @@ class PipelineOrchestrator:
         
         self.logger.info(f"Profiling {len(sampled_reads)} reads (sampled from {total_reads:,} total)")
         
-        # Run profiler
-        profiler = ErrorProfiler()
+        # Run profiler with K-Weaver k-mer size
+        profiler = ErrorProfiler(k=profile_k)
         profile = profiler.profile_errors(
             sampled_reads,
             detect_ancient=self.config['profiling']['ancient_dna']['detect_damage']
@@ -387,6 +448,9 @@ class PipelineOrchestrator:
         use_ai = self.config['ai']['enabled']
         ai_models = self._load_ai_models() if use_ai else None
         
+        # Get K-Weaver k-mer predictions
+        kmer_prediction = self.state.get('kmer_prediction')
+        
         # Process each input file independently by technology
         # This minimizes read combining/separating operations
         technologies = self.state['technologies']
@@ -395,24 +459,35 @@ class PipelineOrchestrator:
         for i, (reads_file, tech) in enumerate(zip(read_files, technologies)):
             self.logger.info(f"\n  Processing file {i+1}/{len(read_files)}: {Path(reads_file).name} ({tech})")
             
-            # Select technology-specific corrector
+            # Select technology-specific corrector with K-Weaver k-mer
             if tech == 'illumina':
+                # Use polish_k for Illumina correction (precision focus)
+                correction_k = kmer_prediction.polish_k if kmer_prediction else self.config['correction']['illumina']['kmer_size']
                 corrector = IlluminaCorrector(
-                    kmer_size=self.config['correction']['illumina']['kmer_size'],
+                    kmer_size=correction_k,
                     ml_k_model=ai_models.get('adaptive_kmer') if use_ai else None
                 )
+                self.logger.info(f"    Using k={correction_k} for Illumina correction")
             elif tech == 'ancient':
                 corrector = AncientDNACorrector(
                     ml_damage_model=ai_models.get('base_error_classifier') if use_ai else None
                 )
             elif tech == 'ont' or tech == 'ont_ultralong':
+                # Use extension_k for ONT correction (balance accuracy/length)
+                correction_k = kmer_prediction.extension_k if kmer_prediction else 41
                 corrector = ONTCorrector(
+                    kmer_size=correction_k,
                     ml_error_model=ai_models.get('base_error_classifier') if use_ai else None
                 )
+                self.logger.info(f"    Using k={correction_k} for ONT correction")
             elif tech == 'pacbio':
+                # Use polish_k for PacBio correction (high precision)
+                correction_k = kmer_prediction.polish_k if kmer_prediction else 55
                 corrector = PacBioCorrector(
+                    kmer_size=correction_k,
                     ml_error_model=ai_models.get('base_error_classifier') if use_ai else None
                 )
+                self.logger.info(f"    Using k={correction_k} for PacBio correction")
             else:
                 # Auto-detect or unknown - use generic
                 corrector = IlluminaCorrector()
@@ -477,6 +552,9 @@ class PipelineOrchestrator:
                 'r2': self.config['runtime'].get('hic_r2')
             }
         
+        # Get K-Weaver k-mer predictions for assembly
+        kmer_prediction = self.state.get('kmer_prediction')
+        
         # Run technology-specific assembly pipeline
         # Pass file paths instead of loaded reads
         assembly_result = self._run_assembly_pipeline(
@@ -485,6 +563,7 @@ class PipelineOrchestrator:
             long_read_files=long_read_files,
             ul_read_files=ul_read_files,
             hic_data=hic_data,
+            kmer_prediction=kmer_prediction,
             ml_k_model=ai_models.get('adaptive_kmer') if use_ai else None
         )
         
@@ -530,6 +609,7 @@ class PipelineOrchestrator:
         long_read_files: Optional[List[str]] = None,
         ul_read_files: Optional[List[str]] = None,
         hic_data: Optional[Any] = None,
+        kmer_prediction: Optional[Any] = None,
         ml_k_model: Optional[Any] = None
     ) -> AssemblyResult:
         """
@@ -607,28 +687,40 @@ class PipelineOrchestrator:
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
         """
-        Illumina pipeline: OLC → DBG → [String Graph if UL] → Hi-C.
+        Illumina pipeline with correct module ordering.
         
-        Flow:
-        1. Use OLC to generate artificial long reads (streaming from files)
-        2. Build DBG from artificial long reads
-        3. Build string graph IF UL reads available (always follows DBG)
-        4. Scaffold with Hi-C (if available)
+        CORRECT FLOW:
+        1. OLC → artificial long reads
+        2. DBG engine → raw graph
+        3. EdgeWarden → filter low-quality edges
+        4. PathWeaver → select optimal paths
+        5. String Graph engine → UL overlay (if UL reads present)
+        6. ThreadCompass → route UL reads (if UL reads present)
+        7. Hi-C scaffolding → proximity-guided scaffolds
+        8. Haplotype Detangler → phase the graph
+        9. Iteration cycle (EdgeWarden → PathWeaver → String Graph → ThreadCompass)
+        10. SVScribe → detect structural variants
+        11. Finalize → extract contigs/scaffolds
+        
+        NOTE: Haplotype Detangler runs AFTER first complete iteration, not before.
         """
-        self.logger.info("Running Illumina pipeline: OLC → DBG → String Graph → Hi-C")
+        self.logger.info("Running Illumina pipeline: OLC → DBG → EdgeWarden → PathWeaver → String Graph → ThreadCompass → Hi-C → Phasing → Iteration → SVScribe")
         
         result = AssemblyResult(stats={'read_type': 'illumina'})
         
-        # Step 1: OLC assembly to generate artificial long reads
-        if olc_long_reads is None:
-            self.logger.info("Running OLC to generate artificial long reads")
-            olc_long_reads = self._run_olc(corrected_reads)
-            result.stats['olc_contigs'] = len(olc_long_reads)
-        else:
-            self.logger.info(f"Using {len(olc_long_reads)} pre-computed OLC contigs")
+        # Step 1: OLC assembly to generate artificial long reads from Illumina files
+        # NOTE: For OLC, we load Illumina reads into memory (they're short, OLC output is smaller)
+        self.logger.info("Step 1: Running OLC to generate artificial long reads")
+        illumina_reads = []
+        if illumina_files:
+            for illumina_file in illumina_files:
+                illumina_reads.extend(self._read_file_streaming(Path(illumina_file)))
         
-        # Step 2: Build DBG from artificial long reads
-        self.logger.info("Building DBG from OLC-derived long reads")
+        olc_long_reads = self._run_olc(illumina_reads) if illumina_reads else []
+        result.stats['olc_contigs'] = len(olc_long_reads)
+        
+        # Step 2: Build DBG from artificial long reads (NO phasing yet)
+        self.logger.info("Step 2: Building DBG from OLC-derived long reads")
         base_k = self.config.get('dbg_k', 31)
         min_coverage = self.config.get('min_coverage', 2)
         
@@ -641,11 +733,31 @@ class PipelineOrchestrator:
         result.stats['dbg_nodes'] = len(result.dbg.nodes)
         result.stats['dbg_edges'] = len(result.dbg.edges)
         
-        # Step 3: Build string graph
-        if ul_reads or ul_anchors:
-            self.logger.info("Building string graph with UL overlay")
-            if ul_anchors is None:
-                ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
+        # Step 3: EdgeWarden - Filter low-quality edges
+        self.logger.info("Step 3: Applying EdgeWarden to filter edges")
+        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
+        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        result.dbg = edge_warden.filter_graph(result.dbg)
+        result.stats['edges_after_warden'] = len(result.dbg.edges)
+        
+        # Step 4: PathWeaver - Select optimal paths through graph
+        self.logger.info("Step 4: Applying PathWeaver for path selection")
+        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
+        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        result.dbg = path_weaver.resolve_paths(result.dbg)
+        result.stats['paths_selected'] = path_weaver.get_path_count()
+        
+        # Step 5: Build string graph (if UL reads available)
+        # Load UL reads from files if present
+        ul_reads = []
+        if ul_read_files:
+            self.logger.info("Step 5: Loading UL reads for string graph overlay")
+            for ul_file in ul_read_files:
+                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+        
+        if ul_reads:
+            self.logger.info("Step 5: Building string graph with UL overlay")
+            ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
             
             result.string_graph = build_string_graph_from_dbg_and_ul(
                 result.dbg,
@@ -653,45 +765,155 @@ class PipelineOrchestrator:
                 min_support=self.config.get('min_ul_support', 2)
             )
             result.stats['string_edges'] = len(result.string_graph.edges)
+            
+            # Step 6: ThreadCompass - Route UL reads through graph
+            self.logger.info("Step 6: Applying ThreadCompass for UL routing")
+            use_ul_ai = self.config.get('assembly', {}).get('string_graph', {}).get('use_ul_routing_ai', True)
+            thread_compass = ThreadCompass(use_ai=use_ul_ai and self.config['ai']['enabled'])
+            result.string_graph = thread_compass.route_ul_reads(
+                result.string_graph,
+                ul_reads  # Already loaded above
+            )
+            result.stats['ul_reads_routed'] = thread_compass.get_routed_count()
         else:
-            self.logger.info("No UL reads; skipping string graph overlay")
+            self.logger.info("Step 5-6: No UL reads; skipping string graph overlay and ThreadCompass")
+            thread_compass = None  # For iteration cycle
         
-        # Step 4: Extract contigs from graph
+        # Step 7: Hi-C proximity edge addition (if available)
+        if hic_data:
+            self.logger.info("Step 7: Adding Hi-C proximity edges to graph")
+            # Hi-C adds long-range connectivity edges to the graph
+            # NO contig extraction - work directly on graph structure
+            graph_to_annotate = result.string_graph or result.dbg
+            result.dbg = self._add_hic_edges_to_graph(graph_to_annotate, hic_data)
+            if result.string_graph:
+                result.string_graph.dbg = result.dbg  # Update underlying DBG
+            result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
+            result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
+        
+        # Step 8: Haplotype Detangler - Phase the graph (AFTER first iteration)
+        # Uses Hi-C connectivity clusters from proximity edges already in graph
+        self.logger.info("Step 8: Applying Haplotype Detangler for phasing")
+        use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
+        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        
+        graph_to_phase = result.string_graph or result.dbg
+        phasing_result = haplotype_detangler.phase_graph(
+            graph_to_phase,
+            use_hic_edges=True  # Hi-C edges already integrated into graph
+        )
+        result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
+        result.stats['phasing_confidence'] = phasing_result.confidence
+        
+        # Step 9: Iteration cycle (refine graph with phasing information)
+        max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
+        # Reduce iterations if AI enabled (more accurate per iteration)
+        if self.config['ai']['enabled']:
+            max_iterations = min(max_iterations, 2)
+        
+        self.logger.info(f"Step 9: Running {max_iterations} refinement iterations")
+        for iteration in range(max_iterations):
+            self.logger.info(f"  Iteration {iteration + 1}/{max_iterations}")
+            
+            # Re-apply EdgeWarden with phasing context
+            result.dbg = edge_warden.filter_graph(
+                result.dbg,
+                phasing_info=phasing_result
+            )
+            
+            # Re-apply PathWeaver with phasing context
+            result.dbg = path_weaver.resolve_paths(
+                result.dbg,
+                phasing_info=phasing_result
+            )
+            
+            # Rebuild string graph if UL reads present
+            if ul_reads:
+                result.string_graph = build_string_graph_from_dbg_and_ul(
+                    result.dbg,
+                    ul_anchors,
+                    min_support=self.config.get('min_ul_support', 2)
+                )
+                
+                # Re-route UL reads
+                if thread_compass:  # Only if ThreadCompass was initialized
+                    result.string_graph = thread_compass.route_ul_reads(
+                        result.string_graph,
+                        ul_reads,
+                        phasing_info=phasing_result
+                    )
+            
+            result.stats[f'iteration_{iteration + 1}_edges'] = len(result.dbg.edges)
+        
+        # Step 10: SVScribe - Detect structural variants
+        # Distinguishes sequence evidence (DBG/UL) vs proximity evidence (Hi-C edges)
+        self.logger.info("Step 10: Running SVScribe for structural variant detection")
+        use_sv_ai = self.config.get('assembly', {}).get('sv_detection', {}).get('use_sv_ai', True)
+        sv_scribe = SVScribe(use_ai=use_sv_ai and self.config['ai']['enabled'])
+        
+        sv_calls = sv_scribe.detect_svs(
+            graph=result.string_graph or result.dbg,
+            ul_routes=thread_compass.get_routes() if (thread_compass and ul_reads) else None,
+            distinguish_edge_types=True,  # Separate sequence vs Hi-C evidence
+            phasing_info=phasing_result
+        )
+        result.stats['sv_calls'] = len(sv_calls)
+        result.stats['sv_types'] = sv_scribe.get_sv_type_counts()
+        
+        # Step 11: Extract final contigs from refined graph
+        self.logger.info("Step 11: Extracting final contigs from refined graph")
         result.contigs = self._extract_contigs_from_graph(
             result.string_graph or result.dbg
         )
         result.stats['num_contigs'] = len(result.contigs)
         
-        # Step 5: Hi-C scaffolding (if available)
+        # Step 12: Build scaffolds by traversing graph with Hi-C edge priority
         if hic_data:
-            self.logger.info("Running Hi-C scaffolding")
-            result.scaffolds = self._run_hic_scaffolding(result.contigs, hic_data)
+            self.logger.info("Step 12: Building scaffolds from graph (prioritizing Hi-C edges)")
+            result.scaffolds = self._extract_scaffolds_from_graph(
+                result.string_graph or result.dbg,
+                prefer_hic_edges=True,  # Follow Hi-C edges for long-range connections
+                phasing_info=phasing_result  # Haplotype-aware scaffolding
+            )
             result.stats['num_scaffolds'] = len(result.scaffolds)
+            result.stats['scaffold_n50'] = self._calculate_n50([len(s.seq) for s in result.scaffolds])
         
         return result
     
     def _run_hifi_pipeline(
         self,
-        hifi_reads: List[SeqRead],
-        ul_reads: Optional[List[SeqRead]],
-        ul_anchors: Optional[List[ULAnchor]],
+        hifi_read_files: Optional[List[str]],
+        ul_read_files: Optional[List[str]],
         hic_data: Optional[Any],
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
         """
-        HiFi pipeline: DBG → [String Graph if UL] → Hi-C.
+        HiFi pipeline with correct module ordering.
         
-        Flow:
-        1. Build DBG directly from HiFi reads (skip OLC)
-        2. Build string graph IF UL reads available (always follows DBG)
-        3. Scaffold with Hi-C (if available)
+        CORRECT FLOW:
+        1. DBG engine → raw graph (skip OLC for HiFi)
+        2. EdgeWarden → filter low-quality edges
+        3. PathWeaver → select optimal paths
+        4. String Graph engine → UL overlay (if UL reads present)
+        5. ThreadCompass → route UL reads (if UL reads present)
+        6. Hi-C scaffolding → proximity-guided scaffolds
+        7. Haplotype Detangler → phase the graph
+        8. Iteration cycle (EdgeWarden → PathWeaver → String Graph → ThreadCompass)
+        9. SVScribe → detect structural variants
+        10. Finalize → extract contigs/scaffolds
         """
-        self.logger.info("Running HiFi pipeline: DBG → String Graph → Hi-C")
+        self.logger.info("Running HiFi pipeline: DBG → EdgeWarden → PathWeaver → String Graph → ThreadCompass → Hi-C → Phasing → Iteration → SVScribe")
         
         result = AssemblyResult(stats={'read_type': 'hifi'})
         
-        # Step 1: Build DBG from HiFi reads
-        self.logger.info(f"Building DBG from {len(hifi_reads)} HiFi reads")
+        # Step 1: Load HiFi reads from files and build DBG
+        hifi_reads = []
+        if hifi_read_files:
+            self.logger.info(f"Step 1: Loading HiFi reads from {len(hifi_read_files)} files")
+            for hifi_file in hifi_read_files:
+                hifi_reads.extend(self._read_file_streaming(Path(hifi_file)))
+        
+        self.logger.info(f"Step 1: Building DBG from {len(hifi_reads)} HiFi reads")
         base_k = self.config.get('dbg_k', 51)  # Higher k for HiFi
         min_coverage = self.config.get('min_coverage', 2)
         
@@ -704,11 +926,31 @@ class PipelineOrchestrator:
         result.stats['dbg_nodes'] = len(result.dbg.nodes)
         result.stats['dbg_edges'] = len(result.dbg.edges)
         
-        # Step 2: Build string graph
-        if ul_reads or ul_anchors:
-            self.logger.info("Building string graph with UL overlay")
-            if ul_anchors is None:
-                ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
+        # Step 2: EdgeWarden - Filter low-quality edges
+        self.logger.info("Step 2: Applying EdgeWarden to filter edges")
+        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
+        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        result.dbg = edge_warden.filter_graph(result.dbg)
+        result.stats['edges_after_warden'] = len(result.dbg.edges)
+        
+        # Step 3: PathWeaver - Select optimal paths through graph
+        self.logger.info("Step 3: Applying PathWeaver for path selection")
+        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
+        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        result.dbg = path_weaver.resolve_paths(result.dbg)
+        result.stats['paths_selected'] = path_weaver.get_path_count()
+        
+        # Step 4: Build string graph (if UL reads available)
+        # Load UL reads from files if present
+        ul_reads = []
+        if ul_read_files:
+            self.logger.info("Step 4: Loading UL reads for string graph overlay")
+            for ul_file in ul_read_files:
+                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+        
+        if ul_reads:
+            self.logger.info("Step 4: Building string graph with UL overlay")
+            ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
             
             result.string_graph = build_string_graph_from_dbg_and_ul(
                 result.dbg,
@@ -716,43 +958,137 @@ class PipelineOrchestrator:
                 min_support=self.config.get('min_ul_support', 2)
             )
             result.stats['string_edges'] = len(result.string_graph.edges)
+            
+            # Step 5: ThreadCompass - Route UL reads through graph
+            self.logger.info("Step 5: Applying ThreadCompass for UL routing")
+            use_ul_ai = self.config.get('assembly', {}).get('string_graph', {}).get('use_ul_routing_ai', True)
+            thread_compass = ThreadCompass(use_ai=use_ul_ai and self.config['ai']['enabled'])
+            result.string_graph = thread_compass.route_ul_reads(
+                result.string_graph,
+                ul_reads  # Already loaded above
+            )
+            result.stats['ul_reads_routed'] = thread_compass.get_routed_count()
+        else:
+            self.logger.info("Step 4-5: No UL reads; skipping string graph overlay and ThreadCompass")
+            thread_compass = None  # For iteration cycle
         
-        # Step 3: Extract contigs
+        # Step 6: Hi-C proximity edge addition (if available)
+        if hic_data:
+            self.logger.info("Step 6: Adding Hi-C proximity edges to graph")
+            graph_to_annotate = result.string_graph or result.dbg
+            result.dbg = self._add_hic_edges_to_graph(graph_to_annotate, hic_data)
+            if result.string_graph:
+                result.string_graph.dbg = result.dbg
+            result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
+            result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
+        
+        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters (HiFi)
+        self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
+        use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
+        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        
+        graph_to_phase = result.string_graph or result.dbg
+        phasing_result = haplotype_detangler.phase_graph(
+            graph_to_phase,
+            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+        )
+        result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
+        result.stats['phasing_confidence'] = phasing_result.confidence
+        
+        # Step 8: Iteration cycle (refine graph with phasing information)
+        max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
+        if self.config['ai']['enabled']:
+            max_iterations = min(max_iterations, 2)
+        
+        self.logger.info(f"Step 8: Running {max_iterations} refinement iterations")
+        for iteration in range(max_iterations):
+            self.logger.info(f"  Iteration {iteration + 1}/{max_iterations}")
+            
+            result.dbg = edge_warden.filter_graph(result.dbg, phasing_info=phasing_result)
+            result.dbg = path_weaver.resolve_paths(result.dbg, phasing_info=phasing_result)
+            
+            if ul_reads:
+                result.string_graph = build_string_graph_from_dbg_and_ul(
+                    result.dbg, ul_anchors,
+                    min_support=self.config.get('min_ul_support', 2)
+                )
+                if thread_compass:  # Only if ThreadCompass was initialized
+                    result.string_graph = thread_compass.route_ul_reads(
+                        result.string_graph,
+                        ul_reads,
+                        phasing_info=phasing_result
+                    )
+            
+            result.stats[f'iteration_{iteration + 1}_edges'] = len(result.dbg.edges)
+        
+        # Step 9: SVScribe - Detect structural variants (distinguish edge types - HiFi)
+        self.logger.info("Step 9: Running SVScribe for structural variant detection")
+        use_sv_ai = self.config.get('assembly', {}).get('sv_detection', {}).get('use_sv_ai', True)
+        sv_scribe = SVScribe(use_ai=use_sv_ai and self.config['ai']['enabled'])
+        
+        sv_calls = sv_scribe.detect_svs(
+            graph=result.string_graph or result.dbg,
+            ul_routes=thread_compass.get_routes() if (thread_compass and ul_reads) else None,
+            distinguish_edge_types=True,  # Sequence vs Hi-C evidence
+            phasing_info=phasing_result
+        )
+        result.stats['sv_calls'] = len(sv_calls)
+        result.stats['sv_types'] = sv_scribe.get_sv_type_counts()
+        
+        # Step 10: Extract final contigs from refined graph (HiFi)
+        self.logger.info("Step 10: Extracting final contigs from refined graph")
         result.contigs = self._extract_contigs_from_graph(
             result.string_graph or result.dbg
         )
         result.stats['num_contigs'] = len(result.contigs)
         
-        # Step 4: Hi-C scaffolding
+        # Step 11: Build scaffolds prioritizing Hi-C edges (HiFi)
         if hic_data:
-            self.logger.info("Running Hi-C scaffolding")
-            result.scaffolds = self._run_hic_scaffolding(result.contigs, hic_data)
+            self.logger.info("Step 11: Building scaffolds from graph (prioritizing Hi-C edges)")
+            result.scaffolds = self._extract_scaffolds_from_graph(
+                result.string_graph or result.dbg,
+                prefer_hic_edges=True,
+                phasing_info=phasing_result
+            )
             result.stats['num_scaffolds'] = len(result.scaffolds)
+            result.stats['scaffold_n50'] = self._calculate_n50([len(s.seq) for s in result.scaffolds])
         
         return result
     
     def _run_ont_pipeline(
         self,
-        ont_reads: List[SeqRead],
-        ul_reads: Optional[List[SeqRead]],
-        ul_anchors: Optional[List[ULAnchor]],
+        ont_read_files: Optional[List[str]],
+        ul_read_files: Optional[List[str]],
         hic_data: Optional[Any],
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
         """
-        ONT pipeline: DBG → [String Graph if UL] → Hi-C.
+        ONT pipeline with correct module ordering.
         
-        Flow:
-        1. Build DBG from ONT reads (skip OLC)
-        2. Build string graph IF UL reads available (always follows DBG, essential for ONT)
-        3. Scaffold with Hi-C (if available)
+        CORRECT FLOW:
+        1. DBG engine → raw graph (skip OLC for ONT)
+        2. EdgeWarden → filter low-quality edges
+        3. PathWeaver → select optimal paths
+        4. String Graph engine → UL overlay (essential for ONT)
+        5. ThreadCompass → route UL reads
+        6. Hi-C scaffolding → proximity-guided scaffolds
+        7. Haplotype Detangler → phase the graph
+        8. Iteration cycle (EdgeWarden → PathWeaver → String Graph → ThreadCompass)
+        9. SVScribe → detect structural variants
+        10. Finalize → extract contigs/scaffolds
         """
-        self.logger.info("Running ONT pipeline: DBG → String Graph + UL → Hi-C")
+        self.logger.info("Running ONT pipeline: DBG → EdgeWarden → PathWeaver → String Graph + UL → ThreadCompass → Hi-C → Phasing → Iteration → SVScribe")
         
         result = AssemblyResult(stats={'read_type': 'ont'})
         
-        # Step 1: Build DBG from ONT reads
-        self.logger.info(f"Building DBG from {len(ont_reads)} ONT reads")
+        # Step 1: Load ONT reads from files and build DBG
+        ont_reads = []
+        if ont_read_files:
+            self.logger.info(f"Step 1: Loading ONT reads from {len(ont_read_files)} files")
+            for ont_file in ont_read_files:
+                ont_reads.extend(self._read_file_streaming(Path(ont_file)))
+        
+        self.logger.info(f"Step 1: Building DBG from {len(ont_reads)} ONT reads")
         base_k = self.config.get('dbg_k', 41)  # Medium k for ONT
         min_coverage = self.config.get('min_coverage', 3)  # Higher for noisy ONT
         
@@ -765,11 +1101,31 @@ class PipelineOrchestrator:
         result.stats['dbg_nodes'] = len(result.dbg.nodes)
         result.stats['dbg_edges'] = len(result.dbg.edges)
         
-        # Step 2: Build string graph (UL overlay is critical for ONT)
-        if ul_reads or ul_anchors:
-            self.logger.info("Building string graph with UL overlay (essential for ONT)")
-            if ul_anchors is None:
-                ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
+        # Step 2: EdgeWarden - Filter low-quality edges (critical for noisy ONT)
+        self.logger.info("Step 2: Applying EdgeWarden to filter edges")
+        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
+        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        result.dbg = edge_warden.filter_graph(result.dbg)
+        result.stats['edges_after_warden'] = len(result.dbg.edges)
+        
+        # Step 3: PathWeaver - Select optimal paths through graph
+        self.logger.info("Step 3: Applying PathWeaver for path selection")
+        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
+        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        result.dbg = path_weaver.resolve_paths(result.dbg)
+        result.stats['paths_selected'] = path_weaver.get_path_count()
+        
+        # Step 4: Build string graph (UL overlay is critical for ONT)
+        # Load UL reads from files if present
+        ul_reads = []
+        if ul_read_files:
+            self.logger.info("Step 4: Loading UL reads for string graph overlay (essential for ONT)")
+            for ul_file in ul_read_files:
+                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+        
+        if ul_reads:
+            self.logger.info("Step 4: Building string graph with UL overlay (essential for ONT)")
+            ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
             
             result.string_graph = build_string_graph_from_dbg_and_ul(
                 result.dbg,
@@ -777,20 +1133,100 @@ class PipelineOrchestrator:
                 min_support=self.config.get('min_ul_support', 2)
             )
             result.stats['string_edges'] = len(result.string_graph.edges)
+            
+            # Step 5: ThreadCompass - Route UL reads through graph
+            self.logger.info("Step 5: Applying ThreadCompass for UL routing")
+            use_ul_ai = self.config.get('assembly', {}).get('string_graph', {}).get('use_ul_routing_ai', True)
+            thread_compass = ThreadCompass(use_ai=use_ul_ai and self.config['ai']['enabled'])
+            result.string_graph = thread_compass.route_ul_reads(
+                result.string_graph,
+                ul_reads  # Already loaded above
+            )
+            result.stats['ul_reads_routed'] = thread_compass.get_routed_count()
         else:
-            self.logger.warning("No UL reads provided for ONT assembly - may have low contiguity")
+            self.logger.warning("Step 4-5: No UL reads provided for ONT assembly - may have low contiguity")
+            thread_compass = None  # For iteration cycle
         
-        # Step 3: Extract contigs
+        # Step 6: Hi-C proximity edge addition (if available)
+        if hic_data:
+            self.logger.info("Step 6: Adding Hi-C proximity edges to graph")
+            graph_to_annotate = result.string_graph or result.dbg
+            result.dbg = self._add_hic_edges_to_graph(graph_to_annotate, hic_data)
+            if result.string_graph:
+                result.string_graph.dbg = result.dbg
+            result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
+            result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
+        
+        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters
+        self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
+        use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
+        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        
+        graph_to_phase = result.string_graph or result.dbg
+        phasing_result = haplotype_detangler.phase_graph(
+            graph_to_phase,
+            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+        )
+        result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
+        result.stats['phasing_confidence'] = phasing_result.confidence
+        
+        # Step 8: Iteration cycle (refine graph with phasing information)
+        max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
+        if self.config['ai']['enabled']:
+            max_iterations = min(max_iterations, 2)
+        
+        self.logger.info(f"Step 8: Running {max_iterations} refinement iterations")
+        for iteration in range(max_iterations):
+            self.logger.info(f"  Iteration {iteration + 1}/{max_iterations}")
+            
+            result.dbg = edge_warden.filter_graph(result.dbg, phasing_info=phasing_result)
+            result.dbg = path_weaver.resolve_paths(result.dbg, phasing_info=phasing_result)
+            
+            if ul_reads:
+                result.string_graph = build_string_graph_from_dbg_and_ul(
+                    result.dbg, ul_anchors,
+                    min_support=self.config.get('min_ul_support', 2)
+                )
+                if thread_compass:  # Only if ThreadCompass was initialized
+                    result.string_graph = thread_compass.route_ul_reads(
+                        result.string_graph,
+                        ul_reads,
+                        phasing_info=phasing_result
+                    )
+            
+            result.stats[f'iteration_{iteration + 1}_edges'] = len(result.dbg.edges)
+        
+        # Step 9: SVScribe - Detect structural variants (distinguish edge types)
+        self.logger.info("Step 9: Running SVScribe for structural variant detection")
+        use_sv_ai = self.config.get('assembly', {}).get('sv_detection', {}).get('use_sv_ai', True)
+        sv_scribe = SVScribe(use_ai=use_sv_ai and self.config['ai']['enabled'])
+        
+        sv_calls = sv_scribe.detect_svs(
+            graph=result.string_graph or result.dbg,
+            ul_routes=thread_compass.get_routes() if (thread_compass and ul_reads) else None,
+            distinguish_edge_types=True,  # Sequence vs Hi-C evidence
+            phasing_info=phasing_result
+        )
+        result.stats['sv_calls'] = len(sv_calls)
+        result.stats['sv_types'] = sv_scribe.get_sv_type_counts()
+        
+        # Step 10: Extract final contigs from refined graph
+        self.logger.info("Step 10: Extracting final contigs from refined graph")
         result.contigs = self._extract_contigs_from_graph(
             result.string_graph or result.dbg
         )
         result.stats['num_contigs'] = len(result.contigs)
         
-        # Step 4: Hi-C scaffolding
+        # Step 11: Build scaffolds prioritizing Hi-C edges
         if hic_data:
-            self.logger.info("Running Hi-C scaffolding")
-            result.scaffolds = self._run_hic_scaffolding(result.contigs, hic_data)
+            self.logger.info("Step 11: Building scaffolds from graph (prioritizing Hi-C edges)")
+            result.scaffolds = self._extract_scaffolds_from_graph(
+                result.string_graph or result.dbg,
+                prefer_hic_edges=True,
+                phasing_info=phasing_result
+            )
             result.stats['num_scaffolds'] = len(result.scaffolds)
+            result.stats['scaffold_n50'] = self._calculate_n50([len(s.seq) for s in result.scaffolds])
         
         return result
     
@@ -803,15 +1239,17 @@ class PipelineOrchestrator:
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
         """
-        Ancient DNA pipeline: DBG → [String Graph if UL] → Hi-C.
+        Ancient DNA pipeline with correct module ordering.
         
         Assumes preprocessing has already merged/assembled ancient DNA
         fragments into longer "pseudo-long-reads".
-        String graph built IF UL reads available (always follows DBG).
-        """
-        self.logger.info("Running Ancient DNA pipeline: DBG → String Graph → Hi-C")
         
-        # Ancient DNA uses similar flow to HiFi
+        Flow identical to HiFi pipeline:
+        DBG → EdgeWarden → PathWeaver → String Graph → ThreadCompass → Hi-C → Phasing → Iteration → SVScribe
+        """
+        self.logger.info("Running Ancient DNA pipeline: DBG → EdgeWarden → PathWeaver → String Graph → ThreadCompass → Hi-C → Phasing → Iteration → SVScribe")
+        
+        # Ancient DNA uses similar flow to HiFi (same module ordering)
         return self._run_hifi_pipeline(
             corrected_reads, ul_reads, ul_anchors, hic_data, ml_k_model
         )
@@ -891,8 +1329,8 @@ class PipelineOrchestrator:
         self.logger.debug("Converting DBG to KmerGraph format...")
         kmer_graph = self._dbg_to_kmer_graph(dbg)
         
-        # Initialize ULReadMapper
-        mapper = ULReadMapper(
+        # Initialize LongReadOverlay (formerly ULReadMapper)
+        mapper = LongReadOverlay(
             min_anchor_length=100,
             min_identity=0.7,
             anchor_k=15,
@@ -1033,7 +1471,12 @@ class PipelineOrchestrator:
         
         return []
     
-    def _run_hic_scaffolding(self, contigs: List[SeqRead], hic_data: Optional[Any]) -> List[SeqRead]:
+    def _run_hic_scaffolding(
+        self,
+        contigs: List[SeqRead],
+        hic_data: Optional[Any],
+        phasing_info: Optional[Any] = None
+    ) -> List[SeqRead]:
         """
         Run Hi-C scaffolding on contigs.
         
@@ -1042,6 +1485,7 @@ class PipelineOrchestrator:
         Args:
             contigs: List of assembled contigs (SeqRead objects)
             hic_data: Hi-C read data for proximity ligation
+            phasing_info: Optional phasing information from Haplotype Detangler
         
         Returns:
             List of scaffolded contigs (SeqRead objects)
@@ -1050,16 +1494,163 @@ class PipelineOrchestrator:
         1. Build contig contact matrix from Hi-C alignments
         2. Cluster contigs by contact frequency
         3. Order and orient contigs within scaffolds
-        4. Join contigs with N-gaps
-        5. Return scaffolded sequences
+        4. Use phasing_info to separate haplotypes if available
+        5. Join contigs with N-gaps
+        6. Return scaffolded sequences
         """
         self.logger.warning(
             f"Hi-C scaffolding is not yet implemented. "
             f"Returning {len(contigs)} unscaffolded contigs."
         )
         
+        if phasing_info:
+            self.logger.info(f"Phasing information available: {phasing_info.num_haplotypes} haplotypes detected")
+        
         # Placeholder: return contigs unchanged
         return contigs
+    
+    def _add_hic_edges_to_graph(
+        self,
+        graph: Union[DBGGraph, StringGraph],
+        hic_data: Any
+    ) -> Union[DBGGraph, StringGraph]:
+        """
+        Add Hi-C proximity edges to the graph (Strategy 4: Hi-C as graph annotation).
+        
+        Hi-C creates NEW edges representing long-range proximity contacts, not modifying
+        existing sequence-based edges. These edges enable:
+        - Phasing via connectivity clustering
+        - SVScribe evidence type distinction
+        - Scaffolding by traversing proximity edges
+        
+        Args:
+            graph: DBGGraph or StringGraph to annotate
+            hic_data: Hi-C read pairs for proximity ligation analysis
+        
+        Returns:
+            Graph with additional Hi-C proximity edges
+        
+        Implementation:
+        1. Build contact matrix from Hi-C alignments to graph nodes
+        2. Identify strong long-range contacts (threshold-based)
+        3. Create new edges with type='hic' and proximity scores
+        4. Add edges to graph without modifying existing edges
+        """
+        self.logger.info("Adding Hi-C proximity edges to graph")
+        
+        # TODO: Full implementation
+        # For now, log that Hi-C edge addition is pending
+        self.logger.warning(
+            "Hi-C edge addition is not yet fully implemented. "
+            "Graph structure maintained, but Hi-C edges not added."
+        )
+        
+        # Placeholder: Return graph unchanged
+        # Real implementation would:
+        # 1. Parse Hi-C read pairs
+        # 2. Align to graph nodes
+        # 3. Build contact matrix
+        # 4. Threshold for significant contacts
+        # 5. Add proximity edges with type='hic'
+        
+        return graph
+    
+    def _count_hic_edges(self, graph: Union[DBGGraph, StringGraph]) -> int:
+        """
+        Count number of Hi-C proximity edges in graph.
+        
+        Args:
+            graph: Graph to analyze
+        
+        Returns:
+            Number of edges with type='hic'
+        """
+        # Placeholder implementation
+        count = 0
+        if isinstance(graph, DBGGraph):
+            for edge in graph.edges:
+                if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
+                    count += 1
+        elif isinstance(graph, StringGraph) and hasattr(graph, 'dbg'):
+            count = self._count_hic_edges(graph.dbg)
+        
+        return count
+    
+    def _calculate_hic_coverage(self, graph: Union[DBGGraph, StringGraph]) -> float:
+        """
+        Calculate percentage of graph nodes with Hi-C edge connections.
+        
+        Args:
+            graph: Graph to analyze
+        
+        Returns:
+            Percentage (0-100) of nodes connected by Hi-C edges
+        """
+        # Placeholder implementation
+        if isinstance(graph, DBGGraph):
+            if not graph.nodes:
+                return 0.0
+            
+            nodes_with_hic = set()
+            for edge in graph.edges:
+                if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
+                    if hasattr(edge, 'source'):
+                        nodes_with_hic.add(edge.source)
+                    if hasattr(edge, 'target'):
+                        nodes_with_hic.add(edge.target)
+            
+            return (len(nodes_with_hic) / len(graph.nodes)) * 100.0
+        
+        elif isinstance(graph, StringGraph) and hasattr(graph, 'dbg'):
+            return self._calculate_hic_coverage(graph.dbg)
+        
+        return 0.0
+    
+    def _extract_scaffolds_from_graph(
+        self,
+        graph: Union[DBGGraph, StringGraph],
+        prefer_hic_edges: bool = True,
+        phasing_info: Optional[Any] = None
+    ) -> List[SeqRead]:
+        """
+        Build scaffolds by traversing graph, prioritizing Hi-C proximity edges.
+        
+        Unlike traditional scaffolding (contig concatenation with gaps), this
+        traverses the graph structure using Hi-C edges to connect distant nodes.
+        
+        Args:
+            graph: Graph to traverse
+            prefer_hic_edges: If True, follow Hi-C edges for long-range connections
+            phasing_info: Optional haplotype information for phased scaffolding
+        
+        Returns:
+            List of scaffold sequences (SeqRead objects)
+        
+        Algorithm:
+        1. Start from high-coverage seed nodes
+        2. Traverse edges preferring: sequence edges locally, Hi-C edges for jumps
+        3. Use phasing_info to keep scaffolds haplotype-consistent
+        4. Generate scaffold sequences from traversed paths
+        5. Mark Hi-C junction points in metadata
+        """
+        self.logger.info("Building scaffolds from graph with Hi-C edge priority")
+        
+        # TODO: Full implementation
+        # For now, extract contigs and return (no Hi-C scaffolding yet)
+        self.logger.warning(
+            "Hi-C-guided scaffold extraction not yet fully implemented. "
+            "Returning contigs instead of scaffolds."
+        )
+        
+        # Placeholder: Return contigs
+        # Real implementation would:
+        # 1. Find scaffold seed nodes (high coverage, unambiguous)
+        # 2. Extend scaffolds using sequence edges
+        # 3. Jump gaps using Hi-C edges
+        # 4. Respect phasing boundaries
+        # 5. Generate scaffold sequences with marked Hi-C junctions
+        
+        return self._extract_contigs_from_graph(graph)
     
     # ========================================================================
     # Finishing and utility methods

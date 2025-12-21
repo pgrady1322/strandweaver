@@ -84,7 +84,7 @@ DEFAULT_CONFIG = {
     # Pipeline Control
     # ========================================================================
     'pipeline': {
-        'steps': ['profile', 'correct', 'assemble', 'finish'],
+        'steps': ['kweaver', 'profile', 'correct', 'assemble', 'finish'],
         'skip_profiling': False,
         'skip_correction': False,
         'resume': False,
@@ -334,7 +334,7 @@ def save_config_template(output_path: Path, template: str = 'default'):
     
     # Customize for specific templates
     if template == 'illumina':
-        config['pipeline']['steps'] = ['profile', 'correct', 'assemble', 'finish']
+        config['pipeline']['steps'] = ['kweaver', 'profile', 'correct', 'assemble', 'finish']
         config['assembly']['graph']['type'] = 'dbg'
         config['assembly']['olc']['enabled'] = True
         config['correction']['illumina']['use_ai_kmer_selection'] = True
@@ -388,7 +388,7 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
             errors.append("GPU requested but PyTorch not installed")
     
     # Validate pipeline steps
-    valid_steps = ['profile', 'correct', 'assemble', 'finish']
+    valid_steps = ['kweaver', 'profile', 'correct', 'assemble', 'finish']
     for step in config.get('pipeline', {}).get('steps', []):
         if step not in valid_steps:
             errors.append(f"Invalid pipeline step: {step}")

@@ -2479,6 +2479,658 @@ class EdgeWarden:
         return (self.static_extractor.all_feature_names +
                 TemporalFeatures.feature_names() +
                 ExpandedFeatures.feature_names())
+    
+    # ========================================================================
+    #                    GRAPH FILTERING METHODS
+    # ========================================================================
+    
+    def filter_graph(self, graph, min_coverage: Optional[int] = None,
+                    phasing_info: Optional[Any] = None, use_ai: bool = True,
+                    read_data: Optional[Dict] = None) -> Any:
+        """
+        Filter low-quality edges from assembly graph.
+        
+        This is the main entry point called by the pipeline for edge filtering.
+        Applies multiple filtering strategies:
+        1. Coverage-based filtering (remove edges below threshold)
+        2. Quality-based filtering (graph topology, node consistency)
+        3. Phasing-aware filtering (if phasing_info provided)
+        4. AI scoring with full 80 features (if use_ai=True and models loaded)
+        
+        Args:
+            graph: DBGGraph or StringGraph object with edges to filter
+            min_coverage: Minimum coverage threshold for edges (technology-specific default)
+            phasing_info: Optional phasing result for haplotype-aware filtering
+            use_ai: Whether to use AI models for edge scoring (default: True)
+            read_data: Optional dict with read sequences, quality scores, and coverage arrays
+                      Format: {'reads': {read_id: SeqRead}, 'coverage': {node_id: np.ndarray}}
+        
+        Returns:
+            Filtered graph with low-quality edges removed
+        
+        Algorithm:
+            1. Determine coverage threshold (provided or technology default)
+            2. Iterate through all edges in graph
+            3. For each edge:
+               a. Check coverage threshold
+               b. Calculate quality score (topology, consistency)
+               c. Check phasing consistency (if applicable)
+               d. Score with AI model (if enabled)
+            4. Remove edges that fail filters
+            5. Update graph edge indices and adjacency lists
+            6. Return filtered graph with statistics
+        
+        Statistics tracked:
+            - total_edges_initial
+            - edges_removed_coverage
+            - edges_removed_quality
+            - edges_removed_phasing
+            - edges_removed_ai
+            - total_edges_final
+            - filtering_time
+        """
+        import time
+        start_time = time.time()
+        
+        logger.info(f"EdgeWarden: Filtering graph edges")
+        logger.info(f"  Initial edges: {len(graph.edges)}")
+        
+        # Determine coverage threshold
+        if min_coverage is None:
+            min_coverage = self._get_default_coverage_threshold()
+        
+        logger.info(f"  Min coverage: {min_coverage}")
+        logger.info(f"  Phasing-aware: {'Yes' if phasing_info else 'No'}")
+        logger.info(f"  AI scoring: {'Yes' if use_ai else 'No'}")
+        
+        # Track edges to remove and reasons
+        edges_to_remove = set()
+        removal_reasons = {
+            'coverage': 0,
+            'quality': 0,
+            'phasing': 0,
+            'ai': 0
+        }
+        
+        # Iterate through all edges
+        for edge_id, edge in list(graph.edges.items()):
+            # Filter 1: Coverage threshold
+            if edge.coverage < min_coverage:
+                edges_to_remove.add(edge_id)
+                removal_reasons['coverage'] += 1
+                continue
+            
+            # Filter 2: Quality-based filtering
+            quality_score = self._calculate_edge_quality(graph, edge)
+            if quality_score < self._get_quality_threshold():
+                edges_to_remove.add(edge_id)
+                removal_reasons['quality'] += 1
+                continue
+            
+            # Filter 3: Phasing-aware filtering (if phasing info available)
+            if phasing_info is not None:
+                if not self._is_haplotype_consistent(edge, phasing_info):
+                    edges_to_remove.add(edge_id)
+                    removal_reasons['phasing'] += 1
+                    continue
+            
+            # Filter 4: AI scoring (if enabled and models loaded)
+            if use_ai and hasattr(self.tech_models, 'models') and self.tech_models.models:
+                try:
+                    ai_score = self._score_edge_with_ai(graph, edge, read_data)
+                    if ai_score < self._get_ai_threshold():
+                        edges_to_remove.add(edge_id)
+                        removal_reasons['ai'] += 1
+                        continue
+                except Exception as e:
+                    logger.debug(f"AI scoring failed for edge {edge_id}: {e}")
+                    # Continue without AI score (don't remove based on AI failure)
+        
+        # Remove filtered edges from graph
+        for edge_id in edges_to_remove:
+            edge = graph.edges[edge_id]
+            
+            # Remove from edges dict
+            del graph.edges[edge_id]
+            
+            # Remove from adjacency lists
+            if edge_id in graph.out_edges[edge.from_id]:
+                graph.out_edges[edge.from_id].remove(edge_id)
+            if edge_id in graph.in_edges[edge.to_id]:
+                graph.in_edges[edge.to_id].remove(edge_id)
+        
+        elapsed_time = time.time() - start_time
+        
+        # Log statistics
+        logger.info(f"EdgeWarden: Filtering complete")
+        logger.info(f"  Edges removed: {len(edges_to_remove)} ({len(edges_to_remove)/max(len(graph.edges) + len(edges_to_remove), 1) * 100:.1f}%)")
+        logger.info(f"    - Coverage: {removal_reasons['coverage']}")
+        logger.info(f"    - Quality: {removal_reasons['quality']}")
+        logger.info(f"    - Phasing: {removal_reasons['phasing']}")
+        logger.info(f"    - AI: {removal_reasons['ai']}")
+        logger.info(f"  Final edges: {len(graph.edges)}")
+        logger.info(f"  Filtering time: {elapsed_time:.2f}s")
+        
+        return graph
+    
+    def _get_default_coverage_threshold(self) -> int:
+        """Get technology-specific default coverage threshold."""
+        thresholds = {
+            TechnologyType.NANOPORE_R9: 3,
+            TechnologyType.NANOPORE_R10: 3,
+            TechnologyType.PACBIO_HIFI: 2,
+            TechnologyType.PACBIO_CLR: 3,
+            TechnologyType.ILLUMINA: 2,
+            TechnologyType.ANCIENT_DNA: 2
+        }
+        return thresholds.get(self.technology, 2)
+    
+    def _get_quality_threshold(self) -> float:
+        """Get quality score threshold for filtering."""
+        # Quality score range: 0.0 (poor) to 1.0 (excellent)
+        # Conservative threshold: keep edges with quality >= 0.3
+        return 0.3
+    
+    def _get_ai_threshold(self) -> float:
+        """Get AI confidence threshold for filtering."""
+        # AI confidence range: 0.0 to 1.0
+        # Threshold: keep edges with AI confidence >= 0.5 (predicted as good)
+        return 0.5
+    
+    def _calculate_edge_quality(self, graph, edge) -> float:
+        """
+        Calculate quality score for an edge based on graph topology.
+        
+        Quality indicators:
+        - Coverage consistency between nodes
+        - Node degree (not too many branches)
+        - Local clustering coefficient
+        - Coverage ratio between nodes
+        
+        Returns score in range [0.0, 1.0]
+        """
+        try:
+            from_node = graph.nodes.get(edge.from_id)
+            to_node = graph.nodes.get(edge.to_id)
+            
+            if not from_node or not to_node:
+                return 0.0
+            
+            # Component 1: Coverage consistency (0-0.4 points)
+            coverage_from = getattr(from_node, 'coverage', 0.0)
+            coverage_to = getattr(to_node, 'coverage', 0.0)
+            
+            if coverage_from > 0 and coverage_to > 0:
+                coverage_ratio = min(coverage_from, coverage_to) / max(coverage_from, coverage_to)
+                coverage_score = coverage_ratio * 0.4
+            else:
+                coverage_score = 0.0
+            
+            # Component 2: Node degree penalty (0-0.3 points)
+            # Lower degree = more confident connection
+            from_out_degree = len(graph.out_edges.get(edge.from_id, []))
+            to_in_degree = len(graph.in_edges.get(edge.to_id, []))
+            
+            # Penalize high-degree nodes (repeats, tangles)
+            max_degree = max(from_out_degree, to_in_degree)
+            if max_degree <= 2:
+                degree_score = 0.3
+            elif max_degree <= 5:
+                degree_score = 0.2
+            elif max_degree <= 10:
+                degree_score = 0.1
+            else:
+                degree_score = 0.0
+            
+            # Component 3: Edge coverage relative to nodes (0-0.3 points)
+            edge_coverage = getattr(edge, 'coverage', 0.0)
+            avg_node_coverage = (coverage_from + coverage_to) / 2.0
+            
+            if avg_node_coverage > 0:
+                edge_coverage_ratio = edge_coverage / avg_node_coverage
+                # Good edge: coverage close to node coverage
+                if 0.5 <= edge_coverage_ratio <= 2.0:
+                    edge_coverage_score = 0.3
+                elif 0.3 <= edge_coverage_ratio <= 3.0:
+                    edge_coverage_score = 0.15
+                else:
+                    edge_coverage_score = 0.0
+            else:
+                edge_coverage_score = 0.0
+            
+            total_score = coverage_score + degree_score + edge_coverage_score
+            return total_score
+            
+        except Exception as e:
+            logger.debug(f"Error calculating edge quality: {e}")
+            return 0.5  # Neutral score on error (don't remove)
+    
+    def _is_haplotype_consistent(self, edge, phasing_info) -> bool:
+        """
+        Check if edge connects nodes from the same haplotype.
+        
+        Args:
+            edge: Edge object with from_id and to_id
+            phasing_info: PhasingResult with node_assignments dict
+        
+        Returns:
+            True if edge is haplotype-consistent (keep edge)
+            False if edge crosses haplotypes (chimeric, remove edge)
+        """
+        try:
+            # Get node haplotype assignments
+            node_assignments = getattr(phasing_info, 'node_assignments', {})
+            
+            if not node_assignments:
+                return True  # No phasing info, keep edge
+            
+            haplotype_from = node_assignments.get(edge.from_id)
+            haplotype_to = node_assignments.get(edge.to_id)
+            
+            # If either node is unphased, keep edge (conservative)
+            if haplotype_from is None or haplotype_to is None:
+                return True
+            
+            # Check if same haplotype
+            return haplotype_from == haplotype_to
+            
+        except Exception as e:
+            logger.debug(f"Error checking haplotype consistency: {e}")
+            return True  # Keep edge on error (conservative)
+    
+    def _score_edge_with_ai(self, graph, edge, read_data: Optional[Dict] = None) -> float:
+        """
+        Score edge using AI model with full 80-feature extraction.
+        
+        Extracts all features (static + temporal + expanded) for maximum accuracy.
+        Uses alignment data from read_data if available, otherwise falls back to
+        graph-only features.
+        
+        Returns confidence score [0.0, 1.0] where:
+        - 1.0 = high confidence this is a good edge
+        - 0.0 = high confidence this is a bad edge
+        """
+        try:
+            # Extract full 80 features for edge
+            if read_data is not None:
+                features = self._extract_edge_features_full(graph, edge, read_data)
+            else:
+                # Fallback to minimal features if no read data
+                features = self._extract_edge_features_minimal(graph, edge)
+                logger.debug(f"No read_data provided, using minimal features for edge {edge.id}")
+            
+            # Get technology string
+            tech_str = self._get_tech_string()
+            
+            # Predict with tech-specific model
+            prediction, confidence, _ = self.tech_models.predict_single(
+                features, tech_str
+            )
+            
+            # prediction = 1 means "good edge", prediction = 0 means "bad edge"
+            # Return confidence adjusted by prediction
+            if prediction == 1:
+                return confidence  # Good edge with confidence
+            else:
+                return 1.0 - confidence  # Bad edge, invert confidence
+            
+        except Exception as e:
+            logger.debug(f"AI edge scoring failed: {e}")
+            return 0.5  # Neutral score on failure
+    
+    def _extract_edge_features_full(self, graph, edge, read_data: Dict) -> np.ndarray:
+        """
+        Extract full 80-feature set for edge scoring.
+        
+        Uses all available information:
+        - Static features (26): graph topology, coverage, node properties
+        - Temporal features (34): quality/coverage trajectories, error patterns
+        - Expanded features (20): sequence complexity, boundaries, systematic errors
+        
+        Args:
+            graph: DBGGraph with nodes and edges
+            edge: Edge to score
+            read_data: Dict with 'reads' (read sequences/quality) and 'coverage' (arrays)
+        
+        Returns:
+            80-element feature vector
+        """
+        try:
+            # Get nodes connected by this edge
+            from_node = graph.nodes.get(edge.from_id)
+            to_node = graph.nodes.get(edge.to_id)
+            
+            if not from_node or not to_node:
+                # Fallback to minimal features
+                return self._extract_edge_features_minimal(graph, edge)
+            
+            # Build overlap dict for static features
+            overlap = self._build_overlap_dict(graph, edge, from_node, to_node)
+            
+            # Build graph context for static features
+            graph_context = self._build_graph_context(graph, edge, read_data)
+            
+            # Extract static features (26)
+            static_features = self.static_extractor.extract_all_features(
+                overlap, graph_context
+            )
+            
+            # Reconstruct alignment segment for temporal features (34)
+            alignment_segment = self._reconstruct_alignment_segment(
+                graph, edge, from_node, to_node, read_data
+            )
+            
+            temporal_features = self.temporal_extractor.extract(alignment_segment)
+            
+            # Extract expanded features (20)
+            expanded_features = self.expanded_extractor.extract(
+                seq_a=from_node.seq,
+                seq_b=to_node.seq,
+                quality_a=alignment_segment.read_a_quality,
+                quality_b=alignment_segment.read_b_quality,
+                coverage_a=alignment_segment.read_a_coverage,
+                coverage_b=alignment_segment.read_b_coverage,
+                alignment_matches=alignment_segment.alignment_matches,
+                overlap_length=edge.overlap_len,
+                total_read_length_a=len(from_node.seq),
+                total_read_length_b=len(to_node.seq)
+            )
+            
+            # Concatenate all 80 features
+            full_features = np.concatenate([
+                static_features.all_features,      # 26
+                temporal_features.to_array(),      # 34
+                expanded_features.to_array()       # 20
+            ])
+            
+            return full_features
+            
+        except Exception as e:
+            logger.debug(f"Full feature extraction failed for edge {edge.id}: {e}")
+            # Fallback to minimal features
+            return self._extract_edge_features_minimal(graph, edge)
+    
+    def _extract_edge_features_minimal(self, graph, edge) -> np.ndarray:
+        """
+        Extract minimal feature set for edge scoring (fallback when alignment data unavailable).
+        
+        Uses graph-aware features (26 features from static extractor).
+        This is a fallback version that doesn't require full overlap data.
+        """
+        # Build minimal overlap dict from edge
+        overlap = {
+            'id': f"edge_{edge.id}",
+            'read_a': f"node_{edge.from_id}",
+            'read_b': f"node_{edge.to_id}",
+            'length': getattr(edge, 'overlap_len', 0),
+            'identity': 0.95,  # Assume high identity for edges
+            'coverage_a': getattr(graph.nodes.get(edge.from_id), 'coverage', 0),
+            'coverage_b': getattr(graph.nodes.get(edge.to_id), 'coverage', 0),
+            'coverage_ratio': 1.0
+        }
+        
+        # Build graph context
+        graph_context = {
+            'node_overlaps': {
+                edge.from_id: list(graph.out_edges.get(edge.from_id, [])),
+                edge.to_id: list(graph.in_edges.get(edge.to_id, []))
+            },
+            'read_coverage': {
+                edge.from_id: getattr(graph.nodes.get(edge.from_id), 'coverage', 0),
+                edge.to_id: getattr(graph.nodes.get(edge.to_id), 'coverage', 0)
+            },
+            'expected_coverage': self._estimate_expected_coverage(graph)
+        }
+        
+        # Extract base + graph features (26 total)
+        static_features = self.static_extractor.extract_all_features(
+            overlap, graph_context
+        )
+        
+        # Pad to 80 features (temporal and expanded set to zero)
+        # AI model expects 80 features, but we only have 26 from static
+        full_features = np.zeros(80, dtype=np.float32)
+        full_features[:26] = static_features.all_features
+        
+        return full_features
+    
+    def _estimate_expected_coverage(self, graph) -> float:
+        """Estimate expected coverage from graph node statistics."""
+        try:
+            coverages = [node.coverage for node in graph.nodes.values() 
+                        if hasattr(node, 'coverage') and node.coverage > 0]
+            if coverages:
+                return np.median(coverages)
+            return 20.0  # Default fallback
+        except:
+            return 20.0
+    
+    def _get_tech_string(self) -> str:
+        """Convert TechnologyType to string for model lookup."""
+        mapping = {
+            TechnologyType.NANOPORE_R9: 'ont_r9',
+            TechnologyType.NANOPORE_R10: 'ont_r10',
+            TechnologyType.PACBIO_HIFI: 'hifi',
+            TechnologyType.ILLUMINA: 'illumina',
+            TechnologyType.ANCIENT_DNA: 'adna'
+        }
+        return mapping.get(self.technology, 'hifi')
+    
+    def _build_overlap_dict(self, graph, edge, from_node, to_node) -> Dict:
+        """Build overlap dictionary from edge for feature extraction."""
+        # Calculate identity from k-mer match (high for DBG edges)
+        identity = 0.95  # DBG edges are k-mer perfect matches
+        
+        # Get coverage values
+        coverage_a = getattr(from_node, 'coverage', 0.0)
+        coverage_b = getattr(to_node, 'coverage', 0.0)
+        coverage_ratio = min(coverage_a, coverage_b) / max(coverage_a, coverage_b, 1.0)
+        
+        overlap = {
+            'id': f"edge_{edge.id}",
+            'read_a': f"node_{edge.from_id}",
+            'read_b': f"node_{edge.to_id}",
+            'technology': self._get_tech_string(),
+            'length': edge.overlap_len,
+            'identity': identity,
+            'left_overhang_a': 0,
+            'left_overhang_b': 0,
+            'right_overhang_a': 0,
+            'right_overhang_b': 0,
+            'coverage_a': coverage_a,
+            'coverage_b': coverage_b,
+            'coverage_ratio': coverage_ratio,
+            'repeat_content_a': self._estimate_repeat_content(from_node.seq),
+            'repeat_content_b': self._estimate_repeat_content(to_node.seq),
+            'kmer_uniqueness': self._calculate_kmer_uniqueness(from_node.seq, to_node.seq),
+            'alignment_score_primary': edge.overlap_len * identity,
+            'alignment_score_secondary': 0,
+            'quality_median_a': 30,  # Will be overridden by temporal features
+            'quality_median_b': 30,
+            'soft_clip_count': 0,
+            'trimming_pattern': 0,
+            'read_a_position': 0,
+            'read_b_position': 0
+        }
+        
+        return overlap
+    
+    def _build_graph_context(self, graph, edge, read_data: Optional[Dict]) -> Dict:
+        """Build graph context dictionary for feature extraction."""
+        # Get expected coverage
+        expected_coverage = self._estimate_expected_coverage(graph)
+        
+        # Build node overlaps (adjacency)
+        node_overlaps = {
+            edge.from_id: [e for e in graph.out_edges.get(edge.from_id, [])],
+            edge.to_id: [e for e in graph.in_edges.get(edge.to_id, [])]
+        }
+        
+        # Build read coverage dict
+        read_coverage = {
+            edge.from_id: getattr(graph.nodes.get(edge.from_id), 'coverage', expected_coverage),
+            edge.to_id: getattr(graph.nodes.get(edge.to_id), 'coverage', expected_coverage)
+        }
+        
+        # Calculate clustering coefficients
+        node_clustering = {
+            edge.from_id: self._calculate_clustering(graph, edge.from_id),
+            edge.to_id: self._calculate_clustering(graph, edge.to_id)
+        }
+        
+        # Estimate subgraph density
+        region_key = f"region_{edge.from_id // 1000}"
+        subgraph_densities = {region_key: 0.5}  # Placeholder
+        
+        graph_context = {
+            'node_overlaps': node_overlaps,
+            'read_coverage': read_coverage,
+            'expected_coverage': expected_coverage,
+            'node_clustering': node_clustering,
+            'subgraph_densities': subgraph_densities,
+            'repeat_regions': [],  # Would need to be passed in or calculated
+            'neighbor_identities': {}  # Would need alignment data
+        }
+        
+        return graph_context
+    
+    def _reconstruct_alignment_segment(self, graph, edge, from_node, to_node,
+                                      read_data: Dict) -> AlignmentSegment:
+        """Reconstruct alignment segment from graph edge and read data."""
+        # Get node sequences
+        seq_a = from_node.seq
+        seq_b = to_node.seq
+        
+        # Get or generate quality scores
+        quality_a = self._get_quality_array(edge.from_id, len(seq_a), read_data)
+        quality_b = self._get_quality_array(edge.to_id, len(seq_b), read_data)
+        
+        # Get or generate coverage arrays
+        coverage_a = self._get_coverage_array(edge.from_id, len(seq_a), read_data)
+        coverage_b = self._get_coverage_array(edge.to_id, len(seq_b), read_data)
+        
+        # Generate alignment matches (k-mer overlap is perfect match)
+        overlap_len = min(edge.overlap_len, len(seq_a), len(seq_b))
+        alignment_matches = np.ones(overlap_len, dtype=bool)
+        
+        # Create alignment segment
+        segment = AlignmentSegment(
+            read_a_seq=seq_a,
+            read_b_seq=seq_b,
+            read_a_quality=quality_a,
+            read_b_quality=quality_b,
+            read_a_coverage=coverage_a,
+            read_b_coverage=coverage_b,
+            alignment_matches=alignment_matches,
+            is_ont='ont' in self._get_tech_string()
+        )
+        
+        return segment
+    
+    def _get_quality_array(self, node_id: int, length: int, read_data: Dict) -> np.ndarray:
+        """Get quality score array for a node from read data or generate default."""
+        try:
+            if read_data and 'quality' in read_data:
+                quality_dict = read_data['quality']
+                if node_id in quality_dict:
+                    return quality_dict[node_id]
+            
+            # Generate default quality array based on technology
+            if 'ont' in self._get_tech_string():
+                # ONT: mean ~12, range 7-20
+                return np.random.normal(12, 3, length).clip(7, 20).astype(np.float32)
+            else:
+                # HiFi/Illumina: high quality, mean ~30
+                return np.random.normal(30, 3, length).clip(20, 40).astype(np.float32)
+        except:
+            # Fallback to uniform quality
+            return np.full(length, 20.0, dtype=np.float32)
+    
+    def _get_coverage_array(self, node_id: int, length: int, read_data: Dict) -> np.ndarray:
+        """Get coverage array for a node from read data or generate default."""
+        try:
+            if read_data and 'coverage' in read_data:
+                coverage_dict = read_data['coverage']
+                if node_id in coverage_dict:
+                    return coverage_dict[node_id]
+            
+            # Generate default coverage array (uniform with some noise)
+            base_coverage = 20.0  # Default coverage
+            return np.random.poisson(base_coverage, length).astype(np.float32)
+        except:
+            # Fallback to uniform coverage
+            return np.full(length, 20.0, dtype=np.float32)
+    
+    def _estimate_repeat_content(self, seq: str) -> float:
+        """Estimate repeat content in sequence."""
+        if len(seq) < 4:
+            return 0.0
+        
+        # Count dinucleotide repeats
+        repeat_count = 0
+        for i in range(len(seq) - 3):
+            if seq[i:i+2] == seq[i+2:i+4]:
+                repeat_count += 1
+        
+        return repeat_count / max(len(seq) - 3, 1)
+    
+    def _calculate_kmer_uniqueness(self, seq_a: str, seq_b: str) -> float:
+        """Calculate k-mer uniqueness score."""
+        k = 15
+        if len(seq_a) < k or len(seq_b) < k:
+            return 0.5
+        
+        # Extract k-mers
+        kmers_a = set(seq_a[i:i+k] for i in range(len(seq_a) - k + 1))
+        kmers_b = set(seq_b[i:i+k] for i in range(len(seq_b) - k + 1))
+        
+        # Calculate Jaccard similarity
+        intersection = len(kmers_a & kmers_b)
+        union = len(kmers_a | kmers_b)
+        
+        if union == 0:
+            return 0.5
+        
+        return intersection / union
+    
+    def _calculate_clustering(self, graph, node_id: int) -> float:
+        """Calculate local clustering coefficient for a node."""
+        try:
+            neighbors = set()
+            
+            # Get outgoing neighbors
+            for edge_id in graph.out_edges.get(node_id, []):
+                edge = graph.edges.get(edge_id)
+                if edge:
+                    neighbors.add(edge.to_id)
+            
+            # Get incoming neighbors
+            for edge_id in graph.in_edges.get(node_id, []):
+                edge = graph.edges.get(edge_id)
+                if edge:
+                    neighbors.add(edge.from_id)
+            
+            if len(neighbors) < 2:
+                return 0.0
+            
+            # Count edges between neighbors
+            edge_count = 0
+            neighbors_list = list(neighbors)
+            for i in range(len(neighbors_list)):
+                for j in range(i + 1, len(neighbors_list)):
+                    n1, n2 = neighbors_list[i], neighbors_list[j]
+                    # Check if edge exists between n1 and n2
+                    for eid in graph.out_edges.get(n1, []):
+                        if graph.edges[eid].to_id == n2:
+                            edge_count += 1
+                            break
+            
+            # Clustering coefficient
+            max_edges = len(neighbors) * (len(neighbors) - 1) / 2
+            return edge_count / max_edges if max_edges > 0 else 0.0
+            
+        except:
+            return 0.5  # Default clustering
 
 
 # ============================================================================
