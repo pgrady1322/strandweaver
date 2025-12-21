@@ -444,16 +444,33 @@ def pipeline(ctx, reads_files, technologies,
         click.echo(f"  {i}. {reads} ({tech})")
     click.echo(f"\n📂 Output: {output}")
     
-    # AI/ML Settings
+    # Determine pipeline characteristics
+    has_illumina = 'illumina' in all_technologies
+    has_long_reads = any(t in ['ont', 'ont_ultralong', 'pacbio', 'hifi'] for t in all_technologies)
+    has_ul = 'ont_ultralong' in all_technologies
+    has_hic = bool(hic_r1 and hic_r2)
     ai_enabled = pipeline_config['ai']['enabled']
-    click.echo(f"\n🤖 AI/ML Mode: {'ENABLED (default)' if ai_enabled else 'DISABLED (--classical)'}")
+    
+    # Get specific AI module states
+    correction_ai_modules = []
+    assembly_ai_modules = []
+    
     if ai_enabled:
-        correction_ai = any(m.get('enabled', False) for m in pipeline_config['ai']['correction'].values() if isinstance(m, dict))
-        assembly_ai = any(m.get('enabled', False) for m in pipeline_config['ai']['assembly'].values() if isinstance(m, dict))
-        click.echo(f"  • Error Correction AI: {'✓' if correction_ai else '✗'}")
-        click.echo(f"  • Assembly AI: {'✓' if assembly_ai else '✗'}")
-        if ai_finish:
-            click.echo(f"  • Claude Finishing: ✓ (experimental)")
+        if pipeline_config['ai']['correction'].get('adaptive_kmer', {}).get('enabled', False):
+            correction_ai_modules.append('K-Weaver')
+        if pipeline_config['ai']['correction'].get('base_error_classifier', {}).get('enabled', False):
+            correction_ai_modules.append('ErrorSmith')
+        
+        if pipeline_config['ai']['assembly'].get('edge_ai', {}).get('enabled', False):
+            assembly_ai_modules.append('EdgeWarden')
+        if pipeline_config['ai']['assembly'].get('path_gnn', {}).get('enabled', False):
+            assembly_ai_modules.append('PathWeaver')
+        if pipeline_config['ai']['assembly'].get('ul_routing_ai', {}).get('enabled', False):
+            assembly_ai_modules.append('ThreadCompass')
+        if pipeline_config['ai']['assembly'].get('diploid_ai', {}).get('enabled', False):
+            assembly_ai_modules.append('Haplotype Detangler')
+        if pipeline_config['ai']['assembly'].get('sv_ai', {}).get('enabled', False):
+            assembly_ai_modules.append('SVScribe')
     
     # Hardware
     hw_mode = "GPU" if pipeline_config['hardware']['use_gpu'] else "CPU (default)"
@@ -461,21 +478,115 @@ def pipeline(ctx, reads_files, technologies,
     click.echo(f"\n💻 Hardware: {hw_mode}")
     click.echo(f"  • Threads: {hw_threads}")
     
-    # Hi-C scaffolding
-    if hic_r1 and hic_r2:
-        click.echo(f"\n🧬 Hi-C Scaffolding Data:")
-        click.echo(f"  • R1: {hic_r1}")
-        click.echo(f"  • R2: {hic_r2}")
-        click.echo(f"  • Note: Hi-C reads NOT error-corrected (used for scaffolding only)")
+    # Build detailed pipeline flow description
+    click.echo(f"\n🔄 Pipeline Flow:")
+    click.echo(f"{'─'*60}")
+    
+    # Step 1: K-mer prediction
+    kweaver_status = '✓ K-Weaver' if 'K-Weaver' in correction_ai_modules else '○ Heuristic'
+    click.echo(f"  1. K-mer Prediction ({kweaver_status})")
+    click.echo(f"     └─ Predict optimal k-mer sizes for pipeline stages")
+    
+    # Step 2: Error profiling & correction
+    techs_to_correct = [t for t in set(all_technologies) if t != 'illumina' or not has_long_reads]
+    errorsmith_status = '✓ ErrorSmith AI' if 'ErrorSmith' in correction_ai_modules else '○ Classical'
+    click.echo(f"  2. Error Correction ({', '.join(techs_to_correct)}) [{errorsmith_status}]")
+    click.echo(f"     └─ Profile errors → Correct reads")
+    
+    # Step 3: Illumina contigger (if applicable)
+    if has_illumina:
+        click.echo(f"  3. Illumina OLC Contigger")
+        click.echo(f"     └─ Generate artificial long reads from Illumina")
+    
+    # Step 4: Graph assembly
+    graph_modules = []
+    if 'EdgeWarden' in assembly_ai_modules:
+        graph_modules.append('EdgeWarden')
+    if 'PathWeaver' in assembly_ai_modules:
+        graph_modules.append('PathWeaver')
+    
+    if graph_modules:
+        graph_status = f"with {', '.join(graph_modules)}"
+    else:
+        graph_status = "Classical algorithms"
+    
+    step_num = 4 if has_illumina else 3
+    click.echo(f"  {step_num}. DBG Assembly ({graph_status})")
+    click.echo(f"     ├─ Build De Bruijn graph from long reads")
+    if 'EdgeWarden' in assembly_ai_modules:
+        click.echo(f"     ├─ EdgeWarden: AI-powered edge filtering")
+    if 'PathWeaver' in assembly_ai_modules:
+        click.echo(f"     └─ PathWeaver: AI-powered path selection")
+    else:
+        click.echo(f"     └─ Simplify graph (tips, bubbles, low coverage)")
+    
+    # Step 5: String graph (if UL reads)
+    if has_ul:
+        step_num += 1
+        threadcompass_status = '✓ ThreadCompass' if 'ThreadCompass' in assembly_ai_modules else '○ Heuristic'
+        click.echo(f"  {step_num}. String Graph Overlay ({threadcompass_status})")
+        click.echo(f"     ├─ Map ultra-long reads to DBG")
+        click.echo(f"     ├─ Create UL-derived super-edges")
+        if 'ThreadCompass' in assembly_ai_modules:
+            click.echo(f"     └─ ThreadCompass: AI-powered UL routing")
+        else:
+            click.echo(f"     └─ Select paths by coverage heuristics")
+    
+    # Step 6: Hi-C scaffolding (if available)
+    if has_hic:
+        step_num += 1
+        click.echo(f"  {step_num}. Hi-C Scaffolding")
+        click.echo(f"     ├─ R1: {Path(hic_r1).name if hic_r1 else 'N/A'}")
+        click.echo(f"     ├─ R2: {Path(hic_r2).name if hic_r2 else 'N/A'}")
+        click.echo(f"     └─ Order and orient contigs using proximity data")
         pipeline_config['scaffolding']['hic']['enabled'] = True
     elif hic_r1 or hic_r2:
         click.echo(f"\n❌ Error: Both --hic-r1 and --hic-r2 must be specified together", err=True)
         ctx.exit(1)
     
-    # Pipeline steps
-    click.echo(f"\n🔄 Pipeline Steps: {' → '.join(pipeline_config['pipeline']['steps'])}")
+    # Step 7: Phasing with iterations
+    step_num += 1
+    detangler_status = '✓ Haplotype Detangler' if 'Haplotype Detangler' in assembly_ai_modules else '○ Classical'
+    num_iterations = pipeline_config.get('assembly', {}).get('phasing', {}).get('iterations', 2 if ai_enabled else 3)
+    click.echo(f"  {step_num}. Haplotype Phasing ({detangler_status})")
+    click.echo(f"     ├─ Separate homologous paths")
+    click.echo(f"     └─ Iterate graph refinement: {num_iterations} rounds")
+    if ai_enabled and ('EdgeWarden' in assembly_ai_modules or 'PathWeaver' in assembly_ai_modules):
+        click.echo(f"        └─ Re-apply {', '.join([m for m in ['EdgeWarden', 'PathWeaver'] if m in assembly_ai_modules])} each iteration")
+    
+    # Step 8: Graph cleanup
+    step_num += 1
+    svscribe_status = '✓ SVScribe' if 'SVScribe' in assembly_ai_modules else '○ Heuristic'
+    click.echo(f"  {step_num}. Graph Cleanup & SV Detection ({svscribe_status})")
+    click.echo(f"     ├─ Final graph simplification")
+    if 'SVScribe' in assembly_ai_modules:
+        click.echo(f"     └─ SVScribe: AI-powered structural variant calling")
+    else:
+        click.echo(f"     └─ Heuristic SV detection")
+    
+    # Step 9: Finishing
+    step_num += 1
+    click.echo(f"  {step_num}. Finishing & Polishing")
+    if ai_finish:
+        click.echo(f"     ├─ Claude AI finishing (experimental)")
+    click.echo(f"     ├─ Extract final contigs from graph")
+    click.echo(f"     ├─ Polish with T2T-Polish")
+    click.echo(f"     └─ Generate assembly statistics & QC report")
+    
+    click.echo(f"{'─'*60}")
+    
+    # Summary of AI/ML status
+    click.echo(f"\n🤖 AI/ML Status: {'ENABLED' if ai_enabled else 'DISABLED (--classical)'}")
+    if ai_enabled:
+        all_modules = correction_ai_modules + assembly_ai_modules
+        if all_modules:
+            click.echo(f"  • Active modules: {', '.join(all_modules)}")
+        else:
+            click.echo(f"  • No AI modules enabled (check config)")
+    
+    # Config file info
     if resume:
-        click.echo(f"  • Resume: ✓ (from last checkpoint)")
+        click.echo(f"\n⚙️  Resume: ✓ (from last checkpoint)")
     if config:
         click.echo(f"\n⚙️  Config File: {config}")
         click.echo(f"  • All parameters from config + CLI overrides")
@@ -483,25 +594,6 @@ def pipeline(ctx, reads_files, technologies,
         click.echo(f"\n⚙️  Config: Using defaults (generate with: strandweaver config init)")
     
     click.echo(f"{'='*60}\n")
-    
-    # Handle Hi-C scaffolding data (if provided)
-    if hic_r1 and hic_r2:
-        import shutil
-        
-        output_path = Path(output)
-        output_path.mkdir(parents=True, exist_ok=True)
-        
-        # Copy Hi-C files to output directory without modification
-        hic_r1_path = Path(hic_r1)
-        hic_r2_path = Path(hic_r2)
-        hic_r1_out = output_path / f"hic_R1{hic_r1_path.suffix}"
-        hic_r2_out = output_path / f"hic_R2{hic_r2_path.suffix}"
-        
-        click.echo("📋 Copying Hi-C scaffolding data...")
-        shutil.copy(hic_r1_path, hic_r1_out)
-        click.echo(f"  ✓ R1: {hic_r1_out}")
-        shutil.copy(hic_r2_path, hic_r2_out)
-        click.echo(f"  ✓ R2: {hic_r2_out}\n")
     
     # ========================================================================
     # Run Pipeline

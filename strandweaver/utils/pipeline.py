@@ -252,8 +252,9 @@ class PipelineOrchestrator:
         self.state = {
             'current_step': None,
             'completed_steps': [],
-            'reads': None,
-            'corrected_reads': None,
+            'read_files': config['runtime']['reads'],  # Store paths, not reads
+            'technologies': config['runtime']['technologies'],
+            'corrected_files': {},  # {technology: corrected_file_path}
             'assembly_result': None,
             'final_contigs': None,
         }
@@ -332,14 +333,32 @@ class PipelineOrchestrator:
         """Error profiling step."""
         self.logger.info("Profiling sequencing errors...")
         
-        # Load reads
-        reads = self._load_reads()
-        
-        # Sample reads for profiling
+        # Sample reads from files (streaming) - don't load all into memory
         sample_size = self.config['profiling']['sample_size']
-        sampled_reads = reads[:sample_size] if len(reads) > sample_size else reads
+        sampled_reads = []
+        total_reads = 0
         
-        self.logger.info(f"Profiling {len(sampled_reads)} reads (sampled from {len(reads)})")
+        for reads_file in self.state['read_files']:
+            reads_path = Path(reads_file)
+            read_count = 0
+            
+            # Stream reads from file
+            for read in self._read_file_streaming(reads_path):
+                if len(sampled_reads) < sample_size:
+                    sampled_reads.append(read)
+                read_count += 1
+                
+                # Stop if we have enough samples
+                if len(sampled_reads) >= sample_size:
+                    break
+            
+            total_reads += read_count
+            self.logger.info(f"  Sampled from {reads_file}: {read_count:,} reads")
+            
+            if len(sampled_reads) >= sample_size:
+                break
+        
+        self.logger.info(f"Profiling {len(sampled_reads)} reads (sampled from {total_reads:,} total)")
         
         # Run profiler
         profiler = ErrorProfiler()
@@ -357,31 +376,26 @@ class PipelineOrchestrator:
         self.logger.info(f"  Technology detected: {profile.get('technology', 'unknown')}")
         self.logger.info(f"  Mean quality: {profile.get('mean_quality', 0):.2f}")
         
-        # Store reads for next step
-        self.state['reads'] = reads
+        # Don't store reads - only metadata
         self.state['error_profile'] = profile
     
     def _step_correct(self):
         """Error correction step."""
         self.logger.info("Correcting sequencing errors...")
         
-        # Load reads if not already in memory
-        if self.state['reads'] is None:
-            reads = self._load_reads()
-        else:
-            reads = self.state['reads']
-        
         # Load AI models if enabled
         use_ai = self.config['ai']['enabled']
         ai_models = self._load_ai_models() if use_ai else None
         
-        # Determine technology-specific corrector
-        technologies = self.config['runtime']['technologies']
-        corrected_reads = []
+        # Process each input file independently by technology
+        # This minimizes read combining/separating operations
+        technologies = self.state['technologies']
+        read_files = self.state['read_files']
         
-        for tech in set(technologies):
-            tech_reads = [r for r, t in zip(reads, technologies) if t == tech]
+        for i, (reads_file, tech) in enumerate(zip(read_files, technologies)):
+            self.logger.info(f"\n  Processing file {i+1}/{len(read_files)}: {Path(reads_file).name} ({tech})")
             
+            # Select technology-specific corrector
             if tech == 'illumina':
                 corrector = IlluminaCorrector(
                     kmer_size=self.config['correction']['illumina']['kmer_size'],
@@ -403,50 +417,59 @@ class PipelineOrchestrator:
                 # Auto-detect or unknown - use generic
                 corrector = IlluminaCorrector()
             
-            self.logger.info(f"  Correcting {len(tech_reads)} {tech} reads...")
-            tech_corrected = corrector.correct_reads(tech_reads)
-            corrected_reads.extend(tech_corrected)
-        
-        # Save corrected reads
-        corrected_path = self.output_dir / "corrected_reads.fastq"
-        self._save_reads(corrected_reads, corrected_path)
-        
-        self.logger.info(f"✓ Corrected {len(corrected_reads)} reads")
-        self.logger.info(f"  Output: {corrected_path}")
-        
-        self.state['corrected_reads'] = corrected_reads
+            # Correct reads in streaming fashion
+            input_path = Path(reads_file)
+            output_path = self.output_dir / f"corrected_{tech}_{i}.fastq"
+            
+            corrected_count = 0
+            with open(output_path, 'w') as out_f:
+                for read in self._read_file_streaming(input_path):
+                    # Correct individual read
+                    corrected = corrector.correct_read(read)
+                    if corrected:
+                        # Write immediately to output file
+                        self._write_read_to_file(corrected, out_f)
+                        corrected_count += 1
+            
+            self.logger.info(f"    ✓ Corrected {corrected_count:,} reads → {output_path.name}")
+            
+            # Store corrected file path by technology
+            if tech not in self.state['corrected_files']:
+                self.state['corrected_files'][tech] = []
+            self.state['corrected_files'][tech].append(str(output_path))
     
     def _step_assemble(self):
         """Assembly step."""
         self.logger.info("Assembling contigs...")
         
-        # Load corrected reads
-        if self.state['corrected_reads'] is None:
-            corrected_path = self.output_dir / "corrected_reads.fastq"
-            if corrected_path.exists():
-                corrected_reads = list(read_fastq(corrected_path))
-            else:
-                # Fall back to original reads if correction was skipped
-                corrected_reads = self._load_reads()
-        else:
-            corrected_reads = self.state['corrected_reads']
-        
         # Load AI models if enabled
         use_ai = self.config['ai']['enabled']
         ai_models = self._load_ai_models() if use_ai else None
         
-        # Detect primary technology for assembly strategy
-        technologies = self.config['runtime']['technologies']
+        # Determine primary technology for assembly strategy
+        technologies = self.state['technologies']
         primary_tech = max(set(technologies), key=technologies.count)
         
-        # Run assembly using integrated assembly orchestrator methods
         self.logger.info(f"  Primary technology: {primary_tech}")
         self.logger.info(f"  AI-powered assembly: {use_ai}")
         
-        # Determine read type for assembly routing
-        read_type = primary_tech.lower()
+        # Prepare corrected read files by category
+        corrected_files = self.state['corrected_files']
         
-        # Prepare HiC data if enabled
+        # Separate by read type for assembly (without loading into memory)
+        long_read_files = []
+        ul_read_files = []
+        illumina_read_files = []
+        
+        for tech, files in corrected_files.items():
+            if tech == 'ont' or tech == 'pacbio':
+                long_read_files.extend(files)
+            elif tech == 'ont_ultralong':
+                ul_read_files.extend(files)
+            elif tech == 'illumina':
+                illumina_read_files.extend(files)
+        
+        # Prepare Hi-C data if enabled
         hic_data = None
         if self.config['scaffolding']['hic']['enabled']:
             hic_data = {
@@ -455,12 +478,12 @@ class PipelineOrchestrator:
             }
         
         # Run technology-specific assembly pipeline
+        # Pass file paths instead of loaded reads
         assembly_result = self._run_assembly_pipeline(
-            read_type=read_type,
-            corrected_reads=corrected_reads,
-            long_reads=None,  # Use corrected_reads as long reads
-            ul_reads=None,    # TODO: Extract UL reads if available
-            ul_anchors=None,
+            read_type=primary_tech.lower(),
+            illumina_files=illumina_read_files,
+            long_read_files=long_read_files,
+            ul_read_files=ul_read_files,
             hic_data=hic_data,
             ml_k_model=ai_models.get('adaptive_kmer') if use_ai else None
         )
@@ -503,26 +526,22 @@ class PipelineOrchestrator:
     def _run_assembly_pipeline(
         self,
         read_type: str,
-        corrected_reads: List[SeqRead],
-        olc_long_reads: Optional[List[SeqRead]] = None,
-        long_reads: Optional[List[SeqRead]] = None,
-        ul_reads: Optional[List[SeqRead]] = None,
-        ul_anchors: Optional[List[ULAnchor]] = None,
+        illumina_files: Optional[List[str]] = None,
+        long_read_files: Optional[List[str]] = None,
+        ul_read_files: Optional[List[str]] = None,
         hic_data: Optional[Any] = None,
         ml_k_model: Optional[Any] = None
     ) -> AssemblyResult:
         """
         Orchestrate the full assembly flow based on read_type.
         
-        Integrated from AssemblyOrchestrator.run_assembly_pipeline().
+        Now uses streaming file-based processing to avoid memory issues.
         
         Args:
             read_type: One of "illumina", "hifi", "ont", "ancient", "mixed"
-            corrected_reads: Error-corrected reads (from preprocessing)
-            olc_long_reads: Optional artificial long reads from OLC (for Illumina)
-            long_reads: Optional true long reads (HiFi, ONT)
-            ul_reads: Optional ultra-long ONT reads (for string graph overlay)
-            ul_anchors: Optional pre-computed UL anchors to DBG nodes
+            illumina_files: List of corrected Illumina read file paths
+            long_read_files: List of corrected long read file paths (HiFi, ONT)
+            ul_read_files: List of corrected ultra-long read file paths
             hic_data: Optional Hi-C data for scaffolding
             ml_k_model: Optional ML model for regional k-mer selection
         
@@ -543,30 +562,30 @@ class PipelineOrchestrator:
         # Determine pipeline flow based on read_type
         if read_type == "illumina":
             result = self._run_illumina_pipeline(
-                corrected_reads, olc_long_reads, ul_reads, ul_anchors,
+                illumina_files, long_read_files, ul_read_files,
                 hic_data, ml_k_model
             )
         
         elif read_type == "hifi" or read_type == "pacbio":
             result = self._run_hifi_pipeline(
-                long_reads or corrected_reads, ul_reads, ul_anchors,
+                long_read_files, ul_read_files,
                 hic_data, ml_k_model
             )
         
         elif read_type == "ont" or read_type == "ont_r10" or read_type == "ont_ultralong":
             result = self._run_ont_pipeline(
-                long_reads or corrected_reads, ul_reads, ul_anchors,
+                long_read_files, ul_read_files,
                 hic_data, ml_k_model
             )
         
         elif read_type == "ancient":
             result = self._run_ancient_pipeline(
-                corrected_reads, ul_reads, ul_anchors, hic_data, ml_k_model
+                long_read_files, ul_read_files, hic_data, ml_k_model
             )
         
         elif read_type == "mixed":
             result = self._run_mixed_pipeline(
-                corrected_reads, long_reads, ul_reads, ul_anchors,
+                illumina_files, long_read_files, ul_read_files,
                 hic_data, ml_k_model
             )
         
@@ -581,10 +600,9 @@ class PipelineOrchestrator:
     
     def _run_illumina_pipeline(
         self,
-        corrected_reads: List[SeqRead],
-        olc_long_reads: Optional[List[SeqRead]],
-        ul_reads: Optional[List[SeqRead]],
-        ul_anchors: Optional[List[ULAnchor]],
+        illumina_files: Optional[List[str]],
+        long_read_files: Optional[List[str]],
+        ul_read_files: Optional[List[str]],
         hic_data: Optional[Any],
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
@@ -592,7 +610,7 @@ class PipelineOrchestrator:
         Illumina pipeline: OLC → DBG → [String Graph if UL] → Hi-C.
         
         Flow:
-        1. Use OLC to generate artificial long reads (if not provided)
+        1. Use OLC to generate artificial long reads (streaming from files)
         2. Build DBG from artificial long reads
         3. Build string graph IF UL reads available (always follows DBG)
         4. Scaffold with Hi-C (if available)
@@ -1130,28 +1148,25 @@ class PipelineOrchestrator:
         # If last step was completed, start from beginning
         return self.steps[0]
     
-    def _load_reads(self) -> List[SeqRead]:
-        """Load input reads from files."""
-        all_reads = []
-        
-        for reads_file in self.config['runtime']['reads']:
-            reads_path = Path(reads_file)
-            
-            if reads_path.suffix in ['.fq', '.fastq']:
-                reads = list(read_fastq(reads_path))
-            elif reads_path.suffix in ['.fa', '.fasta']:
-                reads = list(read_fasta(reads_path))
-            else:
-                # Try both
-                try:
-                    reads = list(read_fastq(reads_path))
-                except:
-                    reads = list(read_fasta(reads_path))
-            
-            all_reads.extend(reads)
-            self.logger.info(f"  Loaded {len(reads):,} reads from {reads_file}")
-        
-        return all_reads
+    def _read_file_streaming(self, reads_path: Path):
+        """Stream reads from file without loading all into memory."""
+        if reads_path.suffix in ['.fq', '.fastq']:
+            yield from read_fastq(reads_path)
+        elif reads_path.suffix in ['.fa', '.fasta']:
+            yield from read_fasta(reads_path)
+        else:
+            # Try FASTQ first, fall back to FASTA
+            try:
+                yield from read_fastq(reads_path)
+            except:
+                yield from read_fasta(reads_path)
+    
+    def _write_read_to_file(self, read: SeqRead, file_handle):
+        """Write a single read to an open file handle (FASTQ format)."""
+        file_handle.write(f"@{read.id}\n")
+        file_handle.write(f"{read.sequence}\n")
+        file_handle.write("+\n")
+        file_handle.write(f"{read.quality}\n")
     
     def _save_reads(self, reads: List[SeqRead], output_path: Path):
         """Save reads to file."""
