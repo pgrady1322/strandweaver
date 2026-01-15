@@ -20,6 +20,7 @@ Consolidated from:
 from dataclasses import dataclass, field
 from typing import Dict, Set, List, Optional, Tuple, Any
 from collections import defaultdict, Counter
+from pathlib import Path
 import logging
 
 from strandweaver.utils.hardware_management import GPUKmerExtractor, GPUGraphBuilder
@@ -308,8 +309,6 @@ class Anchor:
             >>> builder = DeBruijnGraphBuilder()
             >>> dbg = builder.build_dbg_with_preprocessing(result.corrected_reads_path, result)
         """
-        from pathlib import Path
-        
         corrected_reads_path = Path(corrected_reads_path)
         
         logger.info("=" * 80)

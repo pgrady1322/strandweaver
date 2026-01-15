@@ -99,3 +99,38 @@ execution:
   log_level: INFO  # Log level: DEBUG, INFO, WARNING, ERROR
   checkpoint_frequency: 1  # Checkpoint after each major step (1 = always)
   temp_dir: null  # Temporary directory (null = system default)
+
+# Chromosome classification configuration
+chromosome_classification:
+  enabled: false  # Enable chromosome/microchromosome identification
+  advanced: false  # Enable advanced features (Tier 3: telomeres, Hi-C patterns)
+  mode: fast  # Classification mode: fast, accurate, comprehensive
+  
+  # Pre-filtering parameters (Tier 1)
+  min_length: 50000  # Minimum scaffold length (50 kb)
+  max_length: 20000000  # Maximum scaffold length (20 Mb)
+  min_coverage_ratio: 0.3  # Minimum coverage vs genome average
+  max_coverage_ratio: 1.5  # Maximum coverage vs genome average
+  
+  # Gene detection (Tier 2)
+  gene_detection_method: blast  # Method: blast, augustus, busco, orf
+  blast_database: nr  # BLAST database (nr, swissprot, custom path)
+  blast_evalue: 1e-5  # BLAST e-value threshold
+  min_gene_density: 5  # Minimum genes per Mb for chromosomes
+  
+  # Augustus parameters (if gene_detection_method=augustus)
+  augustus_species: human  # Augustus species model
+  
+  # BUSCO parameters (if gene_detection_method=busco)
+  busco_lineage: auto  # BUSCO lineage (auto, vertebrata_odb10, etc.)
+  
+  # Advanced features (Tier 3, requires advanced=true)
+  check_telomeres: true  # Search for telomeric repeats
+  check_hic_patterns: true  # Analyze Hi-C contact patterns (if Hi-C data available)
+  check_synteny: false  # Check synteny with reference genome
+  reference_genome: null  # Path to reference genome (required if check_synteny=true)
+  
+  # Output
+  output_format: json  # Output format: json, csv
+  annotate_graph: true  # Add annotations to graph for BandageNG visualization
+

@@ -234,6 +234,15 @@ def config_show(config_file, format):
               help='Hi-C R1 reads (proximity ligation for scaffolding, not error-corrected)')
 @click.option('--hic-r2', type=click.Path(exists=True),
               help='Hi-C R2 reads (proximity ligation for scaffolding, not error-corrected)')
+# ============================================================================
+# Chromosome Classification
+# ============================================================================
+@click.option('--id-chromosomes', is_flag=True,
+              help='Identify microchromosomes/chromosomal segments using gene content analysis (BLAST-based)')
+@click.option('--id-chromosomes-advanced', is_flag=True,
+              help='Enable advanced chromosome identification (includes telomere and Hi-C pattern analysis)')
+@click.option('--blast-db', type=str, default='nr',
+              help='BLAST database for chromosome classification (default: nr)')
 @click.pass_context
 def pipeline(ctx, reads_files, technologies, 
              reads1, reads2, reads3, reads4, reads5,
@@ -242,7 +251,8 @@ def pipeline(ctx, reads_files, technologies,
              use_ai, disable_correction_ai, disable_assembly_ai, ai_finish,
              use_gpu, gpu_backend, gpu_device, threads,
              resume, checkpoint_dir, start_from, skip_profiling, skip_correction,
-             illumina_r1, illumina_r2, hic_r1, hic_r2):
+             illumina_r1, illumina_r2, hic_r1, hic_r2,
+             id_chromosomes, id_chromosomes_advanced, blast_db):
     """
     Run the complete assembly pipeline.
     
@@ -594,6 +604,24 @@ def pipeline(ctx, reads_files, technologies,
         click.echo(f"\n⚙️  Config: Using defaults (generate with: strandweaver config init)")
     
     click.echo(f"{'='*60}\n")
+    
+    # ========================================================================
+    # Chromosome Classification Configuration
+    # ========================================================================
+    if id_chromosomes or id_chromosomes_advanced:
+        # Initialize chromosome_classification config if not present
+        if 'chromosome_classification' not in pipeline_config:
+            pipeline_config['chromosome_classification'] = {}
+        
+        pipeline_config['chromosome_classification']['enabled'] = True
+        pipeline_config['chromosome_classification']['advanced'] = id_chromosomes_advanced
+        pipeline_config['chromosome_classification']['blast_database'] = blast_db
+        pipeline_config['chromosome_classification']['mode'] = 'fast'
+        
+        if verbose:
+            mode = "Advanced (Tiers 1-3)" if id_chromosomes_advanced else "Basic (Tiers 1-2)"
+            click.echo(f"ℹ️  Chromosome classification enabled: {mode}")
+            click.echo(f"   BLAST database: {blast_db}")
     
     # ========================================================================
     # Run Pipeline

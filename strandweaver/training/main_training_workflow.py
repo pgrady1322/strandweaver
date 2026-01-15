@@ -1197,8 +1197,8 @@ SCENARIOS = {
     
     'balanced': ScenarioConfig(
         name='balanced',
-        genome_size=1_000_000,
-        num_genomes=30,  # Reduced from 100 for faster generation
+        genome_size=10_000_000,  # 10 Mb - production scale
+        num_genomes=100,  # Full production dataset
         illumina_coverage=30.0,
         hifi_coverage=30.0,
         ont_coverage=30.0,
@@ -1209,8 +1209,8 @@ SCENARIOS = {
     
     'repeat_heavy': ScenarioConfig(
         name='repeat_heavy',
-        genome_size=2_000_000,
-        num_genomes=50,
+        genome_size=10_000_000,  # 10 Mb - production scale
+        num_genomes=100,  # Increased from 50
         repeat_density=0.60,  # 60% repeats (high)
         illumina_coverage=40.0,
         hifi_coverage=40.0,
@@ -1223,8 +1223,8 @@ SCENARIOS = {
     
     'sv_dense': ScenarioConfig(
         name='sv_dense',
-        genome_size=1_000_000,
-        num_genomes=50,
+        genome_size=10_000_000,  # 10 Mb - production scale
+        num_genomes=100,  # Increased from 50
         sv_density=0.0005,  # 10× normal SV density
         sv_max_size=500_000,  # Larger SVs
         illumina_coverage=40.0,
@@ -1237,7 +1237,7 @@ SCENARIOS = {
     
     'diploid_focus': ScenarioConfig(
         name='diploid_focus',
-        genome_size=1_000_000,
+        genome_size=10_000_000,  # 10 Mb - production scale
         num_genomes=100,
         snp_rate=0.02,  # 2% heterozygosity (high)
         illumina_coverage=30.0,
@@ -1250,8 +1250,8 @@ SCENARIOS = {
     
     'ultra_long_focus': ScenarioConfig(
         name='ultra_long_focus',
-        genome_size=5_000_000,
-        num_genomes=30,
+        genome_size=10_000_000,  # 10 Mb - production scale
+        num_genomes=100,  # Increased from 30
         illumina_coverage=20.0,
         hifi_coverage=30.0,
         ont_coverage=20.0,

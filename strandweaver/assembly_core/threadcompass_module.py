@@ -232,6 +232,111 @@ class ThreadCompass:
         self.logger.info(f"Registered {len(mappings)} UL read mappings")
         return len(mappings)
     
+    # ========================================================================
+    #                    PIPELINE INTEGRATION INTERFACE
+    # ========================================================================
+    
+    def route_ul_reads(
+        self,
+        graph: Any,
+        ul_reads: List[Any],
+        phasing_info: Optional[Any] = None,
+        edgewarden_scores: Optional[Dict] = None,
+        pathweaver_scores: Optional[Dict] = None
+    ) -> Any:
+        """
+        Route ultra-long reads through assembly graph and update graph structure.
+        
+        Main pipeline integration method that:
+        1. Maps UL reads to graph nodes
+        2. Detects new joins from spanning evidence
+        3. Scores paths through ambiguous regions
+        4. Updates graph with UL-supported edges
+        5. Stores routing information for downstream modules (SVScribe)
+        
+        Args:
+            graph: Assembly graph (DBGGraph or StringGraph)
+            ul_reads: List of ultra-long read sequences (SeqRead objects)
+            phasing_info: Optional phasing result for haplotype-aware routing
+            edgewarden_scores: Optional edge confidence scores from EdgeWarden
+            pathweaver_scores: Optional path scores from PathWeaver
+        
+        Returns:
+            Modified graph with UL-derived edges and updated scores
+        """
+        import time
+        start_time = time.time()
+        
+        self.logger.info("ThreadCompass: Routing ultra-long reads through graph")
+        self.logger.info(f"  UL reads: {len(ul_reads)}")
+        self.logger.info(f"  Graph nodes: {len(graph.nodes)}")
+        self.logger.info(f"  Graph edges: {len(graph.edges)}")
+        self.logger.info(f"  Phasing-aware: {'Yes' if phasing_info else 'No'}")
+        
+        # Store graph reference
+        self.graph = graph
+        
+        # Initialize routing storage for SVScribe
+        self._ul_routes = {}
+        
+        # Step 1: Map UL reads to graph nodes
+        self.logger.info("  Step 1/5: Mapping UL reads to graph nodes...")
+        mappings = self._map_ul_reads_to_graph(graph, ul_reads, self.k_mer_size)
+        self.register_ul_mappings(mappings)
+        self.logger.info(f"    Mapped {len(mappings)} reads")
+        
+        # Step 2: Build UL paths for SVScribe
+        self.logger.info("  Step 2/5: Building UL paths...")
+        self._ul_routes = self._build_ul_paths(mappings, graph)
+        self.logger.info(f"    Built {len(self._ul_routes)} paths")
+        
+        # Step 3: Detect new joins from spanning evidence
+        self.logger.info("  Step 3/5: Detecting new joins from UL spanning...")
+        new_joins = self.detect_new_joins(
+            max_joins=100,
+            min_ul_confidence=0.6
+        )
+        self.logger.info(f"    Detected {len(new_joins)} candidate joins")
+        
+        # Step 4: Filter joins by phasing consistency
+        if phasing_info:
+            self.logger.info("  Step 4/5: Filtering joins by phasing...")
+            new_joins = self._filter_joins_by_phasing(new_joins, phasing_info)
+            self.logger.info(f"    Retained {len(new_joins)} phase-consistent joins")
+        else:
+            self.logger.info("  Step 4/5: Skipping phasing filter (no phasing info)")
+        
+        # Step 5: Add UL-derived edges to graph
+        self.logger.info("  Step 5/5: Adding UL edges to graph...")
+        graph = self._add_ul_edges_to_graph(graph, new_joins, phasing_info)
+        
+        elapsed_time = time.time() - start_time
+        
+        # Log final statistics
+        ul_edge_count = sum(1 for e in graph.edges.values() if getattr(e, 'edge_type', None) == 'ul')
+        self.logger.info("ThreadCompass: Routing complete")
+        self.logger.info(f"  UL edges added: {ul_edge_count}")
+        self.logger.info(f"  Total graph edges: {len(graph.edges)}")
+        self.logger.info(f"  UL paths stored: {len(self._ul_routes)}")
+        self.logger.info(f"  Routing time: {elapsed_time:.2f}s")
+        
+        return graph
+    
+    def get_routes(self) -> Dict[str, ULPath]:
+        """
+        Get stored UL routing paths for downstream analysis.
+        
+        Used by SVScribe to access UL spanning evidence for SV detection.
+        
+        Returns:
+            Dictionary mapping read_id to ULPath objects
+        """
+        if not hasattr(self, '_ul_routes'):
+            self.logger.warning("No UL routes available - call route_ul_reads() first")
+            return {}
+        
+        return self._ul_routes
+    
     def detect_new_joins(
         self,
         max_joins: int = 100,
@@ -505,6 +610,388 @@ class ThreadCompass:
             "max_mapq": max(mapq_scores) if mapq_scores else 0,
             "indexed_nodes": len(self._read_index),
         }
+    
+    # ========================================================================
+    #                    PIPELINE INTEGRATION HELPERS
+    # ========================================================================
+    
+    def _map_ul_reads_to_graph(
+        self,
+        graph: Any,
+        ul_reads: List[Any],
+        k: int
+    ) -> List[ULMapping]:
+        """
+        Map ultra-long reads to graph nodes using k-mer anchoring.
+        
+        Algorithm:
+        1. Build k-mer index from graph nodes
+        2. Extract k-mers from each UL read
+        3. Find matching graph nodes for each k-mer
+        4. Cluster consecutive k-mer hits into anchors
+        5. Identify primary node (longest anchor) and secondary nodes
+        6. Calculate mapping quality (MAPQ-like score)
+        7. Build ULMapping objects
+        
+        Args:
+            graph: Assembly graph
+            ul_reads: List of SeqRead objects
+            k: K-mer size for mapping
+        
+        Returns:
+            List of ULMapping objects
+        """
+        self.logger.debug(f"Mapping {len(ul_reads)} UL reads with k={k}")
+        
+        # Build k-mer index from graph nodes
+        kmer_index = self._build_kmer_index(graph, k)
+        
+        mappings = []
+        for read_idx, read in enumerate(ul_reads):
+            if read_idx % 100 == 0 and read_idx > 0:
+                self.logger.debug(f"  Mapped {read_idx}/{len(ul_reads)} reads")
+            
+            # Get read sequence
+            read_seq = getattr(read, 'sequence', getattr(read, 'seq', ''))
+            read_id = getattr(read, 'id', f"read_{read_idx}")
+            
+            if len(read_seq) < k:
+                continue
+            
+            # Find k-mer matches
+            node_hits = self._find_kmer_matches(read_seq, k, kmer_index)
+            
+            if not node_hits:
+                continue
+            
+            # Cluster hits into anchors
+            anchors = self._cluster_hits_to_anchors(node_hits, read_seq, k)
+            
+            if not anchors:
+                continue
+            
+            # Identify primary and secondary nodes
+            anchor_scores = [(node_id, sum(a.score for a in anc_list)) 
+                           for node_id, anc_list in anchors.items()]
+            anchor_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            primary_node = anchor_scores[0][0]
+            secondary_nodes = [node_id for node_id, _ in anchor_scores[1:]]
+            
+            # Calculate mapping quality
+            primary_mapq = self._calculate_mapq(anchors[primary_node], len(read_seq))
+            secondary_mapq = max([self._calculate_mapq(anchors[n], len(read_seq)) 
+                                for n in secondary_nodes], default=0)
+            
+            # Determine if multimapping
+            is_multimapping = len(anchor_scores) > 1 and anchor_scores[1][1] > 0.8 * anchor_scores[0][1]
+            
+            # Create mapping
+            mapping = ULMapping(
+                read_id=read_id,
+                primary_node=primary_node,
+                secondary_nodes=secondary_nodes,
+                mapping_quality=primary_mapq,
+                primary_mapq=primary_mapq,
+                secondary_mapq=secondary_mapq,
+                anchor_count=len(anchors[primary_node]),
+                span_start=min(a.read_pos for a in anchors[primary_node]),
+                span_end=max(a.read_pos for a in anchors[primary_node]),
+                is_multimapping=is_multimapping
+            )
+            mappings.append(mapping)
+        
+        return mappings
+    
+    def _build_kmer_index(self, graph: Any, k: int) -> Dict[str, List[int]]:
+        """Build k-mer index from graph nodes."""
+        kmer_index = {}  # kmer -> [node_ids]
+        
+        for node_id, node in graph.nodes.items():
+            node_seq = getattr(node, 'sequence', getattr(node, 'seq', ''))
+            
+            if len(node_seq) < k:
+                continue
+            
+            # Extract k-mers from node
+            for i in range(len(node_seq) - k + 1):
+                kmer = node_seq[i:i+k]
+                
+                if kmer not in kmer_index:
+                    kmer_index[kmer] = []
+                kmer_index[kmer].append(node_id)
+        
+        return kmer_index
+    
+    def _find_kmer_matches(
+        self, read_seq: str, k: int, kmer_index: Dict[str, List[int]]
+    ) -> Dict[int, List[Tuple[int, int]]]:
+        """Find k-mer matches between read and graph."""
+        node_hits = {}  # node_id -> [(read_pos, node_pos), ...]
+        
+        for i in range(len(read_seq) - k + 1):
+            kmer = read_seq[i:i+k]
+            
+            if kmer in kmer_index:
+                for node_id in kmer_index[kmer]:
+                    if node_id not in node_hits:
+                        node_hits[node_id] = []
+                    node_hits[node_id].append((i, 0))  # Simplified - store read position
+        
+        return node_hits
+    
+    def _cluster_hits_to_anchors(
+        self, node_hits: Dict[int, List[Tuple[int, int]]], read_seq: str, k: int
+    ) -> Dict[int, List[ULAnchor]]:
+        """Cluster k-mer hits into anchors."""
+        anchors = {}  # node_id -> [ULAnchor]
+        
+        for node_id, hits in node_hits.items():
+            if not hits:
+                continue
+            
+            # Sort hits by read position
+            hits.sort(key=lambda x: x[0])
+            
+            # Cluster consecutive hits
+            current_cluster = [hits[0]]
+            node_anchors = []
+            
+            for i in range(1, len(hits)):
+                # If within k positions, extend cluster
+                if hits[i][0] - current_cluster[-1][0] <= k * 2:
+                    current_cluster.append(hits[i])
+                else:
+                    # Create anchor from cluster
+                    if len(current_cluster) >= 2:
+                        anchor = ULAnchor(
+                            node_id=node_id,
+                            read_pos=current_cluster[0][0],
+                            node_pos=0,
+                            strand=True,
+                            score=len(current_cluster) * k,
+                            length=current_cluster[-1][0] - current_cluster[0][0] + k
+                        )
+                        node_anchors.append(anchor)
+                    
+                    # Start new cluster
+                    current_cluster = [hits[i]]
+            
+            # Process last cluster
+            if len(current_cluster) >= 2:
+                anchor = ULAnchor(
+                    node_id=node_id,
+                    read_pos=current_cluster[0][0],
+                    node_pos=0,
+                    strand=True,
+                    score=len(current_cluster) * k,
+                    length=current_cluster[-1][0] - current_cluster[0][0] + k
+                )
+                node_anchors.append(anchor)
+            
+            if node_anchors:
+                anchors[node_id] = node_anchors
+        
+        return anchors
+    
+    def _calculate_mapq(self, anchors: List[ULAnchor], read_length: int) -> int:
+        """Calculate mapping quality (0-60)."""
+        if not anchors:
+            return 0
+        
+        # Total aligned length
+        total_aligned = sum(a.length for a in anchors)
+        
+        # Fraction of read covered
+        coverage = min(1.0, total_aligned / read_length)
+        
+        # MAPQ score (0-60)
+        mapq = int(coverage * 60)
+        
+        return mapq
+    
+    def _build_ul_paths(
+        self,
+        mappings: List[ULMapping],
+        graph: Any
+    ) -> Dict[str, ULPath]:
+        """
+        Build candidate paths through graph for each UL read.
+        
+        Args:
+            mappings: List of UL mappings
+            graph: Assembly graph
+        
+        Returns:
+            Dictionary mapping read_id to ULPath objects
+        """
+        paths = {}
+        
+        for mapping in mappings:
+            # Build ordered path: primary → secondary nodes
+            nodes = [mapping.primary_node] + mapping.secondary_nodes
+            
+            # Check if path exists in graph (via edges)
+            path_exists = True
+            for i in range(len(nodes) - 1):
+                edge_exists = self._check_edge_exists(graph, nodes[i], nodes[i+1])
+                if not edge_exists:
+                    path_exists = False
+            
+            # Calculate gaps between non-adjacent nodes
+            gaps = []
+            if not path_exists:
+                # Estimate gaps
+                for i in range(len(nodes) - 1):
+                    if not self._check_edge_exists(graph, nodes[i], nodes[i+1]):
+                        # Rough gap estimate (simplified)
+                        gaps.append((i, i+1, 1000))
+            
+            # Create ULPath
+            path = ULPath(
+                nodes=nodes,
+                anchors=[],  # Simplified - could populate from mapping
+                total_aligned=mapping.span_end - mapping.span_start,
+                gaps=gaps,
+                strand_consistent=True
+            )
+            
+            paths[mapping.read_id] = path
+        
+        return paths
+    
+    def _check_edge_exists(self, graph: Any, from_node: int, to_node: int) -> bool:
+        """Check if edge exists between two nodes."""
+        for edge in graph.edges.values():
+            if hasattr(edge, 'from_node') and hasattr(edge, 'to_node'):
+                if (edge.from_node == from_node and edge.to_node == to_node) or \
+                   (edge.from_node == to_node and edge.to_node == from_node):
+                    return True
+            elif hasattr(edge, 'from_id') and hasattr(edge, 'to_id'):
+                if (edge.from_id == from_node and edge.to_id == to_node) or \
+                   (edge.from_id == to_node and edge.to_id == from_node):
+                    return True
+        return False
+    
+    def _add_ul_edges_to_graph(
+        self,
+        graph: Any,
+        new_joins: List[Tuple[int, int, float]],
+        phasing_info: Optional[Any] = None
+    ) -> Any:
+        """
+        Add UL-derived edges to assembly graph.
+        
+        Args:
+            graph: Assembly graph
+            new_joins: List of (from_node, to_node, ul_confidence) tuples
+            phasing_info: Optional phasing for haplotype boundary checking
+        
+        Returns:
+            Modified graph with new edges
+        """
+        edges_added = 0
+        
+        # Generate edge IDs starting from max existing ID
+        max_edge_id = max(graph.edges.keys()) if graph.edges else 0
+        next_edge_id = max_edge_id + 1
+        
+        for from_node, to_node, ul_confidence in new_joins:
+            # Check if edge already exists
+            if self._check_edge_exists(graph, from_node, to_node):
+                continue
+            
+            # Verify phasing consistency (don't add cross-haplotype edges)
+            if phasing_info and hasattr(phasing_info, 'node_assignments'):
+                hap_a = phasing_info.node_assignments.get(from_node)
+                hap_b = phasing_info.node_assignments.get(to_node)
+                
+                if hap_a is not None and hap_b is not None and hap_a != hap_b:
+                    # Skip cross-haplotype edge
+                    continue
+            
+            # Count supporting reads
+            spanning_reads = self._find_spanning_reads(from_node, to_node)
+            support_reads = len(spanning_reads)
+            
+            # Create edge object
+            # Use a simple dict-like object if no Edge class available
+            edge = type('Edge', (), {
+                'from_node': from_node,
+                'to_node': to_node,
+                'from_id': from_node,  # Support both naming conventions
+                'to_id': to_node,
+                'edge_type': 'ul',
+                'confidence': ul_confidence,
+                'source': 'threadcompass',
+                'support_reads': support_reads,
+                'weight': ul_confidence
+            })()
+            
+            # Add to graph
+            graph.edges[next_edge_id] = edge
+            
+            # Update adjacency lists
+            if not hasattr(graph, 'out_edges'):
+                graph.out_edges = {}
+            if not hasattr(graph, 'in_edges'):
+                graph.in_edges = {}
+            
+            if from_node not in graph.out_edges:
+                graph.out_edges[from_node] = set()
+            graph.out_edges[from_node].add(next_edge_id)
+            
+            if to_node not in graph.in_edges:
+                graph.in_edges[to_node] = set()
+            graph.in_edges[to_node].add(next_edge_id)
+            
+            edges_added += 1
+            next_edge_id += 1
+        
+        self.logger.info(f"    Added {edges_added} UL-derived edges")
+        
+        return graph
+    
+    def _filter_joins_by_phasing(
+        self,
+        joins: List[Tuple[int, int, float]],
+        phasing_info: Any
+    ) -> List[Tuple[int, int, float]]:
+        """
+        Filter joins to respect haplotype boundaries.
+        
+        Args:
+            joins: Candidate joins
+            phasing_info: Phasing result with node_assignments
+        
+        Returns:
+            Filtered joins that don't cross haplotype boundaries
+        """
+        if not hasattr(phasing_info, 'node_assignments'):
+            self.logger.warning("Phasing info missing node_assignments, skipping filter")
+            return joins
+        
+        filtered = []
+        crosses_filtered = 0
+        
+        for from_node, to_node, score in joins:
+            # Get haplotype assignments
+            haplotype_a = phasing_info.node_assignments.get(from_node)
+            haplotype_b = phasing_info.node_assignments.get(to_node)
+            
+            # Keep if:
+            # 1. Both unassigned (None)
+            # 2. One unassigned
+            # 3. Same haplotype
+            if haplotype_a is None or haplotype_b is None or haplotype_a == haplotype_b:
+                filtered.append((from_node, to_node, score))
+            else:
+                crosses_filtered += 1
+        
+        if crosses_filtered > 0:
+            self.logger.info(f"      Filtered {crosses_filtered} cross-haplotype joins")
+        
+        return filtered
 
 
 class PathFeatureExtractor:

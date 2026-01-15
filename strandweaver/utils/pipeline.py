@@ -54,7 +54,14 @@ from ..assembly_core.edgewarden_module import EdgeWarden
 from ..assembly_core.pathweaver_module import PathWeaver
 from ..assembly_core.haplotype_detangler_module import HaplotypeDetangler
 from ..assembly_core.threadcompass_module import ThreadCompass
-from ..assembly_core.svscribe_module import SVScribe
+from ..assembly_core.svscribe_module import SVScribe, svs_to_dict_list
+from ..io_utils.assembly_export import (
+    export_graph_to_gfa,
+    export_assembly_stats,
+    export_for_bandageng,
+)
+from collections import defaultdict
+from dataclasses import asdict
 
 
 # ============================================================================
@@ -335,6 +342,8 @@ class PipelineOrchestrator:
             self._step_assemble()
         elif step == 'finish':
             self._step_finish()
+        elif step == 'classify_chromosomes':
+            self._step_classify_chromosomes()
         else:
             raise ValueError(f"Unknown step: {step}")
     
@@ -860,12 +869,68 @@ class PipelineOrchestrator:
         result.stats['sv_calls'] = len(sv_calls)
         result.stats['sv_types'] = sv_scribe.get_sv_type_counts()
         
+        # Export SV calls to JSON
+        if sv_calls:
+            self.logger.info(f"Exporting {len(sv_calls)} structural variant calls")
+            sv_path = self.output_dir / "sv_calls.json"
+            with open(sv_path, 'w') as f:
+                json.dump(svs_to_dict_list(sv_calls), f, indent=2)
+            self.logger.info(f"Saved SV calls to {sv_path}")
+        
+        # Export phasing information
+        if phasing_result:
+            self.logger.info("Exporting phasing information")
+            phasing_path = self.output_dir / "phasing_info.json"
+            with open(phasing_path, 'w') as f:
+                json.dump(asdict(phasing_result), f, indent=2)
+            self.logger.info(f"Saved phasing info to {phasing_path}")
+        
+        # Export assembly graph to GFA format
+        self.logger.info("Exporting assembly graph to GFA format")
+        gfa_path = self.output_dir / "assembly_graph.gfa"
+        export_graph_to_gfa(
+            result.string_graph or result.dbg,
+            gfa_path,
+            include_sequence=True,
+            include_coverage=True
+        )
+        self.logger.info(f"Saved graph to {gfa_path}")
+        
         # Step 11: Extract final contigs from refined graph
         self.logger.info("Step 11: Extracting final contigs from refined graph")
         result.contigs = self._extract_contigs_from_graph(
             result.string_graph or result.dbg
         )
         result.stats['num_contigs'] = len(result.contigs)
+        
+        # Export assembly statistics
+        self.logger.info("Calculating assembly statistics")
+        stats_path = self.output_dir / "assembly_stats.json"
+        contigs_list = [(c.id, c.sequence) for c in result.contigs]
+        export_assembly_stats(
+            result.string_graph or result.dbg,
+            stats_path,
+            contigs=contigs_list
+        )
+        self.logger.info(f"Saved statistics to {stats_path}")
+        
+        # Export coverage data for BandageNG visualization
+        self.logger.info("Exporting coverage data for BandageNG")
+        graph_for_export = result.string_graph or result.dbg
+        long_coverage = self._calculate_coverage_from_reads(graph_for_export, ont_reads)
+        ul_coverage = self._calculate_coverage_from_reads(graph_for_export, ul_reads) if ul_reads else None
+        hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
+        edge_scores = self._extract_edge_scores(graph_for_export)
+        
+        export_for_bandageng(
+            graph_for_export,
+            output_prefix=self.output_dir / "assembly",
+            long_read_coverage=long_coverage,
+            ul_read_coverage=ul_coverage,
+            hic_support=hic_coverage,
+            edge_quality_scores=edge_scores
+        )
+        self.logger.info("Exported coverage and edge score CSVs for BandageNG")
         
         # Step 12: Build scaffolds by traversing graph with Hi-C edge priority
         if hic_data:
@@ -877,6 +942,13 @@ class PipelineOrchestrator:
             )
             result.stats['num_scaffolds'] = len(result.scaffolds)
             result.stats['scaffold_n50'] = self._calculate_n50([len(s.seq) for s in result.scaffolds])
+            
+            # Save scaffolds to FASTA
+            if result.scaffolds:
+                self.logger.info(f"Saving {len(result.scaffolds)} scaffolds")
+                scaffolds_path = self.output_dir / "scaffolds.fasta"
+                self._save_reads(result.scaffolds, scaffolds_path)
+                self.logger.info(f"Saved scaffolds to {scaffolds_path}")
         
         return result
     
@@ -1035,12 +1107,68 @@ class PipelineOrchestrator:
         result.stats['sv_calls'] = len(sv_calls)
         result.stats['sv_types'] = sv_scribe.get_sv_type_counts()
         
+        # Export SV calls to JSON
+        if sv_calls:
+            self.logger.info(f"Exporting {len(sv_calls)} structural variant calls")
+            sv_path = self.output_dir / "sv_calls.json"
+            with open(sv_path, 'w') as f:
+                json.dump(svs_to_dict_list(sv_calls), f, indent=2)
+            self.logger.info(f"Saved SV calls to {sv_path}")
+        
+        # Export phasing information
+        if phasing_result:
+            self.logger.info("Exporting phasing information")
+            phasing_path = self.output_dir / "phasing_info.json"
+            with open(phasing_path, 'w') as f:
+                json.dump(asdict(phasing_result), f, indent=2)
+            self.logger.info(f"Saved phasing info to {phasing_path}")
+        
+        # Export assembly graph to GFA format
+        self.logger.info("Exporting assembly graph to GFA format")
+        gfa_path = self.output_dir / "assembly_graph.gfa"
+        export_graph_to_gfa(
+            result.string_graph or result.dbg,
+            gfa_path,
+            include_sequence=True,
+            include_coverage=True
+        )
+        self.logger.info(f"Saved graph to {gfa_path}")
+        
         # Step 10: Extract final contigs from refined graph (HiFi)
         self.logger.info("Step 10: Extracting final contigs from refined graph")
         result.contigs = self._extract_contigs_from_graph(
             result.string_graph or result.dbg
         )
         result.stats['num_contigs'] = len(result.contigs)
+        
+        # Export assembly statistics
+        self.logger.info("Calculating assembly statistics")
+        stats_path = self.output_dir / "assembly_stats.json"
+        contigs_list = [(c.id, c.sequence) for c in result.contigs]
+        export_assembly_stats(
+            result.string_graph or result.dbg,
+            stats_path,
+            contigs=contigs_list
+        )
+        self.logger.info(f"Saved statistics to {stats_path}")
+        
+        # Export coverage data for BandageNG visualization
+        self.logger.info("Exporting coverage data for BandageNG")
+        graph_for_export = result.string_graph or result.dbg
+        long_coverage = self._calculate_coverage_from_reads(graph_for_export, hifi_reads)
+        ul_coverage = self._calculate_coverage_from_reads(graph_for_export, ul_reads) if ul_reads else None
+        hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
+        edge_scores = self._extract_edge_scores(graph_for_export)
+        
+        export_for_bandageng(
+            graph_for_export,
+            output_prefix=self.output_dir / "assembly",
+            long_read_coverage=long_coverage,
+            ul_read_coverage=ul_coverage,
+            hic_support=hic_coverage,
+            edge_quality_scores=edge_scores
+        )
+        self.logger.info("Exported coverage and edge score CSVs for BandageNG")
         
         # Step 11: Build scaffolds prioritizing Hi-C edges (HiFi)
         if hic_data:
@@ -1052,6 +1180,13 @@ class PipelineOrchestrator:
             )
             result.stats['num_scaffolds'] = len(result.scaffolds)
             result.stats['scaffold_n50'] = self._calculate_n50([len(s.seq) for s in result.scaffolds])
+            
+            # Save scaffolds to FASTA
+            if result.scaffolds:
+                self.logger.info(f"Saving {len(result.scaffolds)} scaffolds")
+                scaffolds_path = self.output_dir / "scaffolds.fasta"
+                self._save_reads(result.scaffolds, scaffolds_path)
+                self.logger.info(f"Saved scaffolds to {scaffolds_path}")
         
         return result
     
@@ -1526,6 +1661,8 @@ class PipelineOrchestrator:
         Args:
             graph: DBGGraph or StringGraph to annotate
             hic_data: Hi-C read pairs for proximity ligation analysis
+                     Can be: (r1_path, r2_path) tuple for FASTQ pairs, or
+                     single BAM/SAM path for pre-aligned reads
         
         Returns:
             Graph with additional Hi-C proximity edges
@@ -1536,24 +1673,157 @@ class PipelineOrchestrator:
         3. Create new edges with type='hic' and proximity scores
         4. Add edges to graph without modifying existing edges
         """
+        from ..assembly_utils.hic_graph_aligner import align_hic_reads_to_graph
+        from ..assembly_core.strandtether_module import StrandTether
+        
         self.logger.info("Adding Hi-C proximity edges to graph")
         
-        # TODO: Full implementation
-        # For now, log that Hi-C edge addition is pending
-        self.logger.warning(
-            "Hi-C edge addition is not yet fully implemented. "
-            "Graph structure maintained, but Hi-C edges not added."
-        )
+        if hic_data is None:
+            self.logger.warning("No Hi-C data provided, skipping Hi-C edge addition")
+            return graph
         
-        # Placeholder: Return graph unchanged
-        # Real implementation would:
-        # 1. Parse Hi-C read pairs
-        # 2. Align to graph nodes
-        # 3. Build contact matrix
-        # 4. Threshold for significant contacts
-        # 5. Add proximity edges with type='hic'
+        # Get Hi-C configuration
+        hic_config = self.config.get('hic', {})
+        min_contacts = hic_config.get('min_contacts', 3)
+        k = hic_config.get('k', 21)
+        min_matches = hic_config.get('min_matches', 3)
+        sample_size = hic_config.get('sample_size', None)
+        min_contact_threshold = hic_config.get('min_contact_threshold', 2)
         
-        return graph
+        try:
+            # Step 1: Parse and align Hi-C reads to graph nodes
+            self.logger.info("  Parsing and aligning Hi-C reads...")
+            hic_pairs = align_hic_reads_to_graph(
+                hic_data=hic_data,
+                graph=graph,
+                k=k,
+                min_matches=min_matches,
+                sample_size=sample_size
+            )
+            
+            if not hic_pairs:
+                self.logger.warning("No Hi-C pairs aligned to graph, skipping edge addition")
+                return graph
+            
+            self.logger.info(f"  Aligned {len(hic_pairs)} Hi-C read pairs")
+            
+            # Step 2: Build contact map using StrandTether
+            self.logger.info("  Building Hi-C contact map...")
+            tether = StrandTether(min_contact_threshold=min_contact_threshold)
+            contact_map = tether.build_contact_map(hic_pairs)
+            
+            total_contacts = len(contact_map.contacts)
+            self.logger.info(f"  Contact map built: {total_contacts} unique contacts")
+            
+            if total_contacts == 0:
+                self.logger.warning("No contacts found in contact map")
+                return graph
+            
+            # Step 3: Add Hi-C edges to graph
+            self.logger.info(f"  Adding Hi-C edges (min_contacts={min_contacts})...")
+            
+            # Get maximum contact count for normalization
+            max_contact_count = max(contact_map.contacts.values())
+            
+            # Track edges added
+            edges_added = 0
+            
+            # Working with DBGGraph
+            if isinstance(graph, DBGGraph):
+                for (node1, node2), count in contact_map.contacts.items():
+                    # Skip if below threshold
+                    if count < min_contacts:
+                        continue
+                    
+                    # Skip if nodes don't exist in graph
+                    if node1 not in graph.nodes or node2 not in graph.nodes:
+                        continue
+                    
+                    # Calculate normalized proximity score (0-1)
+                    proximity_score = count / max_contact_count
+                    
+                    # Create Hi-C edge
+                    hic_edge = self._create_hic_edge(
+                        source=node1,
+                        target=node2,
+                        edge_type='hic',
+                        proximity_score=proximity_score,
+                        contact_count=count
+                    )
+                    
+                    # Add edge to graph
+                    graph.edges.append(hic_edge)
+                    edges_added += 1
+                
+                self.logger.info(f"  ✓ Added {edges_added} Hi-C edges to graph")
+            
+            # Working with StringGraph (add to underlying DBG)
+            elif isinstance(graph, StringGraph) and hasattr(graph, 'dbg'):
+                self.logger.info("  Applying Hi-C edges to underlying DBG...")
+                graph.dbg = self._add_hic_edges_to_graph(graph.dbg, hic_data)
+                edges_added = self._count_hic_edges(graph.dbg)
+                self.logger.info(f"  ✓ Added {edges_added} Hi-C edges to StringGraph's DBG")
+            
+            else:
+                self.logger.warning(f"Unsupported graph type: {type(graph)}")
+                return graph
+            
+            # Step 4: Log statistics
+            if edges_added > 0:
+                coverage = self._calculate_hic_coverage(graph)
+                self.logger.info(f"  Hi-C coverage: {coverage:.1f}% of nodes connected")
+            
+            return graph
+        
+        except Exception as e:
+            self.logger.error(f"Error adding Hi-C edges: {e}")
+            self.logger.warning("Continuing without Hi-C edges")
+            return graph
+    
+    def _create_hic_edge(
+        self,
+        source: int,
+        target: int,
+        edge_type: str,
+        proximity_score: float,
+        contact_count: int
+    ):
+        """
+        Create a Hi-C proximity edge compatible with graph structure.
+        
+        Args:
+            source: Source node ID
+            target: Target node ID
+            edge_type: Edge type (should be 'hic')
+            proximity_score: Normalized proximity score (0-1)
+            contact_count: Raw Hi-C contact count
+        
+        Returns:
+            Edge object compatible with DBGGraph/StringGraph
+        """
+        # Create a simple object with required attributes
+        # This should match the structure used by DBGGraph edges
+        class HiCEdge:
+            def __init__(self, source, target, edge_type, proximity_score, contact_count):
+                self.source = source
+                self.target = target
+                self.edge_type = edge_type
+                self.proximity_score = proximity_score
+                self.contact_count = contact_count
+                self.quality_score = proximity_score  # Alias for consistency
+                self.confidence = proximity_score     # Alias for compatibility
+                
+                # Additional metadata
+                self.metadata = {
+                    'hic_contact_count': contact_count,
+                    'proximity_score': proximity_score
+                }
+            
+            def __repr__(self):
+                return (f"HiCEdge({self.source}->{self.target}, "
+                       f"contacts={self.contact_count}, score={self.proximity_score:.3f})")
+        
+        return HiCEdge(source, target, edge_type, proximity_score, contact_count)
     
     def _count_hic_edges(self, graph: Union[DBGGraph, StringGraph]) -> int:
         """
@@ -1635,22 +1905,482 @@ class PipelineOrchestrator:
         """
         self.logger.info("Building scaffolds from graph with Hi-C edge priority")
         
-        # TODO: Full implementation
-        # For now, extract contigs and return (no Hi-C scaffolding yet)
-        self.logger.warning(
-            "Hi-C-guided scaffold extraction not yet fully implemented. "
-            "Returning contigs instead of scaffolds."
-        )
+        # Get scaffolding configuration
+        hic_config = self.config.get('hic', {})
+        gap_size = hic_config.get('gap_size', 100)
+        min_scaffold_length = hic_config.get('min_scaffold_length', 1000)
         
-        # Placeholder: Return contigs
-        # Real implementation would:
-        # 1. Find scaffold seed nodes (high coverage, unambiguous)
-        # 2. Extend scaffolds using sequence edges
-        # 3. Jump gaps using Hi-C edges
-        # 4. Respect phasing boundaries
-        # 5. Generate scaffold sequences with marked Hi-C junctions
+        # Check if there are Hi-C edges in the graph
+        hic_edge_count = self._count_hic_edges(graph)
         
-        return self._extract_contigs_from_graph(graph)
+        if hic_edge_count == 0 or not prefer_hic_edges:
+            self.logger.warning(
+                f"No Hi-C edges found (count={hic_edge_count}) or Hi-C disabled. "
+                "Returning contigs instead of scaffolds."
+            )
+            return self._extract_contigs_from_graph(graph)
+        
+        self.logger.info(f"  Found {hic_edge_count} Hi-C edges for scaffolding")
+        
+        # Work with DBGGraph (extract from StringGraph if needed)
+        if isinstance(graph, StringGraph) and hasattr(graph, 'dbg'):
+            working_graph = graph.dbg
+        elif isinstance(graph, DBGGraph):
+            working_graph = graph
+        else:
+            self.logger.warning(f"Unsupported graph type: {type(graph)}, returning contigs")
+            return self._extract_contigs_from_graph(graph)
+        
+        # Track visited nodes
+        visited = set()
+        scaffolds = []
+        
+        # Step 1: Get seed nodes (high coverage, unvisited)
+        node_coverage = {}
+        for node_id, node in working_graph.nodes.items():
+            if hasattr(node, 'coverage'):
+                node_coverage[node_id] = node.coverage
+            elif hasattr(node, 'count'):
+                node_coverage[node_id] = node.count
+            else:
+                node_coverage[node_id] = 1.0
+        
+        # Sort by coverage (descending)
+        seed_nodes = sorted(node_coverage.keys(), key=lambda n: node_coverage[n], reverse=True)
+        
+        self.logger.info(f"  Traversing from {len(seed_nodes)} potential seed nodes...")
+        
+        # Step 2: Build scaffolds by traversing from each seed
+        scaffold_count = 0
+        scaffolds_by_haplotype = {'hapA': [], 'hapB': [], 'unphased': []}
+        
+        for seed in seed_nodes:
+            if seed in visited:
+                continue
+            
+            # Traverse with Hi-C priority
+            path, junction_scores = self._traverse_with_hic_priority(
+                graph=working_graph,
+                start=seed,
+                visited=visited,
+                phasing_info=phasing_info
+            )
+            
+            # Only create scaffold if path has at least 2 nodes
+            node_ids = [p for p in path if isinstance(p, int)]
+            if len(node_ids) >= 2:
+                # Build scaffold sequence
+                scaffold_seq, hic_junctions = self._build_scaffold_sequence(
+                    graph=working_graph,
+                    path=path,
+                    default_gap_size=gap_size
+                )
+                
+                # Calculate scaffold confidence
+                confidence = self._calculate_scaffold_confidence(
+                    path=path,
+                    graph=working_graph,
+                    hic_junction_scores=junction_scores
+                )
+                
+                # Check minimum length
+                if len(scaffold_seq) >= min_scaffold_length:
+                    scaffold_count += 1
+                    
+                    # Determine haplotype
+                    haplotype = None
+                    if phasing_info:
+                        seed_hap = self._get_node_haplotype(seed, phasing_info)
+                        if seed_hap == 0:
+                            haplotype = 'hapA'
+                        elif seed_hap == 1:
+                            haplotype = 'hapB'
+                    
+                    if haplotype is None:
+                        haplotype = 'unphased'
+                    
+                    scaffold = SeqRead(
+                        id=f"scaffold_{scaffold_count}",
+                        sequence=scaffold_seq,
+                        quality="~" * len(scaffold_seq),
+                        metadata={
+                            'node_path': node_ids,
+                            'hic_scaffolded': True,
+                            'hic_junctions': hic_junctions,
+                            'num_nodes': len(node_ids),
+                            'num_hic_junctions': len(hic_junctions),
+                            'confidence': confidence,
+                            'seed_node': seed,
+                            'haplotype': haplotype
+                        }
+                    )
+                    scaffolds.append(scaffold)
+                    scaffolds_by_haplotype[haplotype].append(scaffold)
+        
+        self.logger.info(f"  ✓ Built {len(scaffolds)} scaffolds using Hi-C edges")
+        
+        # Report statistics
+        if scaffolds:
+            total_length = sum(len(s.sequence) for s in scaffolds)
+            avg_length = total_length / len(scaffolds)
+            n50 = self._calculate_n50([len(s.sequence) for s in scaffolds])
+            
+            # Calculate average confidence
+            confidences = [s.metadata['confidence'] for s in scaffolds]
+            avg_confidence = sum(confidences) / len(confidences)
+            
+            # Count Hi-C junctions
+            total_junctions = sum(s.metadata['num_hic_junctions'] for s in scaffolds)
+            
+            self.logger.info(f"  Total length: {total_length:,} bp")
+            self.logger.info(f"  Average length: {avg_length:,.0f} bp")
+            self.logger.info(f"  Scaffold N50: {n50:,} bp")
+            self.logger.info(f"  Total Hi-C junctions: {total_junctions}")
+            self.logger.info(f"  Average confidence: {avg_confidence:.2f}")
+            
+            # Report haplotype breakdown if phasing available
+            if phasing_info:
+                n_hapA = len(scaffolds_by_haplotype['hapA'])
+                n_hapB = len(scaffolds_by_haplotype['hapB'])
+                n_unphased = len(scaffolds_by_haplotype['unphased'])
+                
+                self.logger.info(f"  Haplotype breakdown:")
+                self.logger.info(f"    HapA: {n_hapA} scaffolds")
+                self.logger.info(f"    HapB: {n_hapB} scaffolds")
+                self.logger.info(f"    Unphased: {n_unphased} scaffolds")
+                
+                # Optionally save haplotype-specific files
+                if self.config.get('hic', {}).get('save_haplotype_scaffolds', True):
+                    self._save_haplotype_scaffolds(scaffolds_by_haplotype)
+        
+        return scaffolds
+    
+    def _save_haplotype_scaffolds(self, scaffolds_by_haplotype: Dict[str, List[SeqRead]]):
+        """
+        Save haplotype-specific scaffold files.
+        
+        Args:
+            scaffolds_by_haplotype: Dict mapping haplotype to scaffold lists
+        """
+        for haplotype, scaffolds in scaffolds_by_haplotype.items():
+            if not scaffolds:
+                continue
+            
+            filename = f"scaffolds_{haplotype}.fasta"
+            output_path = self.output_dir / filename
+            
+            self._save_reads(scaffolds, output_path)
+            self.logger.info(f"  Saved {len(scaffolds)} {haplotype} scaffolds to {filename}")
+    
+    def _traverse_with_hic_priority(
+        self,
+        graph,
+        start: int,
+        visited: set,
+        phasing_info: Optional[Any] = None
+    ) -> Tuple[List[Union[int, str, Tuple[str, int, float]]], List[float]]:
+        """
+        Traverse graph from start node, prioritizing Hi-C edges.
+        
+        Args:
+            graph: DBGGraph to traverse
+            start: Starting node ID
+            visited: Set of already visited nodes
+            phasing_info: Optional phasing information
+        
+        Returns:
+            Tuple of:
+            - List of node IDs and ('gap', gap_size, score) tuples representing the path
+            - List of Hi-C junction confidence scores
+        """
+        path = [start]
+        visited.add(start)
+        current = start
+        junction_scores = []  # Track Hi-C junction quality
+        
+        max_iterations = 10000  # Safety limit
+        iterations = 0
+        
+        while iterations < max_iterations:
+            iterations += 1
+            
+            # Find edges from current node
+            hic_edges = []      # (target, score, edge_obj)
+            sequence_edges = [] # (target, edge_obj)
+            
+            for edge in graph.edges:
+                # Check if edge starts from current node
+                if not hasattr(edge, 'source') or edge.source != current:
+                    continue
+                
+                target = edge.target
+                
+                # Skip if target already visited
+                if target in visited or target not in graph.nodes:
+                    continue
+                
+                # Check phasing compatibility
+                if phasing_info and not self._phasing_compatible(current, target, phasing_info):
+                    continue
+                
+                # Categorize edge by type
+                if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
+                    # Hi-C edge
+                    score = edge.proximity_score if hasattr(edge, 'proximity_score') else 0.5
+                    hic_edges.append((target, score, edge))
+                else:
+                    # Sequence edge (sequence or ultra-long)
+                    sequence_edges.append((target, edge))
+            
+            # Decide next node: Priority = sequence edges > Hi-C edges
+            if sequence_edges:
+                # Follow sequence edge (direct connection)
+                next_node = sequence_edges[0][0]
+                path.append(next_node)
+                visited.add(next_node)
+                current = next_node
+            
+            elif hic_edges:
+                # Follow Hi-C edge (long-range jump)
+                # Sort by score and take best
+                hic_edges.sort(key=lambda x: x[1], reverse=True)
+                next_node, score, edge = hic_edges[0]
+                
+                # Estimate gap size for this Hi-C junction
+                current_node = graph.nodes[current]
+                target_node = graph.nodes[next_node]
+                gap_size = self._estimate_gap_size(edge, current_node, target_node)
+                
+                # Mark with gap before Hi-C jump (include gap size and score)
+                path.append(('gap', gap_size, score))
+                path.append(next_node)
+                
+                # Track junction quality
+                junction_scores.append(score)
+                
+                visited.add(next_node)
+                current = next_node
+            
+            else:
+                # No more edges to follow
+                break
+        
+        return path, junction_scores
+    
+    def _build_scaffold_sequence(
+        self,
+        graph,
+        path: List[Union[int, Tuple[str, int, float]]],
+        default_gap_size: int = 100
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """
+        Build scaffold sequence from node path with variable N-gaps at Hi-C junctions.
+        
+        Args:
+            graph: DBGGraph
+            path: List of node IDs and ('gap', gap_size, score) tuples
+            default_gap_size: Default gap size for old-style 'gap' markers
+        
+        Returns:
+            Tuple of:
+            - scaffold_sequence: Full sequence with N-gaps
+            - junction_info: List of dicts with gap position, size, and confidence
+        """
+        parts = []
+        hic_junctions = []
+        current_pos = 0
+        
+        for element in path:
+            if isinstance(element, tuple) and element[0] == 'gap':
+                # New format: ('gap', gap_size, score)
+                gap_size = element[1]
+                score = element[2]
+                
+                # Insert N-gap
+                gap = 'N' * gap_size
+                parts.append(gap)
+                hic_junctions.append({
+                    'position': current_pos,
+                    'gap_size': gap_size,
+                    'confidence': score
+                })
+                current_pos += gap_size
+            
+            elif element == 'gap':
+                # Old format: simple 'gap' marker
+                gap = 'N' * default_gap_size
+                parts.append(gap)
+                hic_junctions.append({
+                    'position': current_pos,
+                    'gap_size': default_gap_size,
+                    'confidence': 0.5  # Unknown
+                })
+                current_pos += default_gap_size
+            
+            else:
+                # Add node sequence
+                node = graph.nodes[element]
+                seq = node.seq if hasattr(node, 'seq') else node.sequence
+                parts.append(seq)
+                current_pos += len(seq)
+        
+        scaffold_seq = ''.join(parts)
+        return scaffold_seq, hic_junctions
+    
+    def _estimate_gap_size(
+        self,
+        edge: Any,
+        node1: Any,
+        node2: Any,
+        default_gap: int = 100
+    ) -> int:
+        """
+        Estimate gap size for Hi-C junction based on contact frequency and graph distance.
+        
+        Strategy:
+        - High contact frequency (>0.7) → small gap (100 N)
+        - Medium contact frequency (0.3-0.7) → medium gap (500 N)
+        - Low contact frequency (<0.3) → large gap (1000 N)
+        - Adjust based on coverage discontinuity
+        
+        Args:
+            edge: Hi-C edge connecting the nodes
+            node1: Source node
+            node2: Target node
+            default_gap: Default gap size if no information available
+        
+        Returns:
+            Estimated gap size in base pairs
+        """
+        # Get contact frequency/proximity score
+        if hasattr(edge, 'proximity_score'):
+            contact_freq = edge.proximity_score
+        elif hasattr(edge, 'weight'):
+            # Normalize weight to 0-1 range (assume max weight ~100)
+            contact_freq = min(edge.weight / 100.0, 1.0)
+        else:
+            contact_freq = 0.5  # Unknown, assume medium
+        
+        # Base gap size from contact frequency
+        if contact_freq > 0.7:
+            base_gap = 100    # Strong contact, likely close
+        elif contact_freq > 0.4:
+            base_gap = 500    # Medium contact
+        elif contact_freq > 0.2:
+            base_gap = 1000   # Weak contact
+        else:
+            base_gap = 5000   # Very weak contact, large gap
+        
+        # Adjust for coverage discontinuity
+        cov1 = node1.coverage if hasattr(node1, 'coverage') else node1.count if hasattr(node1, 'count') else 1.0
+        cov2 = node2.coverage if hasattr(node2, 'coverage') else node2.count if hasattr(node2, 'count') else 1.0
+        
+        if cov1 > 0 and cov2 > 0:
+            cov_ratio = max(cov1, cov2) / min(cov1, cov2)
+            if cov_ratio > 2.0:
+                # Large coverage difference suggests a real gap
+                base_gap = int(base_gap * 1.5)
+        
+        # Cap at reasonable maximum
+        return min(base_gap, 10000)
+    
+    def _calculate_scaffold_confidence(
+        self,
+        path: List[Union[int, str]],
+        graph: Any,
+        hic_junction_scores: List[float]
+    ) -> float:
+        """
+        Calculate confidence score for a scaffold based on Hi-C junction quality.
+        
+        Args:
+            path: Scaffold path (nodes and gaps)
+            graph: Assembly graph
+            hic_junction_scores: Contact scores at each Hi-C junction
+        
+        Returns:
+            Confidence score (0.0-1.0)
+        """
+        if not hic_junction_scores:
+            # No Hi-C junctions, just contigs stitched together
+            return 1.0
+        
+        # Average junction quality
+        avg_score = sum(hic_junction_scores) / len(hic_junction_scores)
+        
+        # Penalty for many junctions (more junctions = more uncertainty)
+        num_junctions = len(hic_junction_scores)
+        junction_penalty = 1.0 - (num_junctions * 0.05)  # 5% penalty per junction
+        junction_penalty = max(junction_penalty, 0.5)  # Cap at 50% penalty
+        
+        # Combined confidence
+        confidence = avg_score * junction_penalty
+        
+        return min(max(confidence, 0.0), 1.0)
+    
+    def _get_node_haplotype(
+        self,
+        node_id: int,
+        phasing_info: Optional[Any]
+    ) -> Optional[int]:
+        """
+        Get haplotype assignment for a node.
+        
+        Args:
+            node_id: Node identifier
+            phasing_info: Phasing information from HaplotypeDetangler
+        
+        Returns:
+            0 (hapA), 1 (hapB), or None (unphased/ambiguous)
+        """
+        if phasing_info is None:
+            return None
+        
+        # PhasingResult format: node_assignments dict
+        if hasattr(phasing_info, 'node_assignments'):
+            assignments = phasing_info.node_assignments
+        elif isinstance(phasing_info, dict):
+            assignments = phasing_info
+        else:
+            return None
+        
+        phase = assignments.get(node_id)
+        
+        # Return None for unassigned/ambiguous (-1, 'unassigned', etc.)
+        if phase in [None, -1, 'unassigned']:
+            return None
+        
+        return phase
+    
+    def _phasing_compatible(
+        self,
+        node1: int,
+        node2: int,
+        phasing_info: Optional[Any]
+    ) -> bool:
+        """
+        Check if two nodes are phasing-compatible (same haplotype or ambiguous).
+        
+        Args:
+            node1: First node ID
+            node2: Second node ID
+            phasing_info: Phasing information (from HaplotypeDetangler)
+        
+        Returns:
+            True if nodes can be in same scaffold, False otherwise
+        """
+        if phasing_info is None:
+            return True  # No phasing info, allow all connections
+        
+        phase1 = self._get_node_haplotype(node1, phasing_info)
+        phase2 = self._get_node_haplotype(node2, phasing_info)
+        
+        # If either is unphased, allow
+        if phase1 is None or phase2 is None:
+            return True
+        
+        # Otherwise, must match
+        return phase1 == phase2
     
     # ========================================================================
     # Finishing and utility methods
@@ -1694,6 +2424,106 @@ class PipelineOrchestrator:
         
         self.logger.info(f"✓ Finishing complete")
         self.logger.info(f"  Final assembly: {final_path}")
+    
+    def _step_classify_chromosomes(self):
+        """
+        Classify unconnected scaffolds to identify potential microchromosomes.
+        
+        Uses multi-tier classification:
+        - Tier 1: Fast pre-filtering (length, coverage, GC, connectivity)
+        - Tier 2: Gene content analysis (BLAST homology search)
+        - Tier 3: Advanced features (telomeres, Hi-C patterns) - optional
+        """
+        # Check if enabled
+        if not self.config.get('chromosome_classification', {}).get('enabled', False):
+            self.logger.info("Chromosome classification disabled, skipping")
+            return
+        
+        self.logger.info("Classifying potential chromosomes and microchromosomes...")
+        
+        from ..assembly_utils.chromosome_classifier import ChromosomeClassifier
+        
+        # Get configuration
+        chrom_config = self.config.get('chromosome_classification', {})
+        advanced = chrom_config.get('advanced', False)
+        
+        # Load scaffolds (from assembly output)
+        scaffolds_path = self.output_dir / "scaffolds.fasta"
+        if not scaffolds_path.exists():
+            # Try contigs if no scaffolds
+            scaffolds_path = self.output_dir / "contigs.fasta"
+            if not scaffolds_path.exists():
+                self.logger.warning("No scaffolds or contigs found, skipping classification")
+                return
+        
+        self.logger.info(f"  Loading scaffolds from {scaffolds_path.name}...")
+        scaffolds = list(read_fasta(scaffolds_path))
+        self.logger.info(f"  Loaded {len(scaffolds)} scaffolds")
+        
+        # Initialize classifier
+        classifier = ChromosomeClassifier(config=chrom_config, advanced=advanced)
+        
+        # Get graph and Hi-C data if available
+        graph = self.state.get('graph')
+        contact_map = self.state.get('hic_contact_map')
+        
+        # Run classification
+        results = classifier.classify_scaffolds(
+            scaffolds=scaffolds,
+            graph=graph,
+            contact_map=contact_map
+        )
+        
+        # Export results
+        output_format = chrom_config.get('output_format', 'json')
+        output_path = self.output_dir / f"chromosome_classification.{output_format}"
+        
+        classifier.export_results(results, output_path, format=output_format)
+        
+        # Annotate graph for BandageNG if requested
+        if chrom_config.get('annotate_graph', True) and graph:
+            self._annotate_graph_with_classifications(graph, results)
+        
+        # Summary statistics
+        high_conf = sum(1 for r in results if r.classification == 'HIGH_CONFIDENCE_CHROMOSOME')
+        likely = sum(1 for r in results if r.classification == 'LIKELY_CHROMOSOME')
+        possible = sum(1 for r in results if r.classification == 'POSSIBLE_CHROMOSOME')
+        
+        self.logger.info(f"✓ Chromosome classification complete")
+        self.logger.info(f"  Results: {output_path}")
+        self.logger.info(f"  High confidence: {high_conf}")
+        self.logger.info(f"  Likely: {likely}")
+        self.logger.info(f"  Possible: {possible}")
+    
+    def _annotate_graph_with_classifications(self, graph, classifications: List):
+        """
+        Add chromosome classifications as node annotations in graph.
+        
+        This enables visualization in BandageNG with color-coded nodes.
+        """
+        # Create classification map
+        class_map = {c.scaffold_id: c for c in classifications}
+        
+        # Add annotations to nodes
+        for node_id, node in graph.nodes.items():
+            # Try to match node to classification
+            scaffold_name = f"scaffold_{node_id}"
+            if scaffold_name in class_map:
+                c = class_map[scaffold_name]
+                
+                # Add metadata
+                if not hasattr(node, 'metadata'):
+                    node.metadata = {}
+                
+                node.metadata['chromosome_class'] = c.classification
+                node.metadata['chromosome_prob'] = c.probability
+                node.metadata['is_chromosome'] = 'CHROMOSOME' in c.classification
+        
+        self.logger.info("  Graph annotated with chromosome classifications")
+    
+    # ========================================================================
+    # Checkpoint and utility methods
+    # ========================================================================
     
     def _create_checkpoint(self, step: str):
         """Create checkpoint after step completion."""
@@ -1770,6 +2600,153 @@ class PipelineOrchestrator:
         else:
             # Default to FASTA
             write_fasta(reads, output_path)
+    
+    def _calculate_coverage_from_reads(self, graph: Union[DBGGraph, StringGraph], 
+                                       reads: List[SeqRead]) -> Dict[int, float]:
+        """
+        Calculate per-node coverage from read mappings.
+        
+        Maps reads to graph nodes using k-mer matching and calculates coverage depth.
+        
+        Args:
+            graph: DBGGraph or StringGraph object
+            reads: List of SeqRead objects
+        
+        Returns:
+            Dict mapping node_id to coverage depth (float)
+        """
+        coverage = defaultdict(float)
+        
+        if not reads:
+            return coverage
+        
+        k = 21  # Use small k-mer size for mapping
+        
+        # Sample reads if too many (for performance)
+        sample_size = min(10000, len(reads))
+        sampled_reads = reads[:sample_size] if len(reads) > sample_size else reads
+        
+        for read in sampled_reads:
+            # Extract k-mers from read
+            seq = read.sequence
+            if len(seq) < k:
+                continue
+            
+            read_kmers = set(seq[i:i+k] for i in range(len(seq) - k + 1))
+            
+            # Find matching nodes
+            for node_id, node in graph.nodes.items():
+                node_seq = node.seq if hasattr(node, 'seq') else ""
+                if not node_seq or len(node_seq) < k:
+                    continue
+                
+                # Count k-mer matches
+                node_kmers = set(node_seq[i:i+k] for i in range(len(node_seq) - k + 1))
+                matches = len(read_kmers & node_kmers)
+                
+                if matches > 0:
+                    # Normalize by node length (k-mer count)
+                    node_kmer_count = max(1, len(node_seq) - k + 1)
+                    coverage[node_id] += matches / node_kmer_count
+        
+        # Scale up if we sampled
+        if len(reads) > sample_size:
+            scale_factor = len(reads) / sample_size
+            coverage = {nid: cov * scale_factor for nid, cov in coverage.items()}
+        
+        return dict(coverage)
+    
+    def _calculate_hic_coverage(self, graph: Union[DBGGraph, StringGraph]) -> Dict[int, float]:
+        """
+        Calculate per-node Hi-C support from Hi-C edges.
+        
+        Counts Hi-C contact edges connected to each node.
+        
+        Args:
+            graph: DBGGraph or StringGraph object with Hi-C edges
+        
+        Returns:
+            Dict mapping node_id to Hi-C contact count
+        """
+        hic_support = defaultdict(int)
+        
+        for edge in graph.edges:
+            if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
+                # Get source and target node IDs
+                source_id = edge.source if hasattr(edge, 'source') else edge.from_id
+                target_id = edge.target if hasattr(edge, 'target') else edge.to_id
+                
+                hic_support[source_id] += 1
+                hic_support[target_id] += 1
+        
+        return dict(hic_support)
+    
+    def _extract_edge_scores(self, graph: Union[DBGGraph, StringGraph]) -> Dict[Tuple[int, int], float]:
+        """
+        Extract edge quality scores (0-1) for BandageNG visualization.
+        
+        Gets EdgeWarden quality scores or calculates from edge properties.
+        
+        Args:
+            graph: DBGGraph or StringGraph object
+        
+        Returns:
+            Dict mapping (source_id, target_id) to quality score (0.0-1.0)
+        """
+        edge_scores = {}
+        
+        for edge in graph.edges:
+            # Get source and target IDs
+            source_id = edge.source if hasattr(edge, 'source') else edge.from_id
+            target_id = edge.target if hasattr(edge, 'target') else edge.to_id
+            
+            # Get quality score from edge attributes
+            if hasattr(edge, 'quality_score'):
+                # EdgeWarden score (already 0-1)
+                score = edge.quality_score
+            elif hasattr(edge, 'confidence'):
+                # Use confidence as score
+                score = edge.confidence
+            elif hasattr(edge, 'coverage'):
+                # Calculate score from coverage (normalize to 0-1)
+                # Assume coverage 1-50 maps to 0.0-1.0
+                score = min(1.0, edge.coverage / 50.0)
+            else:
+                # Default score
+                score = 0.5
+            
+            # Clamp to 0-1 range
+            score = max(0.0, min(1.0, score))
+            
+            edge_scores[(source_id, target_id)] = score
+        
+        return edge_scores
+    
+    def _calculate_n50(self, lengths: List[int]) -> int:
+        """
+        Calculate N50 from list of sequence lengths.
+        
+        N50 is the length L such that 50% of all bases are in sequences of length >= L.
+        
+        Args:
+            lengths: List of sequence lengths
+        
+        Returns:
+            N50 value (int)
+        """
+        if not lengths:
+            return 0
+        
+        sorted_lengths = sorted(lengths, reverse=True)
+        total = sum(sorted_lengths)
+        cumsum = 0
+        
+        for length in sorted_lengths:
+            cumsum += length
+            if cumsum >= total / 2:
+                return length
+        
+        return 0
     
     def _save_graph(self, graph, output_path: Path):
         """Save assembly graph to GFA format."""

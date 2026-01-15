@@ -234,7 +234,8 @@ def export_coverage_csv(
     long_read_coverage: dict[int, float],
     ul_read_coverage: dict[int, float] | None,
     hic_support: dict[int, float] | None,
-    output_prefix: str | Path
+    output_prefix: str | Path,
+    edge_quality_scores: dict[tuple[int, int], float] | None = None
 ) -> None:
     """
     Export per-node coverage/support data as CSV files for BandageNG overlay.
@@ -243,16 +244,23 @@ def export_coverage_csv(
     - {output_prefix}_long.csv: Long read coverage
     - {output_prefix}_ul.csv: Ultralong read coverage (if provided)
     - {output_prefix}_hic.csv: Hi-C contact support (if provided)
+    - {output_prefix}_edge_scores.csv: Edge quality scores 0-1 (if provided)
     
     Each CSV has columns:
     - node_name: External unitig name (e.g., 'unitig-1')
     - coverage: Numeric coverage/support value
+    
+    For edge scores CSV:
+    - from_node: Source node name
+    - to_node: Target node name  
+    - quality_score: Edge quality score 0.0-1.0
     
     BandageNG can load these CSVs to color nodes by coverage level,
     helping users identify:
     - Low-coverage regions (potential errors)
     - High-coverage regions (repeats or duplications)
     - Differential support across data types
+    - Low-quality edges (potential misassemblies)
     
     Args:
         graph: Graph object implementing GraphLike protocol
@@ -260,6 +268,7 @@ def export_coverage_csv(
         ul_read_coverage: Optional dict for ultralong read coverage
         hic_support: Optional dict for Hi-C contact count/weight
         output_prefix: Prefix for output CSV files
+        edge_quality_scores: Optional dict mapping (source_id, target_id) -> quality score (0-1)
     """
     output_prefix = Path(output_prefix)
     logger.info(f"Exporting coverage CSVs with prefix: {output_prefix}")
@@ -302,6 +311,17 @@ def export_coverage_csv(
                 support = hic_support.get(node_id, 0.0)
                 f.write(f"{node_name},{support:.2f}\n")
     
+    # Export edge quality scores if provided
+    if edge_quality_scores is not None:
+        edge_path = f"{output_prefix}_edge_scores.csv"
+        logger.info(f"Writing edge quality scores: {edge_path}")
+        with open(edge_path, 'w') as f:
+            f.write("from_node,to_node,quality_score\n")
+            for (source_id, target_id), score in sorted(edge_quality_scores.items()):
+                from_name = node_name_map.get(source_id, f"unitig-{source_id}")
+                to_name = node_name_map.get(target_id, f"unitig-{target_id}")
+                f.write(f"{from_name},{to_name},{score:.4f}\n")
+    
     logger.info("Coverage CSV export complete")
 
 
@@ -311,6 +331,7 @@ def export_for_bandageng(
     long_read_coverage: dict[int, float],
     ul_read_coverage: dict[int, float] | None = None,
     hic_support: dict[int, float] | None = None,
+    edge_quality_scores: dict[tuple[int, int], float] | None = None,
     include_sequence: bool = True
 ) -> dict[str, Path]:
     """
@@ -324,6 +345,7 @@ def export_for_bandageng(
         long_read_coverage: Long read coverage per node (required)
         ul_read_coverage: Ultralong coverage per node (optional)
         hic_support: Hi-C support per node (optional)
+        edge_quality_scores: Edge quality scores 0-1 per edge (optional)
         include_sequence: Whether to include sequences in GFA
     
     Returns:
@@ -332,14 +354,16 @@ def export_for_bandageng(
         - 'long_cov': Path to long read coverage CSV
         - 'ul_cov': Path to UL coverage CSV (if provided)
         - 'hic_cov': Path to Hi-C support CSV (if provided)
+        - 'edge_scores': Path to edge quality scores CSV (if provided)
     
     Example:
         >>> files = export_for_bandageng(
         ...     graph, "my_assembly",
-        ...     long_cov_dict, ul_cov_dict, hic_dict
+        ...     long_cov_dict, ul_cov_dict, hic_dict, edge_scores_dict
         ... )
         >>> print(f"Load {files['gfa']} in BandageNG")
         >>> print(f"Overlay coverage from {files['long_cov']}")
+        >>> print(f"Overlay edge quality from {files['edge_scores']}")
     """
     output_prefix = Path(output_prefix)
     output_files: dict[str, Path] = {}
@@ -353,7 +377,7 @@ def export_for_bandageng(
     
     # Export coverage CSVs
     export_coverage_csv(
-        graph, long_read_coverage, ul_read_coverage, hic_support, output_prefix
+        graph, long_read_coverage, ul_read_coverage, hic_support, output_prefix, edge_quality_scores
     )
     output_files['long_cov'] = Path(f"{output_prefix}_long.csv")
     
@@ -362,6 +386,9 @@ def export_for_bandageng(
     
     if hic_support is not None:
         output_files['hic_cov'] = Path(f"{output_prefix}_hic.csv")
+    
+    if edge_quality_scores is not None:
+        output_files['edge_scores'] = Path(f"{output_prefix}_edge_scores.csv")
     
     logger.info("Complete BandageNG export finished")
     logger.info(f"Generated {len(output_files)} output files")
