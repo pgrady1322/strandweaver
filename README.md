@@ -3,8 +3,8 @@
 **AI-Powered Multi-Technology Genome Assembler with GPU Acceleration**
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Status](https://img.shields.io/badge/status-Production%20Ready-brightgreen.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
-[![License](https://img.shields.io/badge/license-Dual%20Academic%2FCommercial-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-v0.1_Beta-yellow.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
+[![License](https://img.shields.io/badge/license-Dual%20License%20(Academic/Commercial)-blue.svg)](LICENSE_ACADEMIC.md)
 
 StrandWeaver is a next-generation genome assembly pipeline combining machine-learning optimized technology-aware error correction, graph-based assembly with haplotype-aware path resolution, and comprehensive structural variant detection for ancient DNA, Illumina, ONT, ultra-long ONT, and PacBio sequencing data. Its goal is to relieve manual curation bottlenecks in traditional high-contiguity genome assembly by applying AI/ML to genome graph paths and other complex regions. It uses these technologies to improve accuracy and contiguity, but also to provide functional annotations, such as structural variants, during the assembly process.
 
@@ -15,7 +15,9 @@ StrandWeaver is inspired by MaSuRCA, Verkko, and Hifiasm, but includes novel ele
 
 The pipeline can be custom trained using provided scripts for any data type (new sequencing technology) or organism-specific scenario (genomes with extreme repeat content, high heterozygosity, or complex structural variation).
 
-> **🚀 Latest (December 2025):** Complete end-to-end assembly pipeline with AI-powered modules for edge filtering, path resolution, Hi-C scaffolding, and structural variant detection. Full haplotype-aware diploid assembly with comprehensive output generation including GFA graphs, BandageNG visualization, and SV calls.
+> **🚀 v0.1 Release (February 2026):** Beta release with complete end-to-end assembly pipeline. All AI modules functional using optimized heuristics. Core pipeline ready for testing with real data. See [v0.1 Release Notes](#v01-release-notes) below.
+>
+> **Note:** Trained ML models (v0.2+) coming after community feedback on heuristic versions. GPU acceleration fully operational.
 
 ---
 
@@ -69,18 +71,18 @@ The pipeline can be custom trained using provided scripts for any data type (new
 - 🧪 **Training Infrastructure**: Generate custom training data for organism-specific optimization
 - 🔌 **Modular Architecture**: All AI features can be disabled for classical heuristics
 
-### AI-Powered Features
-- **Complete AI Subsystem Suite**:
-  1. ✅ **K-Weaver**: K-mer optimization with ML prediction and rule-based fallback
+### AI/ML Features (v0.1 - Heuristic-Based)
+- **Complete AI Subsystem Suite** (using optimized heuristics - trained models in v0.2+):
+  1. ✅ **K-Weaver**: K-mer optimization with rule-based selection
   2. ✅ **ErrorSmith**: Technology-specific error profiling
-  3. ✅ **EdgeWarden**: 80-feature edge filtering with alignment integration
-  4. ✅ **PathWeaver**: GNN-based haplotype-aware path resolution with variation protection
-  5. ✅ **ThreadCompass**: Ultra-long read routing optimization through assembly graphs
+  3. ✅ **EdgeWarden**: 80-feature edge filtering with heuristic scoring
+  4. ✅ **PathWeaver**: Haplotype-aware path resolution with variation protection
+  5. ✅ **ThreadCompass**: Ultra-long read routing optimization
   6. ✅ **HaplotypeDetangler**: Hi-C-augmented phasing with spectral clustering
   7. ✅ **SVScribe**: Assembly-time structural variant detection
-- **Training Infrastructure**: Complete data generation pipeline for custom model training
-- **Pre-trained Models**: Available for common scenarios (human, model organisms)
-- **Classical Fallbacks**: All AI modules have deterministic heuristic alternatives
+- **Training Infrastructure**: Complete synthetic data generation pipeline for custom model training
+- **Classical Fallbacks**: All AI modules functional with heuristic defaults
+- **Planned**: Trained ML models (XGBoost, PyTorch) for v0.2 release
 
 ---
 

@@ -1299,8 +1299,9 @@ def merge(reads_files, technologies, output, weights):
     if weights:
         click.echo(f"Weights: {weights}")
     
-    # TODO: Implement multi-technology merger
-    click.echo("\n⚠ Multi-technology merging implementation coming soon!")
+    click.echo("\n⚠️ Multi-technology read merging:")
+    click.echo("   This feature is planned for v0.2")
+    click.echo("   Current workaround: Use standard UNIX cat or seqtk for simple merging")
 
 
 @main.command('build-contigs')
@@ -1323,8 +1324,9 @@ def build_contigs(input, output, min_overlap, threads):
     click.echo(f"Min overlap: {min_overlap} bp")
     click.echo(f"Output: {output}")
     
-    # TODO: Implement contig builder
-    click.echo("\n⚠ Contig building implementation coming soon!")
+    click.echo("\n⚠️ Contig building from short reads:")
+    click.echo("   This feature is planned for v0.2")
+    click.echo("   Current workaround: Use flye/hifiasm/miniasm for short read assembly first")
 
 
 @main.command()
@@ -1497,8 +1499,9 @@ def assemble(reads_files, technologies,
     if graph:
         click.echo(f"Output graph: {graph}")
     
-    # TODO: Implement graph assembly
-    click.echo(f"\n⚠ {graph_type} graph assembly implementation coming soon!")
+    click.echo(f"\n⚠️ Assembly from graph files:")
+    click.echo("   This feature is planned for v0.2 (unified single-command assembly)")
+    click.echo("   v0.1 requires using the main 'assemble' command with read files directly")
 
 
 @main.command()
@@ -1525,12 +1528,13 @@ def finish(graph, output, ai, interactive, api_key):
     click.echo(f"Output: {output}")
     
     if ai == 'claude' and not api_key:
-        click.echo("\n⚠ Warning: No Claude API key provided!")
+        click.echo("\n⚠️ Warning: No Claude API key provided!")
         click.echo("   Set ANTHROPIC_API_KEY environment variable or use --api-key")
         click.echo("   Falling back to heuristic method")
     
-    # TODO: Implement AI finishing
-    click.echo(f"\n⚠ AI finishing implementation coming soon!")
+    click.echo("\n⚠️ AI-powered assembly finishing:")
+    click.echo("   This feature is planned for v0.2 and v0.3")
+    click.echo("   v0.1 uses heuristic path resolution within the main assembly pipeline")
 
 
 @main.command()
@@ -1555,8 +1559,9 @@ def validate(assembly, reference, output):
     if output:
         click.echo(f"Output report: {output}")
     
-    # TODO: Implement assembly validation
-    click.echo("\n⚠ Assembly validation implementation coming soon!")
+    click.echo("\n⚠️ Assembly validation:")
+    click.echo("   This feature is planned for v0.2")
+    click.echo("   Current workaround: Use QUAST or similar tools for assembly QC")
 
 
 # ============================================================================
@@ -1575,8 +1580,8 @@ def checkpoints():
 def checkpoints_list(checkpoint_dir):
     """List available checkpoints."""
     click.echo(f"Checkpoints in: {checkpoint_dir}")
-    # TODO: Implement checkpoint listing
-    click.echo("\n⚠ Checkpoint management implementation coming soon!")
+    click.echo("\n⚠️ Checkpoint management:")
+    click.echo("   This feature is planned for v0.2")
 
 
 @checkpoints.command('remove')
@@ -1593,8 +1598,8 @@ def checkpoints_remove(checkpoint_dir, remove_all, before):
     elif before:
         click.echo(f"Removing checkpoints before: {before}")
     
-    # TODO: Implement checkpoint removal
-    click.echo("\n⚠ Checkpoint management implementation coming soon!")
+    click.echo("\n⚠️ Checkpoint management:")
+    click.echo("   This feature is planned for v0.2")
 
 
 @checkpoints.command('export')
@@ -1606,8 +1611,8 @@ def checkpoints_export(checkpoint_dir, output):
     """Export checkpoints to archive."""
     click.echo(f"Exporting checkpoints from: {checkpoint_dir}")
     click.echo(f"Output archive: {output}")
-    # TODO: Implement checkpoint export
-    click.echo("\n⚠ Checkpoint management implementation coming soon!")
+    click.echo("\n⚠️ Checkpoint management:")
+    click.echo("   This feature is planned for v0.2")
 
 
 # ============================================================================
