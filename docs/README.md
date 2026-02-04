@@ -90,18 +90,18 @@ The pipeline can be custom trained using provided scripts for any data type (new
 
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [GPU Acceleration](#gpu-acceleration)
 - [AI/ML Training](#aiml-training)
 - [Documentation](#documentation)
 
 **📚 Full Documentation:**
+- [Features Guide](FEATURES.md) - Complete feature documentation
 - [User Guide](docs/USER_GUIDE.md) - Complete tutorials and usage examples
-- [AI/ML Features Guide](docs/AI_ML_GUIDE.md) - Comprehensive AI documentation
+- [AI/ML Features Guide](archive/AI_ML_GUIDE.md) - Comprehensive AI documentation
 - [Training Guide](TRAINING_GUIDE.md) - Model training instructions
 - [Benchmarks](BENCHMARKS.md) - Performance comparisons
-- [Module Reference](ASSEMBLY_MODULE_REFERENCE.md) - Python module documentation
-- [Pipeline Flow](docs/PIPELINE_FLOW.md) - Visual pipeline diagram
-- [Scientific References](docs/SCIENTIFIC_REFERENCES.md) - Citations
+- [Module Reference](archive/ASSEMBLY_MODULE_REFERENCE.md) - Python module documentation
+- [Pipeline Flow](archive/PIPELINE_FLOW.md) - Visual pipeline diagram
+- [Scientific References](archive/SCIENTIFIC_REFERENCES.md) - Citations
 
 ---
 
@@ -273,13 +273,13 @@ See [TRAINING_GUIDE.md](TRAINING_GUIDE.md) and [docs/AI_ML_GUIDE.md](docs/AI_ML_
 
 | Document | Description |
 |----------|-------------|
-| [AI/ML Guide](docs/AI_ML_GUIDE.md) | Comprehensive AI features and models |
+| [AI/ML Guide](archive/AI_ML_GUIDE.md) | Comprehensive AI features and models |
 | [Training Guide](TRAINING_GUIDE.md) | Training data generation and model training |
 | [GPU Guide](GPU_ACCELERATION_GUIDE.md) | GPU setup, backends, HPC usage |
-| [Module Reference](ASSEMBLY_MODULE_REFERENCE.md) | Python module documentation |
-| [Pipeline Flow](docs/PIPELINE_FLOW.md) | Visual pipeline flowchart |
-| [Scientific References](docs/SCIENTIFIC_REFERENCES.md) | Citations and algorithms |
-| [Development Roadmap](docs/MASTER_DEVELOPMENT_ROADMAP.md) | Project status |
+| [Module Reference](archive/ASSEMBLY_MODULE_REFERENCE.md) | Python module documentation |
+| [Pipeline Flow](archive/PIPELINE_FLOW.md) | Visual pipeline flowchart |
+| [Scientific References](archive/SCIENTIFIC_REFERENCES.md) | Citations and algorithms |
+| [Development Roadmap](archive/MASTER_DEVELOPMENT_ROADMAP.md) | Project status |
 | [AI/ML Status](docs/AI_ML_IMPLEMENTATION_STATUS.md) | AI/ML progress (internal) |
 | [Training Log](docs/TRAINING_LOG.md) | Training runs and model versions |
 
@@ -336,12 +336,12 @@ See [BENCHMARKS.md](BENCHMARKS.md) for detailed performance comparisons.
 | Document | Description |
 |----------|-------------|
 | [User Guide](docs/USER_GUIDE.md) | Complete user manual with tutorials |
-| [AI/ML Guide](docs/AI_ML_GUIDE.md) | Comprehensive AI features and models |
+| [AI/ML Guide](archive/AI_ML_GUIDE.md) | Comprehensive AI features and models |
 | [Training Guide](TRAINING_GUIDE.md) | Training data generation and model training |
 | [Benchmarks](BENCHMARKS.md) | Performance comparisons and validation |
-| [Module Reference](ASSEMBLY_MODULE_REFERENCE.md) | Python module API documentation |
-| [Pipeline Flow](docs/PIPELINE_FLOW.md) | Visual pipeline flowchart |
-| [Scientific References](docs/SCIENTIFIC_REFERENCES.md) | Citations and algorithms |
+| [Module Reference](archive/ASSEMBLY_MODULE_REFERENCE.md) | Python module API documentation |
+| [Pipeline Flow](archive/PIPELINE_FLOW.md) | Visual pipeline flowchart |
+| [Scientific References](archive/SCIENTIFIC_REFERENCES.md) | Citations and algorithms |
 | [Hi-C Integration Guide](docs/HIC_INTEGRATION.md) | Hi-C data preparation and scaffolding |
 | [SV Detection Guide](docs/SV_DETECTION.md) | Structural variant calling documentation |
 
