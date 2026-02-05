@@ -36,6 +36,12 @@ def read_requirements(filename):
 # Basic requirements (always installed)
 install_requires = read_requirements("requirements.txt")
 
+# Add Hi-C dependencies to default install (scipy and scikit-learn)
+install_requires.extend([
+    "scipy>=1.9.0",
+    "scikit-learn>=1.3.0",
+])
+
 # Optional dependencies
 extras_require = {
     "dev": read_requirements("requirements-dev.txt"),
@@ -44,17 +50,12 @@ extras_require = {
         "pytorch-geometric>=2.3.0",
         "xgboost>=2.0.0",
     ],
-    "hic": [
-        "scipy>=1.9.0",
-        "scikit-learn>=1.3.0",
-    ],
 }
 
 # Convenience: install all optional dependencies
 extras_require["all"] = (
     extras_require.get("dev", []) +
-    extras_require.get("ai", []) +
-    extras_require.get("hic", [])
+    extras_require.get("ai", [])
 )
 
 setup(

@@ -48,7 +48,7 @@ Commercial licensing of StrandWeaver is **custom-negotiated** on a case-by-case 
 To obtain a Commercial License, contact:
 
 **Patrick Grady**  
-Email: dr.pgrady@gmail.com  
+Email: dr.pgrady(at)gmail.com  
 Website: https://github.com/pgrady1322/strandweaver
 
 ---
@@ -100,7 +100,7 @@ Website: https://github.com/pgrady1322/strandweaver
 ## 5. NEGOTIATION PROCESS
 
 ### Step 1: Initial Contact
-Send an email to dr.pgrady@gmail.com with:
+Send an email to dr.pgrady(at)gmail.com with:
 - Your organization name
 - Intended use case (which scenario above?)
 - Expected scale (number of samples/users/deployments)
@@ -108,8 +108,8 @@ Send an email to dr.pgrady@gmail.com with:
 - Any specific requirements
 
 ### Step 2: Discussion
-Patrick Grady will:
-- Understand your specific use case
+We will:
+- Work to understand your specific use case
 - Explain commercial licensing options
 - Provide preliminary pricing information
 - Answer technical questions
@@ -144,7 +144,7 @@ Most Commercial License Agreements will include:
 - Late payment penalties
 
 ### 6.3 Intellectual Property
-- Ownership of StrandWeaver (remains with Patrick Grady)
+- Ownership of StrandWeaver (remains with Patrick Grady and Rich Green)
 - Ownership of your derivatives
 - Rights to improvements/feedback
 
@@ -177,8 +177,6 @@ Most Commercial License Agreements will include:
 
 ## 7. PRICING GUIDELINES
 
-### 7.1 General Pricing Factors
-
 License fees vary based on:
 - **Type**: Internal use vs. product distribution vs. service
 - **Scale**: Single user vs. enterprise
@@ -186,17 +184,6 @@ License fees vary based on:
 - **Duration**: One-time vs. annual
 - **Support**: Minimal vs. dedicated
 - **Source Access**: Binary-only vs. source code
-
-### 7.2 Estimated Ranges
-
-These are guidelines only - actual pricing will be negotiated:
-
-| Scenario | Typical Range |
-|----------|---------------|
-| Small single-use project | $500 - $5,000 |
-| Product integration | $5,000 - $50,000 |
-| Annual service subscription | $2,000 - $20,000/yr |
-| Enterprise license | $50,000 - $500,000+ |
 
 ---
 
@@ -220,28 +207,11 @@ If you're unsure whether you need a Commercial License, here are examples:
 - Consulting services (if you bill clients)
 - Any use where someone is being paid for the service
 
-**When in doubt, email dr.pgrady@gmail.com to clarify.**
+**When in doubt, email dr.pgrady(at)gmail.com to clarify.**
 
 ---
 
-## 9. REVENUE SHARING OPTIONS
-
-For certain scenarios (particularly service providers and product integrations), revenue sharing may be an alternative to upfront fees:
-
-### Revenue Sharing Model
-- Lower or no upfront license fee
-- Percentage of revenue from services/products using StrandWeaver
-- Typically 5-15% of relevant revenue
-- Quarterly or annual true-up
-
-This model is attractive for:
-- Service providers using StrandWeaver for genome assembly services
-- Products where StrandWeaver is a key component
-- Cases where revenue varies significantly
-
----
-
-## 10. OPEN SOURCE ALTERNATIVES
+## 9. OPEN SOURCE ALTERNATIVES
 
 If commercial licensing terms don't work for you, here are open-source genome assemblers to consider:
 
@@ -250,33 +220,33 @@ If commercial licensing terms don't work for you, here are open-source genome as
 - **MaSuRCA** (GNU GPL - free for all use, must share modifications)
 - **Flye** (MIT License - free for all use)
 
-However, StrandWeaver offers unique features (AI modules, GPU acceleration, Hi-C integration) that may justify licensing.
+However, StrandWeaver offers unique features (AI modules, GPU acceleration, lack of manual curation) that may justify licensing.
 
 ---
 
-## 11. MODIFICATIONS TO LICENSED SOFTWARE
+## 10. MODIFICATIONS TO LICENSED SOFTWARE
 
-### 11.1 Right to Modify
+### 10.1 Right to Modify
 Commercial licenses typically include the right to:
 - Modify StrandWeaver for your specific use case
 - Fix bugs for your use
 - Create derivative works
 
-### 11.2 Ownership of Modifications
+### 10.2 Ownership of Modifications
 - You own modifications you create
-- Patrick Grady retains ownership of the original StrandWeaver
+- Patrick Grady and Rich Green retain ownership of the original StrandWeaver
 - You may not sublicense your modifications
 
 ### 11.3 Sharing Improvements
 If you make valuable improvements, consider:
 - Contributing back to the main project
-- Providing licensing grants to Patrick Grady for your improvements
+- Providing licensing grants to Patrick Grady and Rich Green for your improvements
 - Making improvements open-source
 - This may entitle you to reduced future licensing fees
 
 ---
 
-## 12. SUPPORT LEVELS
+## 11. SUPPORT LEVELS
 
 Most Commercial Licenses include one of these support levels:
 
@@ -292,15 +262,9 @@ Most Commercial Licenses include one of these support levels:
 - Monthly technical review calls
 - Custom documentation
 
-### Dedicated Support
-- 24/7 support (email/phone/video)
-- On-site training and consulting
-- Custom feature development discussions
-- Service level agreements (SLAs)
-
 ---
 
-## 13. COMPLIANCE
+## 12. COMPLIANCE
 
 When using a Commercial License, you agree to:
 - Comply with all applicable laws
@@ -311,7 +275,7 @@ When using a Commercial License, you agree to:
 
 ---
 
-## 14. DISCLAIMER
+## 13. DISCLAIMER
 
 **STRANDWEAVER IS PROVIDED WITH LIMITED WARRANTIES.** 
 
@@ -326,7 +290,7 @@ See the full license agreement for complete warranty and liability terms.
 
 ---
 
-## 15. TERMINATION
+## 14. TERMINATION
 
 Commercial Licenses typically include termination clauses for:
 - Non-payment of fees
@@ -338,11 +302,11 @@ Specific termination procedures will be defined in the formal Commercial License
 
 ---
 
-## 16. CONTACT & NEXT STEPS
+## 15. CONTACT & NEXT STEPS
 
 ### To Get Started:
 
-1. **Email**: dr.pgrady@gmail.com
+1. **Email**: dr.pgrady(at)gmail.com
 2. **Subject**: "StrandWeaver Commercial License Inquiry"
 3. **Include in Email**:
    - Your organization name
@@ -353,7 +317,7 @@ Specific termination procedures will be defined in the formal Commercial License
    - Any specific requirements
 
 ### What Happens Next:
-- Patrick Grady will review your inquiry
+- We will review your inquiry
 - Initial conversation about your needs
 - Preliminary pricing and terms
 - Formal quote (if interested)
@@ -384,4 +348,4 @@ A: License agreements can typically be amended to reflect changed circumstances.
 
 For more information, visit: https://github.com/pgrady1322/strandweaver
 
-Contact: dr.pgrady@gmail.com
+Contact: dr.pgrady(at)gmail.com

@@ -64,7 +64,7 @@ You may NOT:
 
 For commercial use, you must obtain a Commercial License from Patrick Grady:
 
-- Email: dr.pgrady@gmail.com
+- Email: dr.pgrady(at)gmail.com
 - Website: https://github.com/pgrady1322/strandweaver
 
 Terms for commercial licensing are negotiable and will be established on a case-by-case basis.
@@ -77,14 +77,14 @@ When publishing research using StrandWeaver, please cite:
 
 ```bibtex
 @software{strandweaver2026v01,
-  author = {Grady, Patrick},
+  author = {Grady, Patrick; Green, Richard},
   title = {StrandWeaver: AI-Powered Multi-Technology Genome Assembler (v0.1)},
   year = {2026},
   url = {https://github.com/pgrady1322/strandweaver}
 }
 ```
 
-Alternatively, in text: "Grady, P. (2026). StrandWeaver: AI-Powered Multi-Technology Genome Assembler. https://github.com/pgrady1322/strandweaver"
+Alternatively, in text: "Grady, P.G.S., and Green, R. (2026). StrandWeaver: AI-Powered Multi-Technology Genome Assembler. https://github.com/pgrady1322/strandweaver"
 
 ---
 
@@ -168,7 +168,7 @@ If you are unsure whether your intended use qualifies as Academic, please verify
 - Clinical use or patient applications
 - Any use where you are being paid directly
 
-When in doubt, contact dr.pgrady@gmail.com.
+When in doubt, contact dr.pgrady(at)gmail.com.
 
 ---
 
@@ -177,7 +177,7 @@ When in doubt, contact dr.pgrady@gmail.com.
 For questions about this license or to inquire about a Commercial License:
 
 **Patrick Grady**  
-Email: dr.pgrady@gmail.com  
+Email: dr.pgrady(at)gmail.com  
 Website: https://github.com/pgrady1322/strandweaver
 
 ---
