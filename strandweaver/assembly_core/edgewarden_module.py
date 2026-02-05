@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 EdgeWarden: Comprehensive Overlap Classification & Quality Assessment System
 
 This module consolidates ALL EdgeWarden functionality into a single comprehensive system:

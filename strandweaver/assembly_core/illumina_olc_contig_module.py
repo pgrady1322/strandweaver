@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Contig builder for converting short reads into artificial long reads.
 
 This module implements an overlap-layout-consensus (OLC) approach to assemble

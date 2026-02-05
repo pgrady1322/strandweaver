@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 User-Configurable Training Infrastructure
 
 This module provides a flexible, parameter-driven training data generation system

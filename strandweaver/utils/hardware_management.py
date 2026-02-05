@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Unified GPU Acceleration Module for StrandWeaver Assembly.
 
 Consolidates all GPU-accelerated components into a single module:

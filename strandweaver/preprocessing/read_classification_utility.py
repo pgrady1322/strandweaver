@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Technology Handling Core Module for StrandWeaver.
 
 Consolidated module containing:
@@ -1019,3 +1021,114 @@ def detect_from_fastq_headers(reads_file: Path, max_reads: int = 100) -> Optiona
         
     except Exception:
         return None
+
+
+def classify_read_technology(read_length: int, quality_scores: Optional[List[int]] = None) -> ReadTechnology:
+    """
+    Classify read technology based on read characteristics.
+    
+    Args:
+        read_length: Length of the read in base pairs
+        quality_scores: Optional quality scores for the read
+        
+    Returns:
+        Classified ReadTechnology
+    """
+    # Ultra-long reads (>50kb)
+    if read_length >= 50000:
+        return ReadTechnology.ONT_ULTRALONG
+    
+    # Long reads (>1kb)
+    if read_length >= 1000:
+        # Could be ONT regular or PacBio HiFi
+        # Use quality scores if available to distinguish
+        if quality_scores:
+            avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+            # HiFi typically has Q20+ (99% accuracy)
+            if avg_quality >= 20:
+                return ReadTechnology.PACBIO_HIFI
+        return ReadTechnology.ONT_REGULAR
+    
+    # Short reads (<1kb)
+    if read_length < 1000:
+        # Could be Illumina or ancient DNA
+        if quality_scores:
+            # Ancient DNA typically has lower quality and damage patterns
+            # For now, default to Illumina
+            pass
+        return ReadTechnology.ILLUMINA
+    
+    return ReadTechnology.UNKNOWN
+
+
+def detect_technology_from_header(header: str) -> str:
+    """
+    Detect sequencing technology from FASTQ header.
+    
+    Args:
+        header: FASTQ header line (starting with @)
+        
+    Returns:
+        Detected technology as string (lowercase)
+    """
+    header_lower = header.lower()
+    
+    # Oxford Nanopore indicators (including runid pattern)
+    if any(x in header_lower for x in ['ont', 'nanopore', 'minion', 'promethion', 'guppy', 'dorado', 'runid=', 'ch=', 'start_time=']):
+        return 'ont'
+    
+    # PacBio indicators (including m64011 pattern)
+    if any(x in header_lower for x in ['pacbio', 'hifi', 'ccs']) or (header_lower.startswith('@m') and '/ccs' in header_lower):
+        return 'pacbio'
+    
+    # Illumina indicators (including SRR accessions and machine IDs)
+    illumina_patterns = ['illumina', 'nextseq', 'novaseq', 'hiseq', 'miseq']
+    illumina_prefixes = ['@srr', '@err', '@drr', '@m00', '@k00', '@a00', '@d00', '@e00', '@ns', '@vl', '@mn', '@nb']
+    if any(x in header_lower for x in illumina_patterns) or any(header_lower.startswith(x) for x in illumina_prefixes):
+        return 'illumina'
+    
+    # Hi-C indicators
+    if any(x in header_lower for x in ['hic', 'hi-c', 'omni-c', 'dovetail']):
+        return 'hic'
+    
+    return 'unknown'
+
+
+def parse_quality_scores(quality_string: str, encoding: str = 'phred33') -> List[int]:
+    """
+    Parse quality scores from FASTQ quality string.
+    
+    Args:
+        quality_string: Quality string from FASTQ
+        encoding: Quality encoding (phred33 or phred64)
+        
+    Returns:
+        List of integer quality scores
+    """
+    offset = 33 if encoding == 'phred33' else 64
+    return [ord(char) - offset for char in quality_string]
+
+
+def has_low_quality_bases(quality_scores, threshold: int = 20, max_low_quality_fraction: float = 0.1) -> bool:
+    """
+    Check if a read has too many low-quality bases.
+    
+    Args:
+        quality_scores: List of quality scores (ints) or quality string
+        threshold: Quality score threshold (default Q20)
+        max_low_quality_fraction: Maximum fraction of bases below threshold
+        
+    Returns:
+        True if read has too many low-quality bases
+    """
+    if not quality_scores:
+        return False
+    
+    # Handle string input (convert to ints)
+    if isinstance(quality_scores, str):
+        quality_scores = parse_quality_scores(quality_scores)
+    
+    low_quality_count = sum(1 for q in quality_scores if q < threshold)
+    low_quality_fraction = low_quality_count / len(quality_scores)
+    
+    return low_quality_fraction > max_low_quality_fraction

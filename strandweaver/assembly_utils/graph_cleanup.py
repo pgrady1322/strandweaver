@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Graph Cleanup and Phasing Integration Module for StrandWeaver.
 
 This module performs unified graph cleanup using multiple signals:

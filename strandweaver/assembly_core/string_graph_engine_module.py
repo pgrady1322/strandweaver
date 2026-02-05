@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 String Graph Engine for StrandWeaver.
 
 This module implements a string graph overlay on top of a de Bruijn graph,
@@ -112,7 +114,7 @@ class ULReadMapping:
 
 
 # ============================================================================
-# Legacy Compatibility
+# Ultra-Long Read Structures
 # ============================================================================
 
 @dataclass

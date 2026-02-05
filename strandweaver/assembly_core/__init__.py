@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Assembly Core module for StrandWeaver.
 
 This module provides graph-based genome assembly algorithms including:
@@ -43,9 +45,12 @@ from .pathweaver_module import (
     PathGNN, FeatureExtractor, PathExtractor, GraphTensors, GNNPathResult,
     PathGNNModel, SimpleGNN, MediumGNN, DeepGNN, GNNConfig
 )
-from .ul_routing_ai import ULRouter
-from .svscribe_module import SVDetector
+from .svscribe_module import SVScribe  # Fixed: was SVDetector
 from .haplotype_detangler_module import HaplotypeDetangler
+
+# ULRouter is an alias for ThreadCompass (the actual implementation)
+# ThreadCompass provides the complete UL read routing functionality
+ULRouter = ThreadCompass
 
 __all__ = [
     # Assembly functions
@@ -69,7 +74,7 @@ __all__ = [
     "StrandTether",
     "PathGNN",
     "ULRouter",
-    "SVDetector",
+    "SVScribe",  # Fixed: was SVDetector
     "HaplotypeDetangler",
     # Data structures
     "KmerGraph",

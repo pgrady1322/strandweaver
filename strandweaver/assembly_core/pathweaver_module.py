@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 PathWeaver: GNN-First Path Finding Engine for StrandWeaver.
 
 This module implements GNN-based path prediction with classical algorithm fallback
@@ -32,11 +34,10 @@ This is the CORRECT design philosophy:
 - Classical fallback: Maintain reliability with traditional algorithms
 - Data integration: Enhance predictions with multiple evidence sources
 
-OLD ARCHITECTURE (Deprecated - Algorithm-First with GNN Enhancement)
-─────────────────────────────────────────────────────────────────────
-The previous design used algorithms as primary with GNN as optional refinement.
-This was backwards - treating ML as a "bonus feature" instead of the primary
-intelligence. Legacy mode still available via use_gnn_primary=False parameter.
+ARCHITECTURE NOTES
+──────────────────
+The design prioritizes GNN-based path prediction with classical algorithms as
+fallback. Alternative mode available via use_gnn_primary=False parameter.
 
 Key Features:
 - GNN-based path prediction (primary method)
@@ -47,7 +48,7 @@ Key Features:
 - Misassembly detection
 
 Author: StrandWeaver Development Team
-License: MIT
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging
@@ -1138,25 +1139,19 @@ class PathFinder:
                 # Extract edge features and build edge index
                 for edge_id, edge in self.graph.edges.items():
                     from_node = getattr(edge, 'from_node', None)
-                        to_node = getattr(edge, 'to_node', None)
+                    to_node = getattr(edge, 'to_node', None)
+                    
+                    if from_node and to_node:
+                        features = feature_extractor.extract_edge_features(
+                            edge_id, self.graph
+                        )
+                        graph_tensors.edge_features[edge_id] = features
+                        graph_tensors.edge_to_index[edge_id] = len(graph_tensors.edge_to_index)
                         
-                        if from_node and to_node:
-                            features = feature_extractor.extract_edge_features(
-                                edge_id, self.graph
-                            )
-                            graph_tensors.edge_features[edge_id] = features
-                            graph_tensors.edge_to_index[edge_id] = len(graph_tensors.edge_to_index)
-                            
-                            # Add to edge index using tensor indices
-                            from_idx = graph_tensors.node_to_index[from_node]
-                            to_idx = graph_tensors.node_to_index[to_node]
-                            graph_tensors.edge_index.append((from_idx, to_idx))
-                    
-                    graph_tensors.num_edges = len(graph_tensors.edge_features)
-                    
-                    # Get GNN predictions
-                    path_gnn = PathGNN(model=gnn_scorer)
-                    edge_probs = path_gnn.predict_edge_probabilities(graph_tensors)
+                        # Add to edge index using tensor indices
+                    from_idx = graph_tensors.node_to_index[from_node]
+                    to_idx = graph_tensors.node_to_index[to_node]
+                    graph_tensors.edge_index.append((from_idx, to_idx))
                     
                     # Extract paths from GNN predictions
                     path_extractor = PathExtractor(min_edge_confidence=min_confidence)

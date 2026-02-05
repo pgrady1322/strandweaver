@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Assembly Utilities module for StrandWeaver.
 
 This module provides utility functions for assembly tasks:

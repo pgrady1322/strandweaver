@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 StrandTether: Hi-C Contact Matrix Integration Engine.
 
 Unified Hi-C integration module combining:
@@ -27,7 +29,7 @@ Consolidated from:
 - data_structures.py (Part 3: Hi-C structures and HiCIntegrator)
 
 Author: StrandWeaver Development Team
-License: MIT
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging
@@ -150,9 +152,9 @@ class HiCContactMap:
 @dataclass
 class NodeHiCInfo:
     """
-    Hi-C-derived haplotype information for a graph node (legacy compatibility).
+    Hi-C-derived haplotype information for a graph node.
     
-    This is an alias/alternative structure from data_structures.py consolidation.
+    Alternative structure from data_structures.py consolidation.
     Provides same functionality as HiCNodePhaseInfo with slightly different naming.
     
     Scores indicate tendency toward haplotype A or B based on Hi-C contacts.
@@ -205,9 +207,9 @@ class NodeHiCInfo:
 @dataclass
 class EdgeHiCInfo:
     """
-    Hi-C information for a graph edge (legacy compatibility).
+    Hi-C information for a graph edge.
     
-    This is an alias/alternative structure from data_structures.py consolidation.
+    Alternative structure from data_structures.py consolidation.
     Provides same functionality as HiCEdgeSupport with slightly different naming.
     
     Tracks cis vs trans contacts to validate edge correctness.
@@ -941,12 +943,12 @@ class StrandTether:
 
 
 # ============================================================================
-#                    LEGACY Hi-C INTEGRATOR (from data_structures.py)
+#                    Hi-C INTEGRATOR (from data_structures.py)
 # ============================================================================
 
 class HiCIntegrator:
     """
-    Integrates Hi-C contact data into the assembly graph (legacy interface).
+    Integrates Hi-C contact data into the assembly graph.
     
     Consolidated from data_structures.py Part 3 implementation.
     
@@ -1328,7 +1330,7 @@ __all__ = [
     'HiCContactMap',
     'HiCJoinScore',
     'compute_hic_phase_and_support',
-    # Legacy structures from data_structures.py consolidation
+    # Structures from data_structures.py consolidation
     'NodeHiCInfo',
     'EdgeHiCInfo',
     'HiCIntegrator',

@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Core I/O module for StrandWeaver.
 
 Consolidated module containing:

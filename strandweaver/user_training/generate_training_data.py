@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+StrandWeaver v0.1.0
+
 Command-line interface for user-configurable training data generation.
 
 Example usage:

@@ -31,7 +31,7 @@ Detection Methods:
 12. Graph topology inconsistencies
 
 Author: StrandWeaver Development Team
-License: MIT
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging

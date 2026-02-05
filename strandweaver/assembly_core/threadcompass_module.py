@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 ThreadCompass: Ultra-Long (UL) Read Integration and Routing Engine.
 
 This module integrates UL reads to:
@@ -14,7 +16,7 @@ Designed to work DOWNSTREAM of PathWeaver Pass A and UPSTREAM of PathWeaver Pass
 providing long-range evidence for iterative refinement.
 
 Author: StrandWeaver Development Team
-License: MIT
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging

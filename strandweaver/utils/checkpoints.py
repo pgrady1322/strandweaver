@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Checkpoint management for StrandWeaver pipelines.
 
 Handles creation, storage, and recovery of pipeline checkpoints.

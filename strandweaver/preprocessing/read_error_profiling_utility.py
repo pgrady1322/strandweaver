@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Read Error Profiling Utility for StrandWeaver.
 
 Consolidated module for analyzing sequencing errors using k-mer analysis.

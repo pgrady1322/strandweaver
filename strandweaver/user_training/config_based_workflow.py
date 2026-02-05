@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Config-Based Training Workflow
 
 User-configurable training data generation that allows fine-grained control

@@ -108,7 +108,46 @@ The pipeline can be custom trained using provided scripts for any data type (new
 - 8 GB RAM minimum (32+ GB recommended for large genomes)
 - Disk space: 50-100 GB for intermediate files (genome-dependent)
 
+### Dependencies
+
+StrandWeaver uses a modular dependency system with three installation tiers:
+
+**Core Dependencies (Always Installed)**:
+- **Bioinformatics**: `biopython>=1.79`, `pysam>=0.19.0`
+- **Numerical**: `numpy>=1.21.0`, `scipy>=1.9.0`, `pandas>=1.3.0`
+- **Graph Processing**: `networkx>=2.6.0`
+- **Hi-C/Phasing**: `scipy>=1.9.0`, `scikit-learn>=1.3.0`
+- **CLI/IO**: `click>=8.0.0`, `pyyaml>=6.0`, `tqdm>=4.62.0`, `h5py>=3.5.0`
+- **Performance**: `numba>=0.54.0`, `joblib>=1.1.0`
+
+**AI/ML Dependencies (Optional - `[ai]` flag)**:
+- **PyTorch**: `torch>=2.0.0` (CPU or GPU support)
+- **Graph Neural Networks**: `pytorch-geometric>=2.3.0`
+- **Gradient Boosting**: `xgboost>=2.0.0`
+
+These are required for:
+- Custom model training
+- GPU-accelerated assembly (if CUDA available)
+- Advanced AI features in v0.2+ (current v0.1 uses heuristics)
+
+**Development Dependencies (Optional - `[dev]` flag)**:
+- **Testing**: `pytest>=7.0.0`, `pytest-cov>=4.0.0`
+- **Visualization**: `matplotlib>=3.4.0`, `seaborn>=0.11.0`
+- **Documentation**: Development tools for contributors
+
+**GPU Support**:
+- CUDA 11.8+ for NVIDIA GPUs (automatic via PyTorch)
+- MPS backend for Apple Silicon (automatic in macOS 12.3+)
+- CPU fallback if no GPU detected
+
+**Platform Compatibility**:
+- ✅ Linux (x86_64, ARM64)
+- ✅ macOS (Intel, Apple Silicon with MPS acceleration)
+- ✅ Windows (via WSL2 recommended)
+
 ### Install from GitHub (Recommended)
+
+StrandWeaver has several dependencies, especially if you plan on installing the AI/ML training dependencies, so it is **highly** recommended to install in a virtual environment (conda, python venv).
 
 ```bash
 # Basic installation
@@ -325,7 +364,295 @@ output/
 
 ---
 
-## 📚 Documentation
+## � Troubleshooting
+
+### Installation Issues
+
+**Problem: `ModuleNotFoundError` or import errors**
+```bash
+# Solution: Reinstall with all dependencies
+pip install --force-reinstall "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
+```
+
+**Problem: Python version incompatibility**
+```bash
+# Check Python version (requires 3.9+)
+python3 --version
+
+# Create conda environment with correct Python version
+conda create -n strandweaver python=3.11
+conda activate strandweaver
+pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
+```
+
+**Problem: PyTorch/GPU issues**
+```bash
+# For CUDA support, install PyTorch separately first
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
+
+# Verify GPU detection
+python3 -c "import torch; print(f'GPU available: {torch.cuda.is_available()}')"
+```
+
+### Assembly Quality Issues
+
+**Problem: Low N50 or fragmented assembly**
+- **Check coverage**: Aim for 30×+ HiFi or 50×+ ONT
+  ```bash
+  strandweaver profile --input reads.fastq --output profile.json
+  ```
+- **Add ultra-long reads**: Dramatically improves contiguity
+  ```bash
+  strandweaver assemble --hifi hifi.fastq --ont-ul ultralong.fastq --output improved.fasta
+  ```
+- **Enable Hi-C scaffolding**: For chromosome-scale assemblies
+  ```bash
+  strandweaver assemble --hifi hifi.fastq --hic hic_R1.fastq hic_R2.fastq --output scaffolded.fasta
+  ```
+
+**Problem: Collapsed heterozygous regions**
+```bash
+# Increase identity threshold to preserve variation
+strandweaver assemble \
+  --input reads.fastq \
+  --preserve-heterozygosity \
+  --min-identity 0.995 \
+  --output diploid.fasta
+```
+
+**Problem: Assembly produces too many contigs (over-fragmented)**
+- **Reduce edge filtering stringency**:
+  ```bash
+  strandweaver assemble --input reads.fastq --edge-filter-mode permissive --output assembly.fasta
+  ```
+- **Increase k-mer size**: For high-coverage, low-error data
+  ```bash
+  strandweaver assemble --input reads.fastq --kmer-size 51 --output assembly.fasta
+  ```
+
+**Problem: Assembly is chimeric or has misassemblies**
+- **Enable stricter filtering**:
+  ```bash
+  strandweaver assemble --input reads.fastq --edge-filter-mode strict --output assembly.fasta
+  ```
+- **Add Hi-C validation**: Long-range contact validation prevents chimeras
+  ```bash
+  strandweaver assemble --hifi hifi.fastq --hic hic_R1.fastq hic_R2.fastq --output validated.fasta
+  ```
+
+### Performance & Resource Issues
+
+**Problem: Out of memory (OOM) errors**
+```bash
+# Reduce memory usage with streaming mode
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --streaming \
+  --max-memory 16G
+
+# Or process in batches
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --batch-size 100000
+```
+
+**Problem: Assembly is too slow**
+```bash
+# Increase threads (use all available cores)
+strandweaver assemble --input reads.fastq --threads $(nproc) --output assembly.fasta
+
+# Disable AI features for faster heuristic-only assembly
+strandweaver assemble --input reads.fastq --no-ai --output fast_assembly.fasta
+
+# Use rapid mode (skips iterative refinement)
+strandweaver assemble --input reads.fastq --rapid --output quick_assembly.fasta
+```
+
+**Problem: Disk space issues**
+```bash
+# Enable cleanup of intermediate files
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --cleanup-intermediate
+
+# Specify temporary directory on larger drive
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --temp-dir /mnt/large_drive/tmp
+```
+
+### Input Data Issues
+
+**Problem: "Unsupported file format" error**
+```bash
+# StrandWeaver accepts: FASTQ, FASTA, gzipped variants
+# Check file format
+file reads.fastq
+
+# Convert BAM to FASTQ if needed
+samtools bam2fq reads.bam > reads.fastq
+
+# Decompress if needed
+gunzip -c reads.fastq.gz > reads.fastq
+```
+
+**Problem: Technology auto-detection fails**
+```bash
+# Manually specify read technology
+strandweaver assemble \
+  --input reads.fastq \
+  --technology ont \
+  --output assembly.fasta
+
+# Supported: illumina, ont, hifi, ultralong, ancient
+```
+
+**Problem: Ancient DNA damage not detected**
+```bash
+# Explicitly enable ancient DNA mode
+strandweaver assemble \
+  --ancient-dna ancient_reads.fastq \
+  --damage-aware \
+  --output ancient_assembly.fasta
+
+# Check damage profile first
+strandweaver profile --ancient-dna ancient_reads.fastq --output damage_profile.json
+```
+
+### AI/ML Issues
+
+**Problem: AI features not working**
+```bash
+# Check if AI dependencies installed
+python3 -c "import torch, xgboost; print('AI dependencies OK')"
+
+# Install AI dependencies if missing
+pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[ai]"
+```
+
+**Problem: "No trained models found" warning**
+```bash
+# v0.1 uses optimized heuristics (no models needed)
+# This is expected behavior - assembly will complete successfully
+
+# For v0.2+: Download pre-trained models
+strandweaver download-models --destination ~/.strandweaver/models
+
+# Or train custom models (advanced)
+python3 -m strandweaver.user_training.generate_training_data --output training_data/
+# See strandweaver/user_training/README.md for details
+```
+
+**Problem: GPU not being used**
+```bash
+# Force GPU usage
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --device cuda
+
+# Check GPU memory usage during assembly
+watch -n 1 nvidia-smi
+```
+
+### Output Issues
+
+**Problem: No structural variants detected**
+```bash
+# Ensure SV detection is enabled
+strandweaver assemble \
+  --input reads.fastq \
+  --detect-svs \
+  --sv-mode sensitive \
+  --output assembly.fasta
+
+# SVs require ultra-long or Hi-C data for validation
+strandweaver assemble \
+  --hifi hifi.fastq \
+  --ont-ul ultralong.fastq \
+  --detect-svs \
+  --output assembly.fasta
+```
+
+**Problem: Missing output files**
+```bash
+# Check pipeline.log for errors
+tail -100 output/pipeline.log
+
+# Enable all output formats
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --export-gfa \
+  --export-bandage \
+  --export-stats \
+  --detect-svs
+```
+
+**Problem: GFA file won't load in BandageNG**
+```bash
+# Validate GFA format
+grep "^S" assembly_graph.gfa | head -5
+
+# Regenerate with sequence export
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --export-gfa \
+  --gfa-include-sequences
+```
+
+### Common Error Messages
+
+**`ValueError: Coverage too low for reliable assembly`**
+- Solution: Increase sequencing coverage (aim for 30×+ minimum) or use `--min-coverage 10` to override
+
+**`RuntimeError: Graph construction failed - no valid k-mer overlaps`**
+- Solution: Try different k-mer size with `--kmer-size 31` or `--kmer-size 51`
+
+**`MemoryError: Unable to allocate array`**
+- Solution: Enable streaming mode with `--streaming` or reduce batch size with `--batch-size 50000`
+
+**`ImportError: cannot import name 'ThreadCompass'`**
+- Solution: Reinstall package with `pip install --force-reinstall strandweaver`
+
+**`FileNotFoundError: [Errno 2] No such file or directory`**
+- Solution: Use absolute paths for input/output files or check current working directory
+
+### Getting Help
+
+**Check version and installation**:
+```bash
+strandweaver --version
+strandweaver --help
+```
+
+**Enable verbose logging**:
+```bash
+strandweaver assemble \
+  --input reads.fastq \
+  --output assembly.fasta \
+  --verbose \
+  --log-level DEBUG
+```
+
+**Generate diagnostic report**:
+```bash
+strandweaver diagnose --output diagnostic_report.txt
+```
+
+**Report issues**: [GitHub Issues](https://github.com/pgrady1322/strandweaver/issues)
+
+**Contact**: patrickgsgrady@gmail.com
+
+---
+
+## �📚 Documentation
 
 **Available Documentation:**
 - [Features Guide](docs/FEATURES.md) - Complete feature documentation

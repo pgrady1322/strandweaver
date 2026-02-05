@@ -2,19 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-De Bruijn Graph (DBG) Engine for StrandWeaver.
+StrandWeaver v0.1.0
 
-This module implements a robust DBG engine that:
+De Bruijn Graph (DBG) Engine for StrandWeaver.
 - Accepts both OLC-derived artificial long reads and true long reads (HiFi, ONT)
 - Consumes dynamic k-mer values from the ML regional-k module
 - Builds a compacted de Bruijn graph (unitig representation)
 - Annotates nodes with ML-recommended k values for regional genome complexity
-- GPU-accelerated k-mer extraction and graph building (Apple Silicon MPS)
-- Advanced graph compaction (linear path merging)
-
-Consolidated from:
-- Original dbg_engine_module.py
-- data_structures.py (Part 1: DBG structures and builder)
+- GPU-accelerated k-mer extraction and graph building (Apple Silicon MPS, CUDA)
+- Linear path merging
 """
 
 from dataclasses import dataclass, field
@@ -151,7 +147,7 @@ class KmerGraph:
         return len(self.in_edges.get(node_id, []))
 
 
-# Legacy compatibility aliases
+# Compatibility aliases
 DBGNode = KmerNode
 DBGEdge = KmerEdge
 DBGGraph = KmerGraph

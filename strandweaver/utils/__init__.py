@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Utilities module for StrandWeaver.
 
 This module provides core utilities for the assembly pipeline:
@@ -8,13 +10,8 @@ This module provides core utilities for the assembly pipeline:
 - GPU acceleration core functions
 """
 
-from .pipeline import (
-    PipelineOrchestrator,
-    AssemblyResult,
-    KmerPrediction,
-    PreprocessingStats,
-    PreprocessingResult,
-)
+# Import order matters to avoid circular imports
+# Import hardware_management and checkpoints first (no dependencies)
 from .checkpoints import CheckpointManager
 from .hardware_management import (
     # GPU Backend (explicit selection for HPC)
@@ -34,9 +31,33 @@ from .hardware_management import (
     GPUKmerCounter,
     GPUGraphBuilder,
     GPUContactMapBuilder,
-    GPUPhaser,
-    GPUAnchorMapper,
+    # Note: GPUPhaser and GPUAnchorMapper don't exist in hardware_management
+    # They are implemented as GPUSpectralPhaser and GPUAnchorFinder
 )
+
+# Lazy import of pipeline to break circular dependency
+# pipeline depends on assembly_core which depends on hardware_management
+# which triggers this __init__.py
+def __getattr__(name):
+    """Lazy import of pipeline module to break circular dependency."""
+    if name in ('PipelineOrchestrator', 'AssemblyResult', 'KmerPrediction', 
+                'PreprocessingStats', 'PreprocessingResult'):
+        from .pipeline import (
+            PipelineOrchestrator,
+            AssemblyResult,
+            KmerPrediction,
+            PreprocessingStats,
+            PreprocessingResult,
+        )
+        globals().update({
+            'PipelineOrchestrator': PipelineOrchestrator,
+            'AssemblyResult': AssemblyResult,
+            'KmerPrediction': KmerPrediction,
+            'PreprocessingStats': PreprocessingStats,
+            'PreprocessingResult': PreprocessingResult,
+        })
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # Pipeline (unified master orchestrator)
@@ -64,6 +85,4 @@ __all__ = [
     "GPUKmerCounter",
     "GPUGraphBuilder",
     "GPUContactMapBuilder",
-    "GPUPhaser",
-    "GPUAnchorMapper",
 ]

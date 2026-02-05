@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Preprocessing Module for StrandWeaver.
 
 Comprehensive preprocessing pipeline including error correction, profiling, 

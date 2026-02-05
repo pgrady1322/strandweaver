@@ -16,7 +16,7 @@ Supports both:
 
 Author: StrandWeaver Development Team
 Date: December 24, 2025
-License: MIT
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging

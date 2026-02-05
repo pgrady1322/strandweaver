@@ -1,3 +1,7 @@
-"""Version information for StrandWeaver."""
+"""
+StrandWeaver v0.1.0
+
+Version information for StrandWeaver.
+"""
 
 __version__ = "0.1.0"

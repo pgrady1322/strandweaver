@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 I/O Module for StrandWeaver.
 
 Reorganized module structure:

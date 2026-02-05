@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Configuration parser for StrandWeaver.
 
 Based on the scRN_AI Phase 3 configuration system with YAML parsing,

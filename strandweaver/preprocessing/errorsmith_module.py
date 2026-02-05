@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 ErrorSmith: Unified Error Correction Module for StrandWeaver
 
 This module consolidates all error correction functionality into a single,

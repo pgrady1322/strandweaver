@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 K-Weaver: AI-Powered Adaptive K-mer Selector for Genome Assembly.
 
 K-Weaver dynamically selects optimal k-mer sizes for different assembly stages
@@ -50,6 +52,9 @@ import pickle
 import gzip
 
 import numpy as np
+
+# Import KmerPrediction from pipeline (it's used by this module)
+from ..utils.pipeline import KmerPrediction
 
 logger = logging.getLogger(__name__)
 
@@ -462,48 +467,7 @@ class FeatureExtractor:
 # ============================================================================
 # K-Weaver Prediction Components
 # ============================================================================
-
-@dataclass
-class KmerPrediction:
-    """
-    Multi-stage k-mer size predictions with confidence scores.
-    
-    Each assembly stage gets its own optimal k-mer size:
-    - dbg: de Bruijn graph construction from HiFi/Illumina reads
-    - ul_overlap: Ultralong read overlap detection
-    - extension: Contig extension and gap bridging
-    - polish: Final polishing and error correction
-    """
-    
-    dbg_k: int
-    ul_overlap_k: int
-    extension_k: int
-    polish_k: int
-    
-    # Confidence scores (0-1) for each prediction
-    dbg_confidence: float = 1.0
-    ul_overlap_confidence: float = 1.0
-    extension_confidence: float = 1.0
-    polish_confidence: float = 1.0
-    
-    def to_dict(self) -> Dict[str, int]:
-        """Return k values as dictionary for easy access."""
-        return {
-            'dbg': self.dbg_k,
-            'ul_overlap': self.ul_overlap_k,
-            'extension': self.extension_k,
-            'polish': self.polish_k,
-        }
-    
-    def __str__(self) -> str:
-        """Human-readable representation."""
-        return (
-            f"K-mer predictions:\n"
-            f"  DBG construction: k={self.dbg_k} (confidence: {self.dbg_confidence:.2f})\n"
-            f"  UL overlaps: k={self.ul_overlap_k} (confidence: {self.ul_overlap_confidence:.2f})\n"
-            f"  Extension: k={self.extension_k} (confidence: {self.extension_confidence:.2f})\n"
-            f"  Polish: k={self.polish_k} (confidence: {self.polish_confidence:.2f})"
-        )
+# Note: KmerPrediction is imported from utils.pipeline at the top of the file
 
 
 class KWeaverPredictor:
@@ -645,7 +609,7 @@ class KWeaverPredictor:
                 extension_k=55,
                 polish_k=77,
                 dbg_confidence=0.8,
-                ul_overlap_confidence=0.8,
+                ul_confidence=0.8,
                 extension_confidence=0.8,
                 polish_confidence=0.8,
             )
@@ -657,7 +621,7 @@ class KWeaverPredictor:
                 extension_k=41,
                 polish_k=55,
                 dbg_confidence=0.7,
-                ul_overlap_confidence=0.8,
+                ul_confidence=0.8,
                 extension_confidence=0.7,
                 polish_confidence=0.7,
             )
@@ -669,7 +633,7 @@ class KWeaverPredictor:
                 extension_k=55,
                 polish_k=77,
                 dbg_confidence=0.8,
-                ul_overlap_confidence=0.5,  # Lower confidence - no UL reads
+                ul_confidence=0.5,  # Lower confidence - no UL reads
                 extension_confidence=0.8,
                 polish_confidence=0.8,
             )
@@ -682,7 +646,7 @@ class KWeaverPredictor:
                 extension_k=41,
                 polish_k=55,
                 dbg_confidence=0.5,
-                ul_overlap_confidence=0.5,
+                ul_confidence=0.5,
                 extension_confidence=0.5,
                 polish_confidence=0.5,
             )
@@ -709,7 +673,7 @@ class KWeaverPredictor:
         # Confidence scores
         # For now, use high confidence for ML predictions, lower for fallbacks
         dbg_conf = 0.95 if 'dbg' in self.models else rule_based.dbg_confidence
-        ul_conf = 0.95 if 'ul_overlap' in self.models else rule_based.ul_overlap_confidence
+        ul_conf = 0.95 if 'ul_overlap' in self.models else rule_based.ul_confidence
         ext_conf = 0.95 if 'extension' in self.models else rule_based.extension_confidence
         pol_conf = 0.95 if 'polish' in self.models else rule_based.polish_confidence
         
@@ -721,7 +685,7 @@ class KWeaverPredictor:
             extension_k=k_ext,
             polish_k=k_pol,
             dbg_confidence=dbg_conf,
-            ul_overlap_confidence=ul_conf,
+            ul_confidence=ul_conf,
             extension_confidence=ext_conf,
             polish_confidence=pol_conf,
         )
@@ -745,6 +709,39 @@ class KWeaverPredictor:
                            f"Must be one of {list(k_dict.keys())}")
         
         return k_dict[stage]
+    
+    def get_default_prediction(self, technology: str) -> KmerPrediction:
+        """
+        Get default k-mer prediction for a specific technology.
+        
+        Args:
+            technology: Technology name ('hifi', 'ont', 'illumina', etc.)
+            
+        Returns:
+            KmerPrediction with default values for that technology
+        """
+        from ..preprocessing.read_classification_utility import ReadTechnology
+        
+        # Map string to ReadTechnology if needed
+        tech_map = {
+            'hifi': 'hifi',
+            'pacbio': 'hifi',
+            'ont': 'ont',
+            'nanopore': 'ont',
+            'illumina': 'illumina',
+        }
+        
+        normalized_tech = tech_map.get(technology.lower(), 'unknown')
+        
+        # Create minimal features with just the technology
+        class MinimalFeatures:
+            def __init__(self, tech):
+                self.read_type = tech
+                self.mean_read_length = 15000 if tech in ['hifi', 'ont'] else 150
+                self.estimated_error_rate = 0.01 if tech == 'hifi' else 0.05 if tech == 'ont' else 0.001
+        
+        features = MinimalFeatures(normalized_tech)
+        return self._predict_rule_based(features)
     
     def predict_from_file(self, reads_file: Path) -> KmerPrediction:
         """
@@ -786,6 +783,20 @@ def extract_features_from_file(reads_file: Path,
     """
     extractor = FeatureExtractor(subsample=subsample)
     return extractor.extract_from_file(reads_file)
+
+
+def extract_read_features(reads_file: Path, subsample: Optional[int] = None) -> ReadFeatures:
+    """
+    Extract features from a read file. Convenience wrapper for extract_features_from_file.
+    
+    Args:
+        reads_file: Path to FASTQ/FASTA file
+        subsample: Number of reads to sample (None = all reads)
+        
+    Returns:
+        ReadFeatures object with comprehensive read statistics
+    """
+    return extract_features_from_file(reads_file, subsample=subsample)
 
 
 # Backward compatibility aliases

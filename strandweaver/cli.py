@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Command-line interface for StrandWeaver.
 
 This module provides the main CLI entry point and all subcommands for

@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 Diploid Disentanglement Module for StrandWeaver.
 
 This module separates diploid assembly graphs into haplotype A and B paths
@@ -16,6 +18,7 @@ The goal is to resolve allelic variation and produce haplotype-separated
 assemblies while correctly handling repeats and ambiguous regions.
 """
 
+from __future__ import annotations  # Enable forward references
 from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass, field
 import logging

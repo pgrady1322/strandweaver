@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Configuration schema for StrandWeaver.
 
 Defines all available configuration parameters with defaults and validation.

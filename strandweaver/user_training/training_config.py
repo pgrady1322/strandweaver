@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 User Training Configuration
 
 Dataclasses and configuration objects for user-configurable training data generation.

@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 StrandWeaver Master Pipeline Orchestrator.
 
 This is the unified coordinator that manages the complete assembly pipeline:
@@ -44,7 +46,8 @@ from ..assembly_core.string_graph_engine_module import (
     ULAnchor,
     LongReadOverlay,
 )
-from ..assembly_core.illumina_olc_contig_module import ContigBuilder
+# Lazy import to avoid circular dependency
+# from ..assembly_core.illumina_olc_contig_module import ContigBuilder
 from ..assembly_core.dbg_engine_module import (
     KmerGraph,
     KmerNode,
@@ -75,11 +78,16 @@ class KmerPrediction:
     ul_overlap_k: int                   # UL read overlap alignment k-mer
     extension_k: int                    # Path extension k-mer
     polish_k: int                       # Final polishing k-mer
-    dbg_confidence: float               # Confidence in DBG k choice (0-1)
-    ul_overlap_confidence: float        # UL mapping confidence
-    extension_confidence: float         # Extension k confidence
-    polish_confidence: float            # Polish k confidence
+    dbg_confidence: float = 1.0         # Confidence in DBG k choice (0-1)
+    ul_confidence: float = 1.0          # UL mapping confidence (primary name)
+    extension_confidence: float = 1.0   # Extension k confidence
+    polish_confidence: float = 1.0      # Polish k confidence
     reasoning: Optional[str] = None     # Explanation of k choice
+    
+    @property
+    def ul_overlap_confidence(self) -> float:
+        """Alias for ul_confidence (backward compatibility)."""
+        return self.ul_confidence
     
     def get_primary_k(self) -> int:
         """Get primary k-mer (for DBG) from prediction."""
@@ -1424,6 +1432,9 @@ class PipelineOrchestrator:
             List of assembled contigs as SeqRead objects (artificial long reads)
         """
         self.logger.info("Running OLC assembly")
+        
+        # Lazy import to avoid circular dependency
+        from ..assembly_core.illumina_olc_contig_module import ContigBuilder
         
         # Use existing ContigBuilder for OLC
         builder = ContigBuilder(

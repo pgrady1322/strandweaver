@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 Assembly Export Module - Export Graphs, Contigs, and Paths
 
 This module handles all assembly output operations including:

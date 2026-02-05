@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
+StrandWeaver v0.1.0
+
 AI-Driven Structural Variant (SV) Detection During Assembly.
 
 This module identifies structural variants during graph traversal, not after

@@ -1,4 +1,6 @@
 """
+StrandWeaver v0.1.0
+
 User Input Module - Import User Corrections and Manual Edits
 
 This module handles all user-provided modifications to assemblies:
