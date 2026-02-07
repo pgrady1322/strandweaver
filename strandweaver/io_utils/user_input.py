@@ -29,8 +29,7 @@ chr2    unitig-6+,unitig-7-,unitig-8+              looks correct
 chrX    unitig-9+,unitig-10+                        sex chromosome
 
 Author: StrandWeaver Development Team
-Date: December 2025
-Phase: 5.2 - User-Guided Assembly Refinement
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations

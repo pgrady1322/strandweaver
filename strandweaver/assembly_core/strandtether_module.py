@@ -14,19 +14,8 @@ Unified Hi-C integration module combining:
 5. New join detection from high-contact region pairs
 6. Orientation and distance validation
 
-Designed to work DOWNSTREAM of ThreadCompass and UPSTREAM of PathWeaver Pass B,
+Designed to work downstream of ThreadCompass and upstream of PathWeaver Pass B,
 providing long-range chromatin contact evidence for iterative refinement.
-
-Key Features:
-- GPU-accelerated spectral clustering (15-35× speedup)
-- Vectorized edge support computation (8-12× speedup)
-- Normalized 0.0-1.0 scoring for pipeline integration
-- Haplotype-aware phasing for diploid genomes
-- Multi-contact consistency analysis
-
-Consolidated from:
-- Original strandtether_module.py
-- data_structures.py (Part 3: Hi-C structures and HiCIntegrator)
 
 Author: StrandWeaver Development Team
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md

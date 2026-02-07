@@ -28,6 +28,7 @@ Architecture:
 Author: Patrick Grady
 Date: December 2025
 Version: 2.0 (Consolidated)
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging

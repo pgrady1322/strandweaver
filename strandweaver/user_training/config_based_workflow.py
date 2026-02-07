@@ -6,8 +6,9 @@ Config-Based Training Workflow
 User-configurable training data generation that allows fine-grained control
 over genome and read parameters without predefined scenarios.
 
-Author: StrandWeaver User Training Infrastructure
-Date: February 2026
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
+
 """
 
 import logging

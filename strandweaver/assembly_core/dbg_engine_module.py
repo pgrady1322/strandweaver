@@ -11,6 +11,9 @@ De Bruijn Graph (DBG) Engine for StrandWeaver.
 - Annotates nodes with ML-recommended k values for regional genome complexity
 - GPU-accelerated k-mer extraction and graph building (Apple Silicon MPS, CUDA)
 - Linear path merging
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from dataclasses import dataclass, field
@@ -230,7 +233,10 @@ class DeBruijnGraphBuilder:
     def build_dbg_from_long_reads(
         self,
         long_reads: List,  # List of SeqRead objects - duck typed for flexibility
-        ml_k_model: Optional[Any] = None
+        ml_k_model: Optional[Any] = None,
+        hic_phase_info: Optional[Dict] = None,
+        ul_support_map: Optional[Dict] = None,
+        ai_annotations: Optional[Dict] = None
     ) -> DBGGraph:
         """
         Build a de Bruijn graph from corrected long reads.
@@ -238,6 +244,12 @@ class DeBruijnGraphBuilder:
         Args:
             long_reads: List of SeqRead objects (corrected)
             ml_k_model: Optional ML model for regional k-mer recommendations
+            hic_phase_info: Optional Dict[node_id] -> phase assignment ('A', 'B', 'ambiguous')
+                           from Hi-C phasing. Used for phasing-aware bubble resolution.
+            ul_support_map: Optional Dict[edge_id] -> ul_support_count. Used to
+                           weight bubble arms by ultra-long read support.
+            ai_annotations: Optional Dict[edge_id] -> AI quality score (0-1).
+                           Used to weight bubble arms by EdgeWarden confidence.
         
         Returns:
             DBGGraph with nodes, edges, and optional ML k annotations
@@ -277,7 +289,14 @@ class DeBruijnGraphBuilder:
         
         # Step 4c: Pop error bubbles (collapse near-identical parallel paths)
         # Heterozygous bubbles (real variation) are PROTECTED
-        graph = self._pop_error_bubbles(graph)
+        # When phasing data is available, allelic bubbles are identified by phase
+        # assignment rather than just sequence difference count.
+        graph = self._pop_error_bubbles(
+            graph,
+            hic_phase_info=hic_phase_info,
+            ul_support_map=ul_support_map,
+            ai_annotations=ai_annotations
+        )
         
         # Step 4d: Re-compact if cleanup removed anything (creates new linear chains)
         if len(graph.nodes) < pre_cleanup_nodes:
@@ -928,34 +947,58 @@ class DeBruijnGraphBuilder:
         
         return chain, total_length
     
-    def _pop_error_bubbles(self, graph: DBGGraph) -> DBGGraph:
+    def _pop_error_bubbles(
+        self,
+        graph: DBGGraph,
+        hic_phase_info: Optional[Dict] = None,
+        ul_support_map: Optional[Dict] = None,
+        ai_annotations: Optional[Dict] = None
+    ) -> DBGGraph:
         """
         Collapse short parallel paths (bubbles) caused by sequencing errors.
         
         A bubble is two paths between the same source and sink nodes.
         
-        Decision logic:
-          - Error bubble:  paths differ by <= max_error_differences
-            → collapse to the higher-coverage arm
-          - Heterozygous bubble: paths differ by more
-            → PROTECT both paths (real biological variation)
+        Decision logic (multi-signal, phasing-aware):
+          1. If Hi-C phasing is available and the two arms have DIFFERENT
+             phase assignments (A vs B) → PROTECT (allelic variation)
+          2. If arms differ by <= max_error_differences substitutions
+             → collapse to the higher-support arm (coverage + UL + AI)
+          3. If arms differ by more → PROTECT (potential heterozygosity)
         
-        Coverage comes from k-mer counting — no read re-mapping needed.
+        Support scoring when phasing/UL/AI data is available:
+          support = 0.5 * coverage_norm + 0.3 * ul_support_norm + 0.2 * ai_score
+        Falls back to pure coverage when no auxiliary signals are available.
         
         Args:
             graph: DBG graph (ideally after tip trimming)
+            hic_phase_info: Optional Dict[node_id] -> phase ('A', 'B', 'ambiguous')
+            ul_support_map: Optional Dict[edge_id] -> UL read support count
+            ai_annotations: Optional Dict[edge_id] -> AI quality score (0-1)
             
         Returns:
-            Graph with error bubbles collapsed, heterozygous bubbles intact
+            Graph with error bubbles collapsed, allelic/heterozygous bubbles intact
         """
         max_bubble_arm_length = self.base_k * 10
         # For HiFi (0.1% error): 1-2 substitutions per arm is error-derived.
         # Anything beyond that is potential heterozygosity → protect.
         max_error_differences = 2
         
+        has_phasing = hic_phase_info is not None and len(hic_phase_info) > 0
+        has_ul = ul_support_map is not None and len(ul_support_map) > 0
+        has_ai = ai_annotations is not None and len(ai_annotations) > 0
+        
+        if has_phasing:
+            logger.info("  Bubble resolution: phasing-aware mode (Hi-C phase data available)")
+        if has_ul:
+            logger.info("  Bubble resolution: UL support weighting enabled")
+        if has_ai:
+            logger.info("  Bubble resolution: AI edge score weighting enabled")
+        
         bubbles_found = 0
         bubbles_popped = 0
         bubbles_protected = 0
+        bubbles_phased = 0  # Protected specifically by phase signal
         nodes_to_remove: Set[int] = set()
         edges_to_remove: Set[int] = set()
         
@@ -1001,14 +1044,35 @@ class DeBruijnGraphBuilder:
                         bubbles_protected += 1
                         continue
                     
-                    if n_differences <= max_error_differences:
-                        # ── Error bubble → pop (keep higher-coverage arm) ──
-                        cov_a = sum(graph.nodes[n].coverage for n in path_a) / max(len(path_a), 1)
-                        cov_b = sum(graph.nodes[n].coverage for n in path_b) / max(len(path_b), 1)
+                    # ── Phase-aware check: if arms belong to different
+                    #    haplotypes, ALWAYS protect regardless of sequence
+                    #    similarity (even 1-SNP allelic bubbles) ──
+                    if has_phasing:
+                        phase_a = self._get_arm_phase(
+                            path_a, hic_phase_info)
+                        phase_b = self._get_arm_phase(
+                            path_b, hic_phase_info)
                         
-                        remove_path = path_b if cov_a >= cov_b else path_a
-                        keep_idx = i if cov_a >= cov_b else j
-                        remove_idx = j if cov_a >= cov_b else i
+                        if (phase_a in ('A', 'B') and
+                                phase_b in ('A', 'B') and
+                                phase_a != phase_b):
+                            # Confirmed allelic — different haplotypes
+                            bubbles_protected += 1
+                            bubbles_phased += 1
+                            continue
+                    
+                    if n_differences <= max_error_differences:
+                        # ── Error bubble → pop (keep higher-support arm) ──
+                        support_a = self._calculate_arm_support(
+                            path_a, graph, out_edge_ids[i],
+                            ul_support_map, ai_annotations)
+                        support_b = self._calculate_arm_support(
+                            path_b, graph, out_edge_ids[j],
+                            ul_support_map, ai_annotations)
+                        
+                        remove_path = path_b if support_a >= support_b else path_a
+                        keep_idx = i if support_a >= support_b else j
+                        remove_idx = j if support_a >= support_b else i
                         
                         for nid in remove_path:
                             nodes_to_remove.add(nid)
@@ -1038,11 +1102,108 @@ class DeBruijnGraphBuilder:
                 graph.out_edges.pop(nid, None)
                 graph.in_edges.pop(nid, None)
         
+        phase_detail = f", {bubbles_phased} by Hi-C phase" if bubbles_phased else ""
         logger.info(f"  Bubble popping: found {bubbles_found} bubbles — "
                      f"popped {bubbles_popped} (error), "
-                     f"protected {bubbles_protected} (heterozygous)")
+                     f"protected {bubbles_protected} (heterozygous{phase_detail})")
         
         return graph
+    
+    def _get_arm_phase(
+        self,
+        path_node_ids: List[int],
+        hic_phase_info: Dict
+    ) -> str:
+        """
+        Determine the consensus Hi-C phase for a bubble arm.
+        
+        Returns 'A', 'B', or 'ambiguous' based on majority vote of
+        phase-assigned nodes in the arm.
+        """
+        phase_counts: Dict[str, int] = defaultdict(int)
+        for nid in path_node_ids:
+            phase = hic_phase_info.get(nid, 'ambiguous')
+            if phase in ('A', 'B'):
+                phase_counts[phase] += 1
+        
+        if not phase_counts:
+            return 'ambiguous'
+        
+        best_phase = max(phase_counts, key=phase_counts.get)
+        # Require a clear majority (>60% of phased nodes agree)
+        total_phased = sum(phase_counts.values())
+        if phase_counts[best_phase] / total_phased > 0.6:
+            return best_phase
+        return 'ambiguous'
+    
+    def _calculate_arm_support(
+        self,
+        path_node_ids: List[int],
+        graph: DBGGraph,
+        entry_edge_id: int,
+        ul_support_map: Optional[Dict] = None,
+        ai_annotations: Optional[Dict] = None
+    ) -> float:
+        """
+        Calculate multi-signal support score for a bubble arm.
+        
+        Combines:
+          - Coverage (always available): 50% weight
+          - UL read support (if available): 30% weight
+          - AI edge quality (if available): 20% weight
+        
+        Falls back to pure coverage when auxiliary signals are absent.
+        """
+        # Coverage component (always available)
+        cov = sum(graph.nodes[n].coverage for n in path_node_ids) / max(len(path_node_ids), 1)
+        
+        # Normalize coverage to 0-1 scale using graph median
+        coverages = [n.coverage for n in graph.nodes.values()]
+        median_cov = sorted(coverages)[len(coverages) // 2] if coverages else 1.0
+        cov_norm = min(cov / max(median_cov, 1.0), 2.0) / 2.0  # Cap at 1.0
+        
+        # UL support component
+        ul_norm = 0.0
+        has_ul = ul_support_map is not None and len(ul_support_map) > 0
+        if has_ul:
+            # Sum UL support for edges in this arm
+            ul_total = 0
+            for nid in path_node_ids:
+                for eid in graph.in_edges.get(nid, set()):
+                    ul_total += ul_support_map.get(eid, 0)
+                for eid in graph.out_edges.get(nid, set()):
+                    ul_total += ul_support_map.get(eid, 0)
+            # Also check the entry edge
+            ul_total += ul_support_map.get(entry_edge_id, 0)
+            ul_norm = min(ul_total / 5.0, 1.0)  # Normalize: 5+ UL reads = max
+        
+        # AI edge quality component
+        ai_norm = 0.5  # Default neutral
+        has_ai = ai_annotations is not None and len(ai_annotations) > 0
+        if has_ai:
+            ai_scores = []
+            # Entry edge score
+            entry_score = ai_annotations.get(entry_edge_id)
+            if entry_score is not None:
+                ai_scores.append(entry_score if isinstance(entry_score, (int, float)) else getattr(entry_score, 'score_true', 0.5))
+            # Internal edge scores
+            for nid in path_node_ids:
+                for eid in graph.out_edges.get(nid, set()):
+                    score = ai_annotations.get(eid)
+                    if score is not None:
+                        ai_scores.append(score if isinstance(score, (int, float)) else getattr(score, 'score_true', 0.5))
+            if ai_scores:
+                ai_norm = sum(ai_scores) / len(ai_scores)
+        
+        # Weighted combination — adjust weights based on available signals
+        if has_ul and has_ai:
+            return 0.5 * cov_norm + 0.3 * ul_norm + 0.2 * ai_norm
+        elif has_ul:
+            return 0.6 * cov_norm + 0.4 * ul_norm
+        elif has_ai:
+            return 0.7 * cov_norm + 0.3 * ai_norm
+        else:
+            return cov_norm  # Pure coverage fallback
     
     def _walk_bubble_arm(
         self, graph: DBGGraph, start_id: int,
@@ -1210,7 +1371,10 @@ def build_dbg_from_long_reads(
     long_reads: List,  # List[SeqRead] - intentionally untyped for duck typing
     base_k: int = 31,
     min_coverage: int = 2,
-    ml_k_model: Optional[Any] = None
+    ml_k_model: Optional[Any] = None,
+    hic_phase_info: Optional[Dict] = None,
+    ul_support_map: Optional[Dict] = None,
+    ai_annotations: Optional[Dict] = None
 ) -> DBGGraph:
     """
     Convenience function to build DBG from long reads.
@@ -1220,9 +1384,17 @@ def build_dbg_from_long_reads(
         base_k: Base k-mer size
         min_coverage: Minimum k-mer coverage threshold
         ml_k_model: Optional ML model for regional k annotation
+        hic_phase_info: Optional Hi-C phase assignments for phasing-aware bubble resolution
+        ul_support_map: Optional UL read support counts for multi-signal bubble resolution
+        ai_annotations: Optional AI edge quality scores for multi-signal bubble resolution
     
     Returns:
         Compacted DBG with optional ML k annotations
     """
     builder = DeBruijnGraphBuilder(base_k=base_k, min_coverage=min_coverage)
-    return builder.build_dbg_from_long_reads(long_reads, ml_k_model=ml_k_model)
+    return builder.build_dbg_from_long_reads(
+        long_reads, ml_k_model=ml_k_model,
+        hic_phase_info=hic_phase_info,
+        ul_support_map=ul_support_map,
+        ai_annotations=ai_annotations
+    )

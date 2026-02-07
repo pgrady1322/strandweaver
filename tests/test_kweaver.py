@@ -1,5 +1,8 @@
 """
 Unit tests for K-Weaver module (k-mer size prediction).
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import pytest

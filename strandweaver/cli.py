@@ -8,6 +8,9 @@ Command-line interface for StrandWeaver.
 
 This module provides the main CLI entry point and all subcommands for
 the StrandWeaver genome assembly pipeline.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import sys
@@ -223,7 +226,7 @@ def config_show(config_file, format):
 @click.option('--checkpoint-dir', type=click.Path(),
               help='Checkpoint directory (default: <output>/checkpoints)')
 @click.option('--start-from', 
-              type=click.Choice(['profile', 'correct', 'assemble', 'finish']),
+              type=click.Choice(['profile', 'correct', 'assemble', 'finish', 'misassembly_report', 'classify_chromosomes']),
               help='Start pipeline from specific step')
 @click.option('--skip-profiling', is_flag=True,
               help='Skip error profiling step')
@@ -246,11 +249,27 @@ def config_show(config_file, format):
 # Chromosome Classification
 # ============================================================================
 @click.option('--id-chromosomes', is_flag=True,
-              help='Identify microchromosomes/chromosomal segments using gene content analysis (BLAST-based)')
+              help='Classify scaffolds as chromosomes vs junk using gene content analysis. '
+                   'Uses ORF detection by default; set --gene-detection-method for BLAST/Augustus/BUSCO.')
 @click.option('--id-chromosomes-advanced', is_flag=True,
-              help='Enable advanced chromosome identification (includes telomere and Hi-C pattern analysis)')
+              help='Enable advanced chromosome identification (adds telomere detection and Hi-C self-contact pattern analysis)')
 @click.option('--blast-db', type=str, default='nr',
               help='BLAST database for chromosome classification (default: nr)')
+@click.option('--gene-detection-method', type=click.Choice(['orf', 'blast', 'augustus', 'busco']),
+              default='orf',
+              help='Gene detection method for chromosome classification. '
+                   'orf=built-in (no external tools), blast/augustus/busco require installed tools.')
+# ============================================================================
+# Misassembly Reporting
+# ============================================================================
+@click.option('--misassembly-report/--no-misassembly-report', default=True,
+              help='Generate misassembly report (TSV + BED). Enabled by default.')
+@click.option('--misassembly-min-confidence',
+              type=click.Choice(['HIGH', 'MEDIUM', 'LOW']),
+              default='MEDIUM',
+              help='Minimum confidence level for misassembly flags (default: MEDIUM).')
+@click.option('--misassembly-format', type=str, default='tsv,bed',
+              help='Comma-separated output formats for misassembly report (tsv,bed,json). Default: tsv,bed.')
 @click.pass_context
 def pipeline(ctx, reads_files, technologies, 
              reads1, reads2, reads3, reads4, reads5,
@@ -261,7 +280,8 @@ def pipeline(ctx, reads_files, technologies,
              resume, checkpoint_dir, start_from, skip_profiling, skip_correction,
              min_contig_length,
              illumina_r1, illumina_r2, hic_r1, hic_r2,
-             id_chromosomes, id_chromosomes_advanced, blast_db):
+             id_chromosomes, id_chromosomes_advanced, blast_db, gene_detection_method,
+             misassembly_report, misassembly_min_confidence, misassembly_format):
     """
     Run the complete assembly pipeline.
     
@@ -625,12 +645,32 @@ def pipeline(ctx, reads_files, technologies,
         pipeline_config['chromosome_classification']['enabled'] = True
         pipeline_config['chromosome_classification']['advanced'] = id_chromosomes_advanced
         pipeline_config['chromosome_classification']['blast_database'] = blast_db
-        pipeline_config['chromosome_classification']['mode'] = 'fast'
+        pipeline_config['chromosome_classification']['gene_detection_method'] = gene_detection_method
+        pipeline_config['chromosome_classification']['mode'] = 'fast' if gene_detection_method in ('orf', 'blast') else 'accurate'
         
         if verbose:
             mode = "Advanced (Tiers 1-3)" if id_chromosomes_advanced else "Basic (Tiers 1-2)"
             click.echo(f"ℹ️  Chromosome classification enabled: {mode}")
             click.echo(f"   BLAST database: {blast_db}")
+    
+    # ========================================================================
+    # Misassembly Report Configuration
+    # ========================================================================
+    pipeline_config['misassembly_report'] = {
+        'enabled': misassembly_report,
+        'min_confidence': misassembly_min_confidence,
+        'formats': [f.strip() for f in misassembly_format.split(',')],
+    }
+    
+    # Remove misassembly_report step from pipeline if disabled
+    if not misassembly_report:
+        steps = pipeline_config.get('pipeline', {}).get('steps', [])
+        if 'misassembly_report' in steps:
+            steps.remove('misassembly_report')
+    
+    if verbose and misassembly_report:
+        click.echo(f"ℹ️  Misassembly report: min_confidence={misassembly_min_confidence}, "
+                   f"formats={misassembly_format}")
     
     # ========================================================================
     # Run Pipeline

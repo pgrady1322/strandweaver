@@ -14,6 +14,9 @@ SECTIONS:
 1. Error Type Definitions and Pattern Classification
 2. K-mer Spectrum Analysis
 3. Main Error Profiler
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # =============================================================================

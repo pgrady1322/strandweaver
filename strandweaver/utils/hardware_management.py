@@ -27,6 +27,9 @@ Backend Selection (REQUIRED):
 Environment Variables:
 - STRANDWEAVER_GPU_BACKEND: Set backend ('cuda', 'mps', 'cpu')
 - If not set, defaults to 'cpu' (safe for HPC)
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import Dict, List, Optional, Set, Tuple, Any

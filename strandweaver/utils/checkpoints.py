@@ -4,6 +4,9 @@ StrandWeaver v0.1.0
 Checkpoint management for StrandWeaver pipelines.
 
 Handles creation, storage, and recovery of pipeline checkpoints.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import json

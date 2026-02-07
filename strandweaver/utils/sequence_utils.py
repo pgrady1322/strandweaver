@@ -4,6 +4,9 @@ StrandWeaver v0.1.0
 Sequence utility functions for StrandWeaver.
 
 Provides common sequence manipulation and analysis functions.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import List, Dict, Tuple

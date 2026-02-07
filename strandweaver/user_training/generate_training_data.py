@@ -27,8 +27,8 @@ python generate_training_data.py \
   --sv-density 0.00005 \
   --output training_data/repeat_rich
 
-Author: StrandWeaver User Training Infrastructure
-Date: February 2026
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import argparse

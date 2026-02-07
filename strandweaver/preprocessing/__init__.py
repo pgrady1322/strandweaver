@@ -25,6 +25,9 @@ Main Components:
     - Read technology classification and metadata detection
     - Adapter detection and trimming
     - Visualization and reporting tools
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from .errorsmith_module import (

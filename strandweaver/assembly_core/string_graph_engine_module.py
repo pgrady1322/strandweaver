@@ -17,9 +17,8 @@ Key features:
 - K-mer anchoring for error-prone ultralong reads (uncorrected ONT)
 - Optional MBG/GraphAligner integration for gap filling
 
-Consolidated from:
-- Original string_graph_engine_module.py
-- data_structures.py (Part 2: UL overlay structures and LongReadOverlay)
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from dataclasses import dataclass, field

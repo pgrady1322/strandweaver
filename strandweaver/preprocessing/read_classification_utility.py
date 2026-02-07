@@ -17,6 +17,9 @@ This module handles all technology-specific logic including:
 - Technology detection from file characteristics
 - ONT flow cell and basecaller metadata
 - Automatic basecaller detection via LongBow
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # =============================================================================

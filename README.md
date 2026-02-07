@@ -165,8 +165,11 @@ pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver
 ## 🚀 Quick Start
 
 StrandWeaver offers two execution modes:
-- **Python CLI** (default): Simple single-node execution
-- **Nextflow** (optional): HPC cluster support with automatic parallelization
+
+| Mode | Usage | Best For |
+|------|-------|----------|
+| **Direct** | `strandweaver <command> [options]` | Small/medium datasets, local workstation, testing |
+| **Nextflow** | `strandweaver <command> [options] --nextflow` | Large datasets, HPC clusters, parallel processing |
 
 ### Python CLI Mode
 
@@ -238,6 +241,99 @@ nextflow run strandweaver/nextflow/main.nf \
 ```
 
 See [nextflow/README.md](nextflow/README.md) for complete Nextflow documentation.
+
+#### Nextflow Profiles
+
+| Profile | Description | Use Case |
+|---------|-------------|----------|
+| `local` | Direct execution on local machine | Testing, small datasets |
+| `docker` | Docker containerization | Reproducibility, dependency isolation |
+| `singularity` | Singularity containers | HPC clusters (no root required) |
+| `slurm` | SLURM cluster scheduler | HPC parallel processing |
+| `test` | Use synthetic *E. coli* data | Quick validation |
+
+Combine profiles with commas: `-profile slurm,singularity`
+
+### Individual Processing Commands
+
+StrandWeaver provides standalone commands for each processing stage. Each command supports both direct and Nextflow execution.
+
+#### Error Correction
+```bash
+# Direct mode
+strandweaver correct --hifi reads.fq.gz -o corrected/ -t 8
+
+# Nextflow mode (automatic parallelization)
+strandweaver correct --hifi reads.fq.gz -o corrected/ \
+  --nextflow --nf-profile slurm --correction-batch-size 100000
+```
+
+#### K-mer Extraction
+```bash
+# Direct mode
+strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl -t 8
+
+# Nextflow mode (huge genomes >10GB)
+strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl \
+  --nextflow --nf-profile slurm --kmer-batch-size 2000000
+```
+
+#### Edge Scoring
+```bash
+# Direct mode
+strandweaver score-edges -e edges.json -a aligns.bam -o scored.json -t 8
+
+# Nextflow mode (large graphs)
+strandweaver score-edges -e edges.json -a aligns.bam -o scored.json \
+  --nextflow --nf-profile slurm --edge-batch-size 10000
+```
+
+#### Ultra-Long Read Mapping
+```bash
+# Direct mode
+strandweaver map-ul -u ul_reads.fq.gz -g graph.gfa -o aligns.paf --use-gpu
+
+# Nextflow mode
+strandweaver map-ul -u ul_reads.fq.gz -g graph.gfa -o aligns.paf \
+  --nextflow --nf-profile slurm --use-gpu --ul-batch-size 100
+```
+
+#### Hi-C Alignment
+```bash
+# Direct mode
+strandweaver align-hic --hic-r1 R1.fq.gz --hic-r2 R2.fq.gz \
+  -g graph.gfa -o aligns.bam -t 8
+
+# Nextflow mode (large Hi-C datasets)
+strandweaver align-hic --hic-r1 R1.fq.gz --hic-r2 R2.fq.gz \
+  -g graph.gfa -o aligns.bam \
+  --nextflow --nf-profile slurm --hic-batch-size 500000
+```
+
+#### Structural Variant Detection
+```bash
+# Direct mode
+strandweaver detect-svs -g graph.gfa -o variants.vcf -t 8
+
+# Nextflow mode (large graphs)
+strandweaver detect-svs -g graph.gfa -o variants.vcf \
+  --nextflow --nf-profile slurm --sv-batch-size 1000
+```
+
+### Performance Guidelines
+
+**When to use Direct mode:** Dataset < 10GB, local workstation with 8+ cores, testing and debugging.
+
+**When to use Nextflow mode:** Dataset > 10GB, HPC cluster available, need resume capability, want automatic parallelization.
+
+| Command | Direct (1 node) | Nextflow (20 nodes) | Speedup |
+|---------|----------------|---------------------|--------|
+| `correct` | 20 hours | 2 hours | 10× |
+| `extract-kmers` | 8 hours | 1.5 hours | 5× |
+| `score-edges` | 8 hours | 1.5 hours | 5× |
+| `map-ul` | 6 hours | 1 hour | 6× |
+| `align-hic` | 10 hours | 1.5 hours | 7× |
+| `detect-svs` | 4 hours | 1 hour | 4× |
 
 ---
 
@@ -313,12 +409,16 @@ strandweaver assemble \
 13. **SVScribe**: Graph-based structural variant detection (DEL, INS, INV, DUP, TRA)
 14. **Iterate or Finalize**: Contig and scaffold extraction with comprehensive statistics, or pass graph with feature scoring to pipeline for iteration 2+.
 
+### Post-Assembly Analysis
+15. **Misassembly Report**: Putative misassembly detection using multi-signal evidence (EdgeWarden confidence, coverage discontinuities, UL read conflicts, Hi-C violations). Outputs TSV and BED reports for genome-browser visualization.
+16. **Chromosome Classification**: Multi-tier scaffold classification (gene content, telomere detection, Hi-C self-contact patterns) to identify chromosomes vs. assembly artifacts.
+
 ### Output Generation
-15. **GFA Export**: Assembly graphs in GFA format with sequences
-16. **BandageNG**: Visualization files with coverage tracks and final 0 - 1 range StrandWeaver scores (long/UL/Hi-C).
-17. **Statistics**: N50, L50, coverage metrics, variation protection counts
-18. **SV Calls**: Structural variants in VCF and JSON formats
-19. **Phasing Info**: Haplotype assignments and confidence scores
+17. **GFA Export**: Assembly graphs in GFA format with sequences
+18. **BandageNG**: Visualization files with coverage tracks and final 0 - 1 range StrandWeaver scores (long/UL/Hi-C).
+19. **Statistics**: N50, L50, coverage metrics, variation protection counts
+20. **SV Calls**: Structural variants in VCF and JSON formats
+21. **Phasing Info**: Haplotype assignments and confidence scores
 
 ---
 
@@ -394,9 +494,13 @@ See [strandweaver/user_training/README.md](strandweaver/user_training/README.md)
 ```
 output/
 ├── contigs.fasta                  # Primary assembly contigs
+├── final_assembly.fasta           # Polished, length-filtered contigs
 ├── scaffolds.fasta                # Hi-C scaffolded sequences
 ├── assembly_graph.gfa             # Assembly graph (GFA format)
 ├── assembly_stats.json            # N50, L50, coverage statistics
+├── misassembly_report.tsv         # Putative misassemblies (tab-delimited)
+├── misassembly_report.bed         # Misassemblies (genome browser BED)
+├── chromosome_classification.json # Scaffold → chromosome classification
 ├── sv_calls.vcf                   # Structural variant calls
 ├── phasing_info.json              # Haplotype assignments
 ├── coverage_long.csv              # Long read coverage (BandageNG)

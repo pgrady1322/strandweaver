@@ -3,15 +3,8 @@ StrandWeaver v0.1.0
 
 Assembly Core module for StrandWeaver.
 
-This module provides graph-based genome assembly algorithms including:
-- Contig building from short reads (overlap-layout-consensus)
-- String graph and de Bruijn graph construction  
-- Graph simplification and traversal
-- AI-powered path prediction and routing
-- Structural variant detection
-- Diploid disentanglement
-
-Phase 3: Graph Assembly Engine
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from .illumina_olc_contig_module import (

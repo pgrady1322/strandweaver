@@ -5,8 +5,8 @@ User Training Configuration
 
 Dataclasses and configuration objects for user-configurable training data generation.
 
-Author: StrandWeaver User Training Infrastructure
-Date: February 2026
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from dataclasses import dataclass, field

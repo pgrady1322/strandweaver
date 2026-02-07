@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Tests for ULRouter/ThreadCompass (UL read routing) functionality."""
+"""Tests for ULRouter/ThreadCompass (UL read routing) functionality.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
+"""
 
 import pytest
 from unittest.mock import Mock, MagicMock

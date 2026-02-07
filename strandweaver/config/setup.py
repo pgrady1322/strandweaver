@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-StrandWeaver: AI-Powered Multi-Technology Genome Assembler
+StrandWeaver Setup.py
 
-A genome assembly tool with intelligent error correction, graph-based assembly,
-and AI-powered finishing for Ancient DNA, Illumina, ONT, and PacBio HiFi data.
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from setuptools import setup, find_packages

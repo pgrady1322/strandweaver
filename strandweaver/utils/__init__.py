@@ -8,6 +8,9 @@ This module provides core utilities for the assembly pipeline:
 - Checkpoint management
 - Hardware management (CPU/GPU) - consolidated device and acceleration
 - GPU acceleration core functions
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # Import order matters to avoid circular imports

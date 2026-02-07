@@ -8,17 +8,8 @@ This is the unified coordinator that manages the complete assembly pipeline:
 - Assembly: Technology-specific routing (OLC, DBG, String Graph, Hi-C scaffolding)
 - Finishing: Polishing, gap filling, final output
 
-Consolidates three former coordinators:
-1. PreprocessingCoordinator (from utilities.py) - K-Weaver + ErrorSmith integration
-2. AssemblyOrchestrator (from pipeline_orchestrator.py) - Assembly routing by read type
-3. PipelineOrchestrator (this file) - End-to-end pipeline with checkpointing
-
-Key features:
-- Single entry point for complete pipeline execution
-- Checkpoint support for resume capability
-- AI model loading and management
-- Technology-specific processing (Illumina, HiFi, ONT, Ancient DNA)
-- Deterministic assembly flows based on read type
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from pathlib import Path
@@ -249,6 +240,7 @@ class PipelineOrchestrator:
             'corrected_files': {},  # {technology: corrected_file_path}
             'assembly_result': None,
             'final_contigs': None,
+            'path_weaver': None,  # PathWeaver instance (carries misassembly flags)
         }
         
         # AI models (lazy loaded)
@@ -320,6 +312,8 @@ class PipelineOrchestrator:
             self._step_assemble()
         elif step == 'finish':
             self._step_finish()
+        elif step == 'misassembly_report':
+            self._step_misassembly_report()
         elif step == 'classify_chromosomes':
             self._step_classify_chromosomes()
         else:
@@ -749,6 +743,7 @@ class PipelineOrchestrator:
         path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
         result.stats['paths_selected'] = len(path_weaver.discovered_paths)
+        self.state['path_weaver'] = path_weaver  # Preserve for misassembly reporting
         
         # Step 5: Build string graph (if UL reads available)
         # Load UL reads from files if present
@@ -1018,6 +1013,7 @@ class PipelineOrchestrator:
         path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
         result.stats['paths_selected'] = len(path_weaver.discovered_paths)
+        self.state['path_weaver'] = path_weaver  # Preserve for misassembly reporting
         
         # Step 4: Build string graph (if UL reads available)
         # Load UL reads from files if present
@@ -1269,6 +1265,7 @@ class PipelineOrchestrator:
         path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
         result.stats['paths_selected'] = len(path_weaver.discovered_paths)
+        self.state['path_weaver'] = path_weaver  # Preserve for misassembly reporting
         
         # Step 4: Build string graph (UL overlay is critical for ONT)
         # Load UL reads from files if present
@@ -2477,6 +2474,110 @@ class PipelineOrchestrator:
         self.logger.info(f"  Final contigs: {len(contigs)} ({total_bp:,} bp)")
         self.logger.info(f"  Final assembly: {final_path}")
     
+    def _step_misassembly_report(self):
+        """
+        Generate misassembly report from PathWeaver's detection flags.
+        
+        Writes TSV and BED files to the output directory for downstream
+        analysis and genome-browser visualization.
+        """
+        self.logger.info("Generating misassembly report...")
+        
+        path_weaver = self.state.get('path_weaver')
+        if path_weaver is None:
+            self.logger.warning("No PathWeaver instance available — "
+                                "misassembly detection requires the assemble step to run first. Skipping.")
+            return
+        
+        # Check if misassembly detector is wired up
+        if not hasattr(path_weaver, 'misassembly_detector') or path_weaver.misassembly_detector is None:
+            self.logger.info("Misassembly detector not available in PathWeaver — skipping report")
+            return
+        
+        # Get configuration
+        misassembly_config = self.config.get('misassembly_report', {})
+        min_confidence = misassembly_config.get('min_confidence', 'MEDIUM')
+        output_formats = misassembly_config.get('formats', ['tsv', 'bed'])
+        
+        # Adjust detector confidence threshold if configured
+        from ..assembly_utils.misassembly_detector import ConfidenceLevel
+        conf_map = {
+            'HIGH': ConfidenceLevel.HIGH,
+            'MEDIUM': ConfidenceLevel.MEDIUM,
+            'LOW': ConfidenceLevel.LOW,
+        }
+        if min_confidence.upper() in conf_map:
+            path_weaver.misassembly_detector.min_confidence = conf_map[min_confidence.upper()]
+        
+        # Count total flags across all contigs
+        total_flags = sum(
+            len(flags) for flags in path_weaver.misassembly_detector.detected_flags.values()
+        )
+        
+        if total_flags == 0:
+            self.logger.info("✓ No misassemblies detected — assembly looks clean")
+            # Still write empty files so downstream tools don't fail on missing files
+        
+        # Write reports in each requested format
+        files_written = []
+        
+        if 'tsv' in output_formats:
+            tsv_path = self.output_dir / "misassembly_report.tsv"
+            try:
+                report = path_weaver.get_misassembly_report(output_format='tsv')
+                with open(tsv_path, 'w') as f:
+                    f.write(report)
+                files_written.append(tsv_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to write TSV report: {e}")
+        
+        if 'bed' in output_formats:
+            bed_path = self.output_dir / "misassembly_report.bed"
+            try:
+                report = path_weaver.get_misassembly_report(output_format='bed')
+                # Add BED track header for genome browser
+                header = 'track name="Misassemblies" description="StrandWeaver putative misassembly regions" itemRgb=On\n'
+                with open(bed_path, 'w') as f:
+                    f.write(header)
+                    f.write(report)
+                files_written.append(bed_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to write BED report: {e}")
+        
+        if 'json' in output_formats:
+            json_path = self.output_dir / "misassembly_report.json"
+            try:
+                report = path_weaver.get_misassembly_report(output_format='json')
+                with open(json_path, 'w') as f:
+                    f.write(report)
+                files_written.append(json_path)
+            except Exception as e:
+                self.logger.warning(f"Failed to write JSON report: {e}")
+        
+        # Log summary
+        if total_flags > 0:
+            # Break down by confidence
+            high = medium = low = 0
+            for flags in path_weaver.misassembly_detector.detected_flags.values():
+                for flag in flags:
+                    if flag.confidence.value == 'HIGH':
+                        high += 1
+                    elif flag.confidence.value == 'MEDIUM':
+                        medium += 1
+                    else:
+                        low += 1
+            
+            self.logger.info(f"✓ Misassembly report complete")
+            self.logger.info(f"  Total flags: {total_flags} "
+                             f"(HIGH={high}, MEDIUM={medium}, LOW={low})")
+            contigs_flagged = len(path_weaver.misassembly_detector.detected_flags)
+            self.logger.info(f"  Contigs with flags: {contigs_flagged}")
+        else:
+            self.logger.info(f"✓ Misassembly report complete (no flags)")
+        
+        for p in files_written:
+            self.logger.info(f"  Output: {p}")
+    
     def _step_classify_chromosomes(self):
         """
         Classify unconnected scaffolds to identify potential microchromosomes.
@@ -2499,18 +2600,53 @@ class PipelineOrchestrator:
         chrom_config = self.config.get('chromosome_classification', {})
         advanced = chrom_config.get('advanced', False)
         
-        # Load scaffolds (from assembly output)
+        # ====================================================================
+        # Pre-flight check: verify external tools are available
+        # ====================================================================
+        gene_method = chrom_config.get('gene_detection_method', 'orf')
+        tool_checks = {
+            'blast': ('blastx', 'Install NCBI BLAST+: conda install -c bioconda blast'),
+            'augustus': ('augustus', 'Install Augustus: conda install -c bioconda augustus'),
+            'busco': ('busco', 'Install BUSCO: conda install -c bioconda busco'),
+        }
+        
+        if gene_method in tool_checks:
+            tool_cmd, install_hint = tool_checks[gene_method]
+            import shutil
+            if shutil.which(tool_cmd) is None:
+                self.logger.error(
+                    f"Gene detection method '{gene_method}' requires '{tool_cmd}' "
+                    f"but it was not found on $PATH.\n"
+                    f"  → {install_hint}\n"
+                    f"  → Or use --gene-detection-method orf (no external tools needed)"
+                )
+                raise RuntimeError(
+                    f"Required tool '{tool_cmd}' not found for "
+                    f"--gene-detection-method {gene_method}. "
+                    f"Install it or switch to --gene-detection-method orf."
+                )
+        
+        # Load scaffolds (prefer scaffolds > final_assembly > contigs)
         scaffolds_path = self.output_dir / "scaffolds.fasta"
         if not scaffolds_path.exists():
-            # Try contigs if no scaffolds
+            scaffolds_path = self.output_dir / "final_assembly.fasta"
+        if not scaffolds_path.exists():
             scaffolds_path = self.output_dir / "contigs.fasta"
-            if not scaffolds_path.exists():
-                self.logger.warning("No scaffolds or contigs found, skipping classification")
-                return
+        if not scaffolds_path.exists():
+            self.logger.warning("No scaffolds, final assembly, or contigs found — skipping classification")
+            return
         
         self.logger.info(f"  Loading scaffolds from {scaffolds_path.name}...")
         scaffolds = list(read_fasta(scaffolds_path))
         self.logger.info(f"  Loaded {len(scaffolds)} scaffolds")
+        
+        # Ensure gene_detection_method is set (default to 'orf' for no external deps)
+        if 'gene_detection_method' not in chrom_config:
+            chrom_config['gene_detection_method'] = 'orf'
+        
+        self.logger.info(f"  Gene detection method: {chrom_config['gene_detection_method']}")
+        if chrom_config['gene_detection_method'] == 'orf':
+            self.logger.info("  (Built-in ORF finder — no external tools required)")
         
         # Initialize classifier
         classifier = ChromosomeClassifier(config=chrom_config, advanced=advanced)

@@ -7,32 +7,8 @@ StrandWeaver v0.1.0
 PathWeaver: GNN-First Path Finding Engine for StrandWeaver.
 
 This module implements GNN-based path prediction with classical algorithm fallback
-for assembly graph traversal. It works DOWNSTREAM of EdgeWarden and uses its
+for assembly graph traversal. It works downstream of EdgeWarden and uses its
 outputs without recalculation.
-
-NEW ARCHITECTURE (GNN-First)
-═══════════════════════════════════════════════════════════════════════════════
-1. PRIMARY: GNN Path Prediction
-   ├─ Graph Neural Network predicts edge confidences
-   ├─ Extracts high-confidence paths directly from predictions
-   ├─ Learns biological patterns from training data
-   └─ Fast inference on GPU (if available)
-
-2. FALLBACK: Classical Algorithms (Dijkstra/BFS/DFS)
-   ├─ Used when GNN unavailable or fails
-   ├─ Reliable baseline path finding
-   └─ Well-tested traditional methods
-
-3. ENHANCEMENT: EdgeWarden + Long-Range Data
-   ├─ EdgeWarden scores refine both GNN and algorithm paths
-   ├─ Hi-C contact maps provide phasing information
-   ├─ Ultra-long reads validate path continuity
-   └─ Multi-dimensional scoring combines all sources
-
-This is the CORRECT design philosophy:
-- ML-first: Use machine learning as primary method when available
-- Classical fallback: Maintain reliability with traditional algorithms
-- Data integration: Enhance predictions with multiple evidence sources
 
 ARCHITECTURE NOTES
 ──────────────────

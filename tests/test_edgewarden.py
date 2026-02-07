@@ -1,5 +1,8 @@
 """
 Unit tests for EdgeWarden module (edge quality assessment).
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import pytest

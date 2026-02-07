@@ -3,6 +3,9 @@ Integration test - small end-to-end assembly test.
 
 This test creates minimal synthetic data and runs a complete (tiny) assembly
 to verify the pipeline doesn't crash.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import pytest

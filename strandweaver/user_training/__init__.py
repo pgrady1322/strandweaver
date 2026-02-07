@@ -12,8 +12,8 @@ users to specify exact parameters for:
 - Sequencing technologies and coverage
 - Structural variant density and types
 
-Author: StrandWeaver User Training Infrastructure
-Date: February 2026
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from .training_config import (

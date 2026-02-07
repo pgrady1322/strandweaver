@@ -17,8 +17,7 @@ Sections:
 5. Path Export (NEW - scaffold paths as TSV)
 
 Author: StrandWeaver Development Team
-Date: December 2025
-Phase: 5.2 - User-Guided Assembly Refinement
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations

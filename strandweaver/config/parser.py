@@ -6,8 +6,8 @@ StrandWeaver v0.1.0
 
 Configuration parser for StrandWeaver.
 
-Based on the scRN_AI Phase 3 configuration system with YAML parsing,
-validation, environment variable substitution, and CLI overrides.
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import os

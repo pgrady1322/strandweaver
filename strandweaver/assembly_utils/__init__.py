@@ -4,39 +4,62 @@ StrandWeaver v0.1.0
 Assembly Utilities module for StrandWeaver.
 
 This module provides utility functions for assembly tasks:
-- Graph cleanup and validation
-- Misassembly detection
-- Overlap filtering with AI
-- General assembly utilities
+- Graph cleanup and phasing-aware validation
+- Misassembly detection and flagging
+- Chromosome classification (microchromosome identification)
+- Gene annotation (BLAST, Augustus, BUSCO, ORF)
+- Hi-C read alignment to assembly graphs
 
-Note: GNN models now integrated into pathweaver_module in assembly_core.
-Note: PreprocessingCoordinator now integrated into PipelineOrchestrator in utils.
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
-# GNN models consolidated into pathweaver_module
-# from ..assembly_core.pathweaver_module import (
-#     PathGNNModel, SimpleGNN, MediumGNN, DeepGNN, GNNConfig,
-#     PathGNN, GraphTensors, FeatureExtractor, PathExtractor, GNNPathResult
-# )
-
-from .graph_cleanup import GraphCleaner
-from .misassembly_detector import MisassemblyDetector
-# overlap_ai_filter archived - use EdgeWarden from assembly_core instead
+from .graph_cleanup import GraphCleanupEngine, clean_graph, CleanedGraphResult, Bubble
+from .misassembly_detector import (
+    MisassemblyDetector, MisassemblyFlag, MisassemblyType,
+    ConfidenceLevel, CorrectionStrategy
+)
+from .chromosome_classifier import (
+    ChromosomeClassifier, ChromosomePrefilter, GeneContentClassifier,
+    AdvancedChromosomeFeatures, ChromosomeClassification
+)
+from .gene_annotation import (
+    BlastAnnotator, AugustusPredictor, BUSCOAnalyzer,
+    BlastHit, Gene, BUSCOResult, find_orfs
+)
+from .hic_graph_aligner import (
+    HiCGraphAligner, HiCReadPair, HiCAlignment, align_hic_reads_to_graph
+)
 
 __all__ = [
-    # GNN Models (now in pathweaver_module)
-    "PathGNNModel",
-    "SimpleGNN",
-    "MediumGNN",
-    "DeepGNN",
-    # GNN Path Predictor
-    "PathGNN",
-    "GraphTensors",
-    "FeatureExtractor",
-    "PathExtractor",
-    "GNNPathResult",
-    # Utilities
-    "GraphCleaner",
+    # Graph cleanup & phasing
+    "GraphCleanupEngine",
+    "clean_graph",
+    "CleanedGraphResult",
+    "Bubble",
+    # Misassembly detection
     "MisassemblyDetector",
-    "OverlapFilter",
+    "MisassemblyFlag",
+    "MisassemblyType",
+    "ConfidenceLevel",
+    "CorrectionStrategy",
+    # Chromosome classification
+    "ChromosomeClassifier",
+    "ChromosomePrefilter",
+    "GeneContentClassifier",
+    "AdvancedChromosomeFeatures",
+    "ChromosomeClassification",
+    # Gene annotation
+    "BlastAnnotator",
+    "AugustusPredictor",
+    "BUSCOAnalyzer",
+    "BlastHit",
+    "Gene",
+    "BUSCOResult",
+    "find_orfs",
+    # Hi-C graph alignment
+    "HiCGraphAligner",
+    "HiCReadPair",
+    "HiCAlignment",
+    "align_hic_reads_to_graph",
 ]

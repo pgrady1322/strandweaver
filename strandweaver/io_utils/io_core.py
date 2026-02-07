@@ -14,6 +14,9 @@ Consolidated module containing:
 
 This module handles reading and writing sequencing reads with support
 for multiple technologies and automatic read type classification.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # =============================================================================

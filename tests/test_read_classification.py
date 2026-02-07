@@ -1,5 +1,8 @@
 """
 Unit tests for read classification and technology detection.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import pytest

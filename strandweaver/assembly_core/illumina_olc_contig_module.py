@@ -15,6 +15,7 @@ Key Features:
 
 Author: StrandWeaver Development Team
 Date: 2025-12-01
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import List, Dict, Set, Tuple, Optional
@@ -35,7 +36,7 @@ from strandweaver.utils.hardware_management import (
     GPUOverlapDetector
 )
 
-# Import AI k-mer predictor
+# Import ML k-mer predictor
 try:
     from strandweaver.preprocessing import AdaptiveKmerPredictor
     AI_AVAILABLE = True

@@ -35,6 +35,9 @@ Usage:
     
     # Batch correction with statistics
     stats = corrector.correct_reads("input.fastq", "output.fastq")
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations

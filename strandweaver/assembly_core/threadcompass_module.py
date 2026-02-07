@@ -12,8 +12,8 @@ This module integrates UL reads to:
 3. Score existing joins for UL support/conflict
 4. Produce 0.0-1.0 normalized UL confidence scores
 
-Designed to work DOWNSTREAM of PathWeaver Pass A and UPSTREAM of PathWeaver Pass B,
-providing long-range evidence for iterative refinement.
+Designed to work downstream of PathWeaver Pass A and upstream of PathWeaver Pass B,
+assuming no Hi-C, providing long-range evidence for iterative refinement.
 
 Author: StrandWeaver Development Team
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md

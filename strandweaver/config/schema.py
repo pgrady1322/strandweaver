@@ -4,6 +4,9 @@ StrandWeaver v0.1.0
 Configuration schema for StrandWeaver.
 
 Defines all available configuration parameters with defaults and validation.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import Dict, Any, Optional, List
@@ -86,7 +89,7 @@ DEFAULT_CONFIG = {
     # Pipeline Control
     # ========================================================================
     'pipeline': {
-        'steps': ['kweaver', 'profile', 'correct', 'assemble', 'finish'],
+        'steps': ['kweaver', 'profile', 'correct', 'assemble', 'finish', 'misassembly_report', 'classify_chromosomes'],
         'skip_profiling': False,
         'skip_correction': False,
         'resume': False,
@@ -336,7 +339,7 @@ def save_config_template(output_path: Path, template: str = 'default'):
     
     # Customize for specific templates
     if template == 'illumina':
-        config['pipeline']['steps'] = ['kweaver', 'profile', 'correct', 'assemble', 'finish']
+        config['pipeline']['steps'] = ['kweaver', 'profile', 'correct', 'assemble', 'finish', 'misassembly_report', 'classify_chromosomes']
         config['assembly']['graph']['type'] = 'dbg'
         config['assembly']['olc']['enabled'] = True
         config['correction']['illumina']['use_ai_kmer_selection'] = True
@@ -390,7 +393,7 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
             errors.append("GPU requested but PyTorch not installed")
     
     # Validate pipeline steps
-    valid_steps = ['kweaver', 'profile', 'correct', 'assemble', 'finish']
+    valid_steps = ['kweaver', 'profile', 'correct', 'assemble', 'finish', 'misassembly_report', 'classify_chromosomes']
     for step in config.get('pipeline', {}).get('steps', []):
         if step not in valid_steps:
             errors.append(f"Invalid pipeline step: {step}")

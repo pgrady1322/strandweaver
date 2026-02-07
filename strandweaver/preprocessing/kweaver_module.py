@@ -42,6 +42,9 @@ Example Usage:
     # Use in assembly
     dbg_k = prediction.dbg_k
     ul_k = prediction.ul_overlap_k
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import logging

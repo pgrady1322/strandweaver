@@ -16,6 +16,9 @@ using multiple orthogonal signals:
 
 The goal is to resolve allelic variation and produce haplotype-separated
 assemblies while correctly handling repeats and ambiguous regions.
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations  # Enable forward references

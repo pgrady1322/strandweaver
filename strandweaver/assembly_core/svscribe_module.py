@@ -4,14 +4,9 @@
 """
 StrandWeaver v0.1.0
 
-AI-Driven Structural Variant (SV) Detection During Assembly.
+ML-Driven Structural Variant (SV) Detection During Assembly.
 
-This module identifies structural variants during graph traversal, not after
-assembly completion. By detecting SVs during assembly, we can:
-1. Make informed decisions about graph topology
-2. Preserve both alleles in heterozygous SVs
-3. Flag low-confidence regions for manual review
-4. Provide early QC feedback
+This module identifies structural variants during graph traversal, not after.
 
 Supported SV types:
 - Large deletions (missing edges/nodes compared to expected path)
@@ -19,6 +14,9 @@ Supported SV types:
 - Inversions (UL/Hi-C signals contradict graph direction)
 - Duplications (repeat overexpansion detected via coverage/k-mer)
 - Translocations (Hi-C long-range contacts inconsistent with graph)
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import List, Dict, Set, Tuple, Optional, Any, Union

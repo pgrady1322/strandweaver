@@ -17,6 +17,9 @@ Key operations:
 2. Bubble resolution using haplotype information
 3. Phasing-aware graph partitioning into haplotypes A/B
 4. Output cleaned, phased graphs ready for scaffolding
+
+Author: StrandWeaver Development Team
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from typing import List, Dict, Set, Optional, Tuple, Any
