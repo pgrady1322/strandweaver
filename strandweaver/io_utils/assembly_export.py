@@ -159,12 +159,12 @@ def export_graph_to_gfa(
     
     # Step 1: Export all nodes as GFA segments
     logger.info(f"Processing {len(graph.nodes)} nodes...")
-    for node_id in graph.nodes:
+    for node_id, node in graph.nodes.items():
         unitig_name = generate_unitig_name(node_id)
         node_name_map[node_id] = unitig_name
         
-        sequence = graph.get_node_sequence(node_id) if include_sequence else ""
-        length = graph.get_node_length(node_id)
+        sequence = node.seq if include_sequence else ""
+        length = node.length
         
         segment = GFASegment(
             node_id=node_id,
@@ -176,8 +176,9 @@ def export_graph_to_gfa(
     
     # Step 2: Export all edges as GFA links
     logger.info(f"Processing {len(graph.edges)} edges...")
-    for edge_id in graph.edges:
-        from_id, to_id = graph.get_edge_endpoints(edge_id)
+    for edge_id, edge in graph.edges.items():
+        from_id = edge.from_id
+        to_id = edge.to_id
         
         # Get node names
         from_name = node_name_map.get(from_id)
@@ -187,13 +188,9 @@ def export_graph_to_gfa(
             logger.warning(f"Edge {edge_id} references unknown nodes: {from_id} -> {to_id}")
             continue
         
-        # Get orientations (default to '+' if not tracked)
-        try:
-            from_orient = graph.get_node_orientation(from_id)
-            to_orient = graph.get_node_orientation(to_id)
-        except (AttributeError, NotImplementedError):
-            from_orient = '+'
-            to_orient = '+'
+        # Default to '+' orientation for both nodes
+        from_orient = '+'
+        to_orient = '+'
         
         # For simplicity, use '0M' (zero-length match) as overlap
         # In a real implementation, this could encode actual overlap length
@@ -636,7 +633,7 @@ def export_assembly_stats(
     stats['num_edges'] = len(graph.edges)
     
     # Get node lengths
-    node_lengths = [graph.get_node_length(nid) for nid in graph.nodes]
+    node_lengths = [node.length for node in graph.nodes.values()]
     node_lengths_sorted = sorted(node_lengths, reverse=True)
     
     stats['total_length'] = sum(node_lengths)

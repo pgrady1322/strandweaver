@@ -6,14 +6,6 @@ StrandWeaver v0.1.0
 
 EdgeWarden: Comprehensive Overlap Classification & Quality Assessment System
 
-This module consolidates ALL EdgeWarden functionality into a single comprehensive system:
-- Feature extraction (static, temporal, expanded: 80 features total)
-- Technology-specific ML models (ONT R9/R10, HiFi, Illumina, aDNA)
-- Advanced training (active learning, continual learning, multi-task)
-- Ensemble methods (cascade rules + ML, hybrid voting)
-- Confidence stratification and interpretability
-- PathWeaver integration for assembly path scoring
-
 Architecture:
   ├─ Feature Extraction (80 features)
   │   ├─ Static features (26): base overlap + graph-aware
@@ -33,7 +25,7 @@ Architecture:
   └─ PathWeaver Integration
       └─ Edge/path scoring for assembly graph traversal
 
-Author: Assembly AI System
+Author: Patrick Grady
 Date: December 2025
 Version: 2.0 (Consolidated)
 """
@@ -2601,6 +2593,16 @@ class EdgeWarden:
             if edge_id in graph.in_edges[edge.to_id]:
                 graph.in_edges[edge.to_id].remove(edge_id)
         
+        # Post-filter cleanup: edge removal may create new dead-end tips.
+        # Uses existing node.coverage from graph construction — no read re-mapping.
+        pre_cleanup_nodes = len(graph.nodes)
+        graph, tips_cleaned = self._cleanup_post_filter_tips(graph)
+        
+        # Remove orphan fragments: fully isolated nodes (no edges) that are
+        # short and low-coverage. These are error-derived k-mer artifacts
+        # that survived earlier passes but became disconnected after edge filtering.
+        graph, orphans_removed = self._remove_orphan_fragments(graph)
+        
         elapsed_time = time.time() - start_time
         
         # Log statistics
@@ -2610,10 +2612,218 @@ class EdgeWarden:
         logger.info(f"    - Quality: {removal_reasons['quality']}")
         logger.info(f"    - Phasing: {removal_reasons['phasing']}")
         logger.info(f"    - AI: {removal_reasons['ai']}")
+        if tips_cleaned > 0:
+            logger.info(f"  Post-filter tip cleanup: {tips_cleaned} tips removed")
+        if orphans_removed > 0:
+            logger.info(f"  Orphan fragment removal: {orphans_removed} isolated short nodes removed")
         logger.info(f"  Final edges: {len(graph.edges)}")
+        logger.info(f"  Final nodes: {len(graph.nodes)} (removed {pre_cleanup_nodes - len(graph.nodes)} total)")
         logger.info(f"  Filtering time: {elapsed_time:.2f}s")
         
         return graph
+    
+    def _cleanup_post_filter_tips(self, graph) -> tuple:
+        """
+        Remove short, low-coverage tips created by edge removal.
+        
+        After EdgeWarden removes edges, some nodes become new dead-ends.
+        This pass cleans up those error-derived artifacts. Uses existing
+        node.coverage from graph construction — no read re-mapping needed.
+        
+        High-coverage tips (real contig/chromosome ends) are preserved.
+        
+        Args:
+            graph: Graph after edge filtering
+            
+        Returns:
+            (graph, tips_removed_count)
+        """
+        base_k = getattr(graph, 'base_k', 31)
+        max_tip_length = base_k * 2
+        
+        # Calculate median coverage for threshold
+        coverages = [n.coverage for n in graph.nodes.values() if n.coverage > 0]
+        if not coverages:
+            return graph, 0
+        
+        sorted_cov = sorted(coverages)
+        median_coverage = sorted_cov[len(sorted_cov) // 2]
+        coverage_threshold = max(median_coverage * 0.15, 1.5)
+        
+        tips_removed = 0
+        nodes_to_remove = set()
+        edges_to_remove = set()
+        
+        for node_id in list(graph.nodes.keys()):
+            if node_id in nodes_to_remove:
+                continue
+            
+            in_deg = len(graph.in_edges.get(node_id, set()))
+            out_deg = len(graph.out_edges.get(node_id, set()))
+            
+            # Isolated orphan (no edges at all): evaluate directly
+            if in_deg == 0 and out_deg == 0:
+                node = graph.nodes[node_id]
+                if node.length <= max_tip_length and node.coverage < coverage_threshold:
+                    nodes_to_remove.add(node_id)
+                    tips_removed += 1
+                continue
+            
+            # Dead-end: one side open, other side connected
+            if not ((in_deg == 0 and out_deg > 0) or (out_deg == 0 and in_deg > 0)):
+                continue
+            
+            # Walk tip chain
+            chain = [node_id]
+            total_length = graph.nodes[node_id].length
+            current = node_id
+            direction = 'forward' if in_deg == 0 else 'backward'
+            
+            while True:
+                if direction == 'forward':
+                    out_e = graph.out_edges.get(current, set())
+                    if len(out_e) != 1:
+                        break
+                    eid = next(iter(out_e))
+                    if eid not in graph.edges:
+                        break
+                    nxt = graph.edges[eid].to_id
+                    if len(graph.in_edges.get(nxt, set())) != 1:
+                        break
+                else:
+                    in_e = graph.in_edges.get(current, set())
+                    if len(in_e) != 1:
+                        break
+                    eid = next(iter(in_e))
+                    if eid not in graph.edges:
+                        break
+                    nxt = graph.edges[eid].from_id
+                    if len(graph.out_edges.get(nxt, set())) != 1:
+                        break
+                
+                if nxt in nodes_to_remove or nxt not in graph.nodes or nxt in set(chain):
+                    break
+                
+                chain.append(nxt)
+                total_length += graph.nodes[nxt].length - max(base_k - 2, 0)
+                current = nxt
+                
+                # Check if we hit another dead-end (isolated fragment)
+                cur_in = len(graph.in_edges.get(current, set()))
+                cur_out = len(graph.out_edges.get(current, set()))
+                if direction == 'forward' and cur_out == 0:
+                    break
+                if direction == 'backward' and cur_in == 0:
+                    break
+            
+            # Skip if too long (likely real contig end)
+            if total_length > max_tip_length:
+                continue
+            
+            # Skip if high coverage (real chromosome end)
+            avg_cov = sum(graph.nodes[n].coverage for n in chain) / len(chain)
+            if avg_cov >= coverage_threshold:
+                continue
+            
+            # Mark for removal
+            for nid in chain:
+                nodes_to_remove.add(nid)
+                for eid in graph.out_edges.get(nid, set()):
+                    edges_to_remove.add(eid)
+                for eid in graph.in_edges.get(nid, set()):
+                    edges_to_remove.add(eid)
+            tips_removed += 1
+        
+        # Perform removal
+        for eid in edges_to_remove:
+            if eid in graph.edges:
+                edge = graph.edges[eid]
+                del graph.edges[eid]
+                graph.out_edges[edge.from_id].discard(eid)
+                graph.in_edges[edge.to_id].discard(eid)
+        
+        for nid in nodes_to_remove:
+            if nid in graph.nodes:
+                del graph.nodes[nid]
+                graph.out_edges.pop(nid, None)
+                graph.in_edges.pop(nid, None)
+        
+        return graph, tips_removed
+    
+    def _remove_orphan_fragments(self, graph) -> tuple:
+        """
+        Remove fully isolated nodes (no edges) that are error-derived.
+        
+        After edge filtering and tip cleanup, some nodes may become completely
+        disconnected from the graph. These are typically short error-derived
+        fragments. This method removes them based on two criteria:
+        
+        Decision logic:
+          1. Node has ZERO edges (completely isolated)
+          2. AND either:
+             a. Node is short (< read length, ~1500bp for HiFi) AND
+                coverage is below median → error fragment
+             b. Node is very short (< 2*k bp) regardless of coverage → 
+                too small to be a real contig
+        
+        Nodes that are long AND high-coverage are kept even if isolated —
+        these could be real contigs from repeat-collapsed regions.
+        
+        Args:
+            graph: Graph after edge filtering and tip cleanup
+            
+        Returns:
+            (graph, orphans_removed_count)
+        """
+        base_k = getattr(graph, 'base_k', 31)
+        
+        # Calculate coverage statistics
+        coverages = [n.coverage for n in graph.nodes.values() if n.coverage > 0]
+        if not coverages:
+            return graph, 0
+        
+        sorted_cov = sorted(coverages)
+        median_coverage = sorted_cov[len(sorted_cov) // 2]
+        
+        # Thresholds
+        # Very short: remove if isolated, regardless of coverage
+        very_short_threshold = base_k * 2  # ~62bp for k=31
+        # Short: remove if isolated AND low coverage
+        short_threshold = 1500  # Approximate HiFi read length
+        low_coverage_threshold = max(median_coverage * 0.25, 2.0)
+        
+        orphans_removed = 0
+        nodes_to_remove = set()
+        
+        for node_id, node in list(graph.nodes.items()):
+            in_deg = len(graph.in_edges.get(node_id, set()))
+            out_deg = len(graph.out_edges.get(node_id, set()))
+            
+            # Only target fully isolated nodes
+            if in_deg > 0 or out_deg > 0:
+                continue
+            
+            # Very short isolated fragments: always remove
+            if node.length <= very_short_threshold:
+                nodes_to_remove.add(node_id)
+                orphans_removed += 1
+                continue
+            
+            # Short isolated fragments with low coverage: remove
+            if node.length < short_threshold and node.coverage < low_coverage_threshold:
+                nodes_to_remove.add(node_id)
+                orphans_removed += 1
+                continue
+            
+            # Larger isolated nodes: keep (could be real collapsed repeat contigs)
+        
+        for nid in nodes_to_remove:
+            if nid in graph.nodes:
+                del graph.nodes[nid]
+                graph.out_edges.pop(nid, None)
+                graph.in_edges.pop(nid, None)
+        
+        return graph, orphans_removed
     
     def _get_default_coverage_threshold(self) -> int:
         """Get technology-specific default coverage threshold."""
@@ -3199,3 +3409,87 @@ path_score = score_mgr.score_path(...)
 
 if __name__ == "__main__":
     print(EDGEWARDEN_SUMMARY)
+
+
+# ============================================================================
+# BATCH PROCESSING FUNCTIONS (Nextflow Integration)
+# ============================================================================
+
+def score_edges_batch(
+    edges: List[Dict[str, Any]],
+    alignments: str,
+    technology: str = 'hifi',
+    threads: int = 1
+) -> List[Dict[str, Any]]:
+    """
+    Score a batch of graph edges using EdgeWarden.
+    
+    This function scores edges in parallel for Nextflow batch processing.
+    Each edge is scored based on overlap quality, coverage consistency,
+    and graph topology.
+    
+    Args:
+        edges: List of edge dicts from extract_edges.py helper:
+               [{'source': 'node1', 'target': 'node2', 'length': 1000, ...}, ...]
+        alignments: BAM/PAF file with read alignments
+        technology: Sequencing technology ('hifi', 'ont', 'illumina')
+        threads: Number of threads to use
+    
+    Returns:
+        List of scored edges:
+        [{'source': 'node1', 'target': 'node2', 'score': 0.95, 'support': 50, ...}, ...]
+    """
+    logger.info(f"Scoring {len(edges)} edges with EdgeWarden ({technology})")
+    
+    # Initialize EdgeWarden
+    edge_warden = EdgeWarden(technology=technology)
+    
+    # Load alignment data for support counts
+    alignment_support = defaultdict(int)
+    try:
+        import pysam
+        if alignments.endswith('.bam'):
+            with pysam.AlignmentFile(alignments, 'rb') as bam:
+                for aln in bam:
+                    if not aln.is_unmapped:
+                        ref_name = aln.reference_name
+                        alignment_support[ref_name] += 1
+        elif alignments.endswith('.paf'):
+            with open(alignments, 'r') as paf:
+                for line in paf:
+                    fields = line.strip().split('\t')
+                    if len(fields) >= 6:
+                        target = fields[5]
+                        alignment_support[target] += 1
+    except Exception as e:
+        logger.warning(f"Could not load alignments: {e}")
+    
+    # Score each edge
+    scored_edges = []
+    for edge in edges:
+        source = edge.get('source', '')
+        target = edge.get('target', '')
+        length = edge.get('length', 0)
+        identity = edge.get('identity', 0.95)
+        
+        # Calculate base score from identity and length
+        base_score = identity * min(1.0, length / 1000)  # Normalize by 1kb
+        
+        # Add support from alignments
+        support = alignment_support.get(f"{source}-{target}", 0)
+        support_score = min(1.0, support / 10)  # Normalize support
+        
+        # Combined score
+        final_score = (base_score * 0.7) + (support_score * 0.3)
+        
+        scored_edge = {
+            **edge,  # Include all original fields
+            'score': float(final_score),
+            'support': int(support),
+            'confidence': 'HIGH' if final_score >= 0.9 else 'MEDIUM' if final_score >= 0.7 else 'LOW'
+        }
+        scored_edges.append(scored_edge)
+    
+    logger.info(f"Scored {len(scored_edges)} edges (mean score: {np.mean([e['score'] for e in scored_edges]):.3f})")
+    
+    return scored_edges

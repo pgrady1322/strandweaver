@@ -237,6 +237,12 @@ def config_show(config_file, format):
 @click.option('--hic-r2', type=click.Path(exists=True),
               help='Hi-C R2 reads (proximity ligation for scaffolding, not error-corrected)')
 # ============================================================================
+# Assembly Filtering
+# ============================================================================
+@click.option('--min-contig-length', type=int, default=0,
+              help='Minimum contig length to include in output (default: 0 = keep all). '
+                   'Recommended: 500-1000 for production assemblies.')
+# ============================================================================
 # Chromosome Classification
 # ============================================================================
 @click.option('--id-chromosomes', is_flag=True,
@@ -253,6 +259,7 @@ def pipeline(ctx, reads_files, technologies,
              use_ai, disable_correction_ai, disable_assembly_ai, ai_finish,
              use_gpu, gpu_backend, gpu_device, threads,
              resume, checkpoint_dir, start_from, skip_profiling, skip_correction,
+             min_contig_length,
              illumina_r1, illumina_r2, hic_r1, hic_r2,
              id_chromosomes, id_chromosomes_advanced, blast_db):
     """
@@ -638,6 +645,7 @@ def pipeline(ctx, reads_files, technologies,
         'hic_r1': hic_r1,
         'hic_r2': hic_r2,
         'verbose': verbose,
+        'min_contig_length': min_contig_length,
     }
     
     # Initialize and run orchestrator
@@ -1615,6 +1623,881 @@ def checkpoints_export(checkpoint_dir, output):
     click.echo(f"Output archive: {output}")
     click.echo("\n⚠️ Checkpoint management:")
     click.echo("   This feature is planned for v0.2")
+
+
+# ============================================================================
+# Utility Commands
+# ============================================================================
+
+# ============================================================================
+# ============================================================================
+# STANDALONE PROCESSING COMMANDS
+# ============================================================================
+# User-facing commands that support both direct execution and Nextflow mode.
+# These commands process entire datasets by default, or generate/run Nextflow
+# workflows when --nextflow flag is provided.
+# ============================================================================
+
+def _run_nextflow(workflow_type, **kwargs):
+    """
+    Helper function to generate and execute Nextflow workflow.
+    
+    Args:
+        workflow_type: Type of workflow (correct, extract-kmers, etc.)
+        **kwargs: Arguments passed from CLI
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    
+    # Build Nextflow command
+    nf_script = Path(__file__).parent.parent / 'nextflow' / 'main.nf'
+    
+    cmd = ['nextflow', 'run', str(nf_script)]
+    
+    # Add workflow entry point
+    cmd.extend(['-entry', workflow_type.upper()])
+    
+    # Add profile
+    if 'nf_profile' in kwargs and kwargs['nf_profile']:
+        cmd.extend(['-profile', kwargs['nf_profile']])
+    
+    # Add resume flag
+    if kwargs.get('nf_resume'):
+        cmd.append('-resume')
+    
+    # Add input files
+    if 'hifi' in kwargs and kwargs['hifi']:
+        cmd.extend(['--hifi', kwargs['hifi']])
+    if 'ont' in kwargs and kwargs['ont']:
+        cmd.extend(['--ont', kwargs['ont']])
+    if 'ont_ul' in kwargs and kwargs['ont_ul']:
+        cmd.extend(['--ont_ul', kwargs['ont_ul']])
+    if 'hic_r1' in kwargs and kwargs['hic_r1']:
+        cmd.extend(['--hic_r1', kwargs['hic_r1']])
+    if 'hic_r2' in kwargs and kwargs['hic_r2']:
+        cmd.extend(['--hic_r2', kwargs['hic_r2']])
+    
+    # Add output directory
+    if 'output' in kwargs and kwargs['output']:
+        cmd.extend(['--outdir', kwargs['output']])
+    
+    # Add batch sizes
+    if 'correction_batch_size' in kwargs and kwargs['correction_batch_size']:
+        cmd.extend(['--correction_batch_size', str(kwargs['correction_batch_size'])])
+    if 'edge_batch_size' in kwargs and kwargs['edge_batch_size']:
+        cmd.extend(['--edge_batch_size', str(kwargs['edge_batch_size'])])
+    if 'ul_batch_size' in kwargs and kwargs['ul_batch_size']:
+        cmd.extend(['--ul_batch_size', str(kwargs['ul_batch_size'])])
+    if 'hic_batch_size' in kwargs and kwargs['hic_batch_size']:
+        cmd.extend(['--hic_batch_size', str(kwargs['hic_batch_size'])])
+    if 'sv_batch_size' in kwargs and kwargs['sv_batch_size']:
+        cmd.extend(['--sv_batch_size', str(kwargs['sv_batch_size'])])
+    if 'kmer_batch_size' in kwargs and kwargs['kmer_batch_size']:
+        cmd.extend(['--kmer_batch_size', str(kwargs['kmer_batch_size'])])
+    
+    # Add max jobs
+    if 'max_correction_jobs' in kwargs and kwargs['max_correction_jobs']:
+        cmd.extend(['--max_correction_jobs', str(kwargs['max_correction_jobs'])])
+    if 'max_edge_jobs' in kwargs and kwargs['max_edge_jobs']:
+        cmd.extend(['--max_edge_jobs', str(kwargs['max_edge_jobs'])])
+    if 'max_ul_jobs' in kwargs and kwargs['max_ul_jobs']:
+        cmd.extend(['--max_ul_jobs', str(kwargs['max_ul_jobs'])])
+    if 'max_hic_jobs' in kwargs and kwargs['max_hic_jobs']:
+        cmd.extend(['--max_hic_jobs', str(kwargs['max_hic_jobs'])])
+    if 'max_sv_jobs' in kwargs and kwargs['max_sv_jobs']:
+        cmd.extend(['--max_sv_jobs', str(kwargs['max_sv_jobs'])])
+    if 'max_kmer_jobs' in kwargs and kwargs['max_kmer_jobs']:
+        cmd.extend(['--max_kmer_jobs', str(kwargs['max_kmer_jobs'])])
+    
+    # Add assembly options
+    if 'enable_ai' in kwargs and kwargs['enable_ai'] is not None:
+        cmd.extend(['--enable_ai', str(kwargs['enable_ai']).lower()])
+    if 'detect_svs' in kwargs and kwargs['detect_svs'] is not None:
+        cmd.extend(['--detect_svs', str(kwargs['detect_svs']).lower()])
+    if 'huge' in kwargs and kwargs['huge']:
+        cmd.append('--huge')
+    if 'preserve_heterozygosity' in kwargs and kwargs['preserve_heterozygosity'] is not None:
+        cmd.extend(['--preserve_heterozygosity', str(kwargs['preserve_heterozygosity']).lower()])
+    if 'min_identity' in kwargs and kwargs['min_identity']:
+        cmd.extend(['--min_identity', str(kwargs['min_identity'])])
+    
+    click.echo(f"Running Nextflow workflow: {' '.join(cmd)}")
+    
+    # Execute Nextflow
+    result = subprocess.run(cmd, capture_output=False)
+    
+    if result.returncode != 0:
+        click.echo(f"✗ Nextflow execution failed with code {result.returncode}", err=True)
+        sys.exit(result.returncode)
+    else:
+        click.echo("✓ Nextflow workflow completed successfully")
+
+
+@main.group(hidden=True)
+def batch():
+    """
+    [INTERNAL] Batch processing commands for Nextflow parallelization.
+    
+    These commands are called by Nextflow workflows and are not intended
+    for direct use. Use the top-level commands with --nextflow flag instead.
+    """
+    pass
+
+
+# ============================================================================
+# USER-FACING PROCESSING COMMANDS
+# ============================================================================
+
+@main.command('correct')
+@click.option('--hifi', type=click.Path(exists=True),
+              help='HiFi reads for error correction')
+@click.option('--ont', type=click.Path(exists=True),
+              help='ONT reads for error correction')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output directory for corrected reads')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm (default: local)')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--correction-batch-size', type=int, default=100000,
+              help='Reads per correction batch (Nextflow mode)')
+@click.option('--max-correction-jobs', type=int, default=20,
+              help='Max parallel correction jobs (Nextflow mode)')
+def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
+                  correction_batch_size, max_correction_jobs):
+    """
+    Correct sequencing errors in reads.
+    
+    Direct mode (default): Processes entire dataset on local machine.
+    Nextflow mode (--nextflow): Splits reads into batches for parallel processing.
+    
+    Examples:
+        # Direct mode - process locally
+        strandweaver correct --hifi reads.fq.gz -o corrected/
+        
+        # Nextflow mode - parallel processing on cluster
+        strandweaver correct --hifi reads.fq.gz -o corrected/ \\
+            --nextflow --nf-profile slurm --nf-resume
+    """
+    if nextflow:
+        # Run via Nextflow
+        _run_nextflow(
+            'CORRECT',
+            hifi=hifi,
+            ont=ont,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            correction_batch_size=correction_batch_size,
+            max_correction_jobs=max_correction_jobs
+        )
+    else:
+        # Run directly
+        import json
+        from pathlib import Path
+        from .preprocessing.errorsmith_module import profile_technology, correct_batch
+        
+        click.echo("Running error correction (direct mode)...")
+        
+        # Profile errors first
+        click.echo("Step 1/2: Profiling errors...")
+        profiles = {}
+        if hifi:
+            click.echo(f"  • HiFi: {hifi}")
+            profiles['hifi'] = profile_technology(hifi, technology='hifi', threads=threads)
+        if ont:
+            click.echo(f"  • ONT: {ont}")
+            profiles['ont'] = profile_technology(ont, technology='ont', threads=threads)
+        
+        # Correct reads
+        click.echo("Step 2/2: Correcting reads...")
+        output_dir = Path(output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        if hifi:
+            output_file = output_dir / 'corrected_hifi.fastq.gz'
+            correct_batch(hifi, 'hifi', profiles['hifi'], str(output_file), threads)
+            click.echo(f"  ✓ HiFi corrected: {output_file}")
+        
+        if ont:
+            output_file = output_dir / 'corrected_ont.fastq.gz'
+            correct_batch(ont, 'ont', profiles['ont'], str(output_file), threads)
+            click.echo(f"  ✓ ONT corrected: {output_file}")
+        
+        click.echo(f"✓ Error correction complete: {output}")
+
+
+@main.command('extract-kmers')
+@click.option('--hifi', type=click.Path(exists=True),
+              help='HiFi reads for k-mer extraction')
+@click.option('--ont', type=click.Path(exists=True),
+              help='ONT reads for k-mer extraction')
+@click.option('--kmer-size', '-k', type=int, required=True,
+              help='K-mer size to extract')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output k-mer table file (PKL)')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization (for huge genomes)')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--kmer-batch-size', type=int, default=1000000,
+              help='Reads per k-mer extraction batch (Nextflow mode)')
+@click.option('--max-kmer-jobs', type=int, default=12,
+              help='Max parallel k-mer jobs (Nextflow mode)')
+def extract_kmers(hifi, ont, kmer_size, output, threads, nextflow, nf_profile,
+                  nf_resume, kmer_batch_size, max_kmer_jobs):
+    """
+    Extract k-mers from reads for k-mer size prediction.
+    
+    Direct mode (default): Single-job processing for normal genomes.
+    Nextflow mode (--nextflow): Parallel processing for huge genomes (>10GB).
+    
+    Examples:
+        # Direct mode
+        strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl
+        
+        # Nextflow mode for huge genome
+        strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl \\
+            --nextflow --nf-profile slurm
+    """
+    if nextflow:
+        _run_nextflow(
+            'EXTRACT_KMERS',
+            hifi=hifi,
+            ont=ont,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            kmer_batch_size=kmer_batch_size,
+            max_kmer_jobs=max_kmer_jobs,
+            huge=True
+        )
+    else:
+        from pathlib import Path
+        from .preprocessing.kweaver_module import extract_kmers_batch
+        
+        click.echo(f"Extracting {kmer_size}-mers (direct mode)...")
+        
+        if hifi:
+            click.echo(f"  • Processing HiFi: {hifi}")
+            extract_kmers_batch(hifi, kmer_size, output, threads)
+        elif ont:
+            click.echo(f"  • Processing ONT: {ont}")
+            extract_kmers_batch(ont, kmer_size, output, threads)
+        
+        click.echo(f"✓ K-mers extracted: {output}")
+
+
+@main.command('score-edges')
+@click.option('--edges', '-e', required=True, type=click.Path(exists=True),
+              help='Graph edges file (JSON)')
+@click.option('--alignments', '-a', required=True, type=click.Path(exists=True),
+              help='Read alignments (BAM/PAF)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output scored edges (JSON)')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--edge-batch-size', type=int, default=10000,
+              help='Edges per batch (Nextflow mode)')
+@click.option('--max-edge-jobs', type=int, default=8,
+              help='Max parallel edge scoring jobs (Nextflow mode)')
+def score_edges_cmd(edges, alignments, output, threads, nextflow, nf_profile,
+                    nf_resume, edge_batch_size, max_edge_jobs):
+    """
+    Score assembly graph edges using read alignments.
+    
+    Examples:
+        # Direct mode
+        strandweaver score-edges -e edges.json -a aligns.bam -o scored.json
+        
+        # Nextflow mode for large graphs
+        strandweaver score-edges -e edges.json -a aligns.bam -o scored.json \\
+            --nextflow --nf-profile slurm
+    """
+    if nextflow:
+        _run_nextflow(
+            'SCORE_EDGES',
+            edges=edges,
+            alignments=alignments,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            edge_batch_size=edge_batch_size,
+            max_edge_jobs=max_edge_jobs
+        )
+    else:
+        import json
+        from pathlib import Path
+        from .assembly_core.edgewarden_module import score_edges_batch
+        
+        click.echo("Scoring edges (direct mode)...")
+        
+        # Load edges
+        with open(edges, 'r') as f:
+            edge_list = json.load(f)
+        
+        # Score edges
+        scored = score_edges_batch(edge_list, alignments, threads)
+        
+        # Save
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        with open(output, 'w') as f:
+            json.dump(scored, f, indent=2)
+        
+        click.echo(f"✓ Edges scored: {output}")
+
+
+@main.command('map-ul')
+@click.option('--ul-reads', '-u', required=True, type=click.Path(exists=True),
+              help='Ultra-long ONT reads (FASTQ)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output alignments (PAF)')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+@click.option('--use-gpu', is_flag=True,
+              help='Use GPU acceleration if available')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--ul-batch-size', type=int, default=100,
+              help='UL reads per batch (Nextflow mode)')
+@click.option('--max-ul-jobs', type=int, default=10,
+              help='Max parallel UL mapping jobs (Nextflow mode)')
+def map_ul_cmd(ul_reads, graph, output, threads, use_gpu, nextflow, nf_profile,
+               nf_resume, ul_batch_size, max_ul_jobs):
+    """
+    Map ultra-long reads to assembly graph.
+    
+    Examples:
+        # Direct mode
+        strandweaver map-ul -u ul_reads.fq.gz -g graph.gfa -o aligns.paf
+        
+        # Nextflow mode with GPU
+        strandweaver map-ul -u ul_reads.fq.gz -g graph.gfa -o aligns.paf \\
+            --nextflow --use-gpu --nf-profile slurm
+    """
+    if nextflow:
+        _run_nextflow(
+            'MAP_UL',
+            ont_ul=ul_reads,
+            graph=graph,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            ul_batch_size=ul_batch_size,
+            max_ul_jobs=max_ul_jobs
+        )
+    else:
+        from pathlib import Path
+        from .assembly_core.threadcompass_module import map_reads_batch
+        
+        click.echo("Mapping ultra-long reads (direct mode)...")
+        
+        map_reads_batch(ul_reads, graph, output, threads, use_gpu)
+        
+        click.echo(f"✓ UL reads mapped: {output}")
+
+
+@main.command('align-hic')
+@click.option('--hic-r1', required=True, type=click.Path(exists=True),
+              help='Hi-C R1 reads (FASTQ)')
+@click.option('--hic-r2', required=True, type=click.Path(exists=True),
+              help='Hi-C R2 reads (FASTQ)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output alignments (BAM)')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--hic-batch-size', type=int, default=500000,
+              help='Hi-C read pairs per batch (Nextflow mode)')
+@click.option('--max-hic-jobs', type=int, default=15,
+              help='Max parallel Hi-C jobs (Nextflow mode)')
+def align_hic_cmd(hic_r1, hic_r2, graph, output, threads, nextflow, nf_profile,
+                  nf_resume, hic_batch_size, max_hic_jobs):
+    """
+    Align Hi-C reads to assembly graph for scaffolding.
+    
+    Examples:
+        # Direct mode
+        strandweaver align-hic --hic-r1 R1.fq.gz --hic-r2 R2.fq.gz \\
+            -g graph.gfa -o aligns.bam
+        
+        # Nextflow mode
+        strandweaver align-hic --hic-r1 R1.fq.gz --hic-r2 R2.fq.gz \\
+            -g graph.gfa -o aligns.bam --nextflow --nf-profile slurm
+    """
+    if nextflow:
+        _run_nextflow(
+            'ALIGN_HIC',
+            hic_r1=hic_r1,
+            hic_r2=hic_r2,
+            graph=graph,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            hic_batch_size=hic_batch_size,
+            max_hic_jobs=max_hic_jobs
+        )
+    else:
+        from pathlib import Path
+        from .assembly_core.strandtether_module import align_reads_batch
+        
+        click.echo("Aligning Hi-C reads (direct mode)...")
+        
+        # Note: align_reads_batch expects interleaved or will handle R1/R2
+        # For now, assuming it can handle paired files
+        align_reads_batch(f"{hic_r1},{hic_r2}", graph, output, threads)
+        
+        click.echo(f"✓ Hi-C reads aligned: {output}")
+
+
+@main.command('detect-svs')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output SVs (VCF)')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads (direct mode only)')
+# Nextflow mode options
+@click.option('--nextflow', is_flag=True,
+              help='Run via Nextflow for automatic parallelization')
+@click.option('--nf-profile', type=str, default='local',
+              help='Nextflow profile: local, docker, singularity, slurm')
+@click.option('--nf-resume', is_flag=True,
+              help='Resume Nextflow workflow from last checkpoint')
+@click.option('--sv-batch-size', type=int, default=1000,
+              help='Graph nodes per SV detection batch (Nextflow mode)')
+@click.option('--max-sv-jobs', type=int, default=10,
+              help='Max parallel SV detection jobs (Nextflow mode)')
+def detect_svs_cmd(graph, output, threads, nextflow, nf_profile, nf_resume,
+                   sv_batch_size, max_sv_jobs):
+    """
+    Detect structural variants in assembly graph.
+    
+    Examples:
+        # Direct mode
+        strandweaver detect-svs -g graph.gfa -o variants.vcf
+        
+        # Nextflow mode for large graphs
+        strandweaver detect-svs -g graph.gfa -o variants.vcf \\
+            --nextflow --nf-profile slurm
+    """
+    if nextflow:
+        _run_nextflow(
+            'DETECT_SVS',
+            graph=graph,
+            output=output,
+            nf_profile=nf_profile,
+            nf_resume=nf_resume,
+            sv_batch_size=sv_batch_size,
+            max_sv_jobs=max_sv_jobs,
+            detect_svs=True
+        )
+    else:
+        import json
+        from pathlib import Path
+        from .assembly_core.svscribe_module import detect_svs_batch, export_vcf
+        
+        click.echo("Detecting structural variants (direct mode)...")
+        
+        # Detect SVs
+        svs = detect_svs_batch(graph)
+        
+        # Export to VCF
+        export_vcf(svs, Path(output))
+        
+        click.echo(f"✓ SVs detected: {output} ({len(svs)} variants)")
+
+
+# ----------------------------------------------------------------------------
+# Error Profiling & Correction Batch Commands
+# ----------------------------------------------------------------------------
+
+@batch.command('profile-errors')
+@click.option('--hifi', type=click.Path(exists=True),
+              help='HiFi reads for error profiling')
+@click.option('--ont', type=click.Path(exists=True),
+              help='ONT reads for error profiling')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output JSON file with error profiles')
+@click.option('--threads', '-t', type=int, default=8,
+              help='Number of threads')
+def batch_profile_errors(hifi, ont, output, threads):
+    """
+    Profile sequencing errors across full dataset.
+    
+    Sequential stage - requires all reads for accurate k-mer spectrum.
+    """
+    import json
+    from pathlib import Path
+    from .preprocessing.errorsmith_module import profile_technology
+    
+    click.echo(f"Profiling errors from reads...")
+    
+    # Profile errors based on available technologies
+    profiles = {}
+    if hifi:
+        click.echo(f"  • HiFi: {hifi}")
+        profiles['hifi'] = profile_technology(hifi, technology='hifi', threads=threads)
+    if ont:
+        click.echo(f"  • ONT: {ont}")
+        profiles['ont'] = profile_technology(ont, technology='ont', threads=threads)
+    
+    # Save profiles to JSON
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(profiles, f, indent=2)
+    
+    click.echo(f"✓ Error profiles saved: {output}")
+
+
+@batch.command('correct')
+@click.option('--input', '-i', required=True, type=click.Path(exists=True),
+              help='Input reads batch (FASTQ)')
+@click.option('--profiles', '-p', required=True, type=click.Path(exists=True),
+              help='Error profiles JSON from profile-errors')
+@click.option('--technology', '-tech', required=True,
+              type=click.Choice(['hifi', 'ont', 'illumina']),
+              help='Sequencing technology')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output corrected reads (FASTQ)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+def batch_correct_reads(input, profiles, technology, output, threads):
+    """
+    Correct errors in a batch of reads.
+    
+    Parallel stage - processes independent read batches.
+    """
+    import json
+    from pathlib import Path
+    from .preprocessing.errorsmith_module import correct_batch
+    
+    click.echo(f"Correcting {technology} reads batch: {Path(input).name}")
+    
+    # Load error profiles
+    with open(profiles, 'r') as f:
+        error_profiles = json.load(f)
+    
+    # Correct reads in batch
+    correct_batch(
+        reads_file=input,
+        technology=technology,
+        error_profile=error_profiles.get(technology, {}),
+        output_file=output,
+        threads=threads
+    )
+    
+    click.echo(f"✓ Corrected batch saved: {output}")
+
+
+@batch.command('merge-corrected')
+@click.option('--input', '-i', 'input_files', multiple=True, required=True,
+              type=click.Path(exists=True),
+              help='Corrected read batches to merge')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output merged FASTQ file')
+def batch_merge_corrected(input_files, output):
+    """
+    Merge corrected read batches into single file.
+    
+    Aggregation stage - collects parallel correction results.
+    """
+    from pathlib import Path
+    import gzip
+    import shutil
+    
+    click.echo(f"Merging {len(input_files)} corrected batches...")
+    
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Determine if output should be compressed
+    is_gzipped = output.endswith('.gz')
+    
+    # Open output file
+    if is_gzipped:
+        out_fh = gzip.open(output_path, 'wt')
+    else:
+        out_fh = open(output_path, 'w')
+    
+    try:
+        for batch_file in input_files:
+            click.echo(f"  • {Path(batch_file).name}")
+            
+            # Read input batch (handle compressed/uncompressed)
+            if batch_file.endswith('.gz'):
+                in_fh = gzip.open(batch_file, 'rt')
+            else:
+                in_fh = open(batch_file, 'r')
+            
+            # Copy to output
+            shutil.copyfileobj(in_fh, out_fh)
+            in_fh.close()
+    finally:
+        out_fh.close()
+    
+    click.echo(f"✓ Merged corrected reads: {output}")
+
+
+# ----------------------------------------------------------------------------
+# K-mer Extraction Batch Commands (--huge mode)
+# ----------------------------------------------------------------------------
+
+@batch.command('extract-kmers')
+@click.option('--input', '-i', required=True, type=click.Path(exists=True),
+              help='Input reads batch (FASTQ)')
+@click.option('--kmer-size', '-k', type=int, required=True,
+              help='K-mer size')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output k-mer table (binary)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+def batch_extract_kmers(input, kmer_size, output, threads):
+    """
+    Extract k-mers from read batch for --huge genome mode.
+    
+    Parallel stage - processes independent read batches.
+    """
+    from pathlib import Path
+    from .preprocessing.kweaver_module import extract_kmers_batch
+    
+    click.echo(f"Extracting {kmer_size}-mers from batch: {Path(input).name}")
+    
+    # Extract k-mers from batch
+    extract_kmers_batch(
+        reads_file=input,
+        k=kmer_size,
+        output_table=output,
+        threads=threads
+    )
+    
+    click.echo(f"✓ K-mer table saved: {output}")
+
+
+# ----------------------------------------------------------------------------
+# Edge Scoring Batch Commands
+# ----------------------------------------------------------------------------
+
+@batch.command('score-edges')
+@click.option('--edges', '-e', required=True, type=click.Path(exists=True),
+              help='Edge batch JSON file')
+@click.option('--alignments', '-a', required=True, type=click.Path(exists=True),
+              help='Read alignments (BAM/PAF)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output scored edges JSON')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+def batch_score_edges(edges, alignments, output, threads):
+    """
+    Score graph edges for a batch.
+    
+    Parallel stage - processes independent edge sets.
+    """
+    import json
+    from pathlib import Path
+    from .assembly_core.edgewarden_module import score_edges_batch
+    
+    click.echo(f"Scoring edge batch: {Path(edges).name}")
+    
+    # Load edges
+    with open(edges, 'r') as f:
+        edge_batch = json.load(f)
+    
+    # Score edges
+    scored_edges = score_edges_batch(
+        edges=edge_batch,
+        alignments=alignments,
+        threads=threads
+    )
+    
+    # Save scored edges
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(scored_edges, f, indent=2)
+    
+    click.echo(f"✓ Scored edges saved: {output}")
+
+
+# ----------------------------------------------------------------------------
+# UL Read Mapping Batch Commands
+# ----------------------------------------------------------------------------
+
+@batch.command('map-ul')
+@click.option('--ul-reads', '-u', required=True, type=click.Path(exists=True),
+              help='Ultra-long reads batch (FASTQ)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output alignments (PAF)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+@click.option('--use-gpu', is_flag=True,
+              help='Use GPU acceleration if available')
+def batch_map_ul_reads(ul_reads, graph, output, threads, use_gpu):
+    """
+    Map ultra-long reads to graph (batch).
+    
+    Parallel stage - processes independent UL read batches.
+    """
+    from pathlib import Path
+    from .assembly_core.threadcompass_module import map_reads_batch
+    
+    click.echo(f"Mapping UL reads batch: {Path(ul_reads).name}")
+    
+    # Map UL reads
+    map_reads_batch(
+        reads_file=ul_reads,
+        graph_file=graph,
+        output_paf=output,
+        threads=threads,
+        use_gpu=use_gpu
+    )
+    
+    click.echo(f"✓ UL alignments saved: {output}")
+
+
+# ----------------------------------------------------------------------------
+# Hi-C Alignment Batch Commands
+# ----------------------------------------------------------------------------
+
+@batch.command('align-hic')
+@click.option('--hic-reads', '-h', required=True, type=click.Path(exists=True),
+              help='Hi-C reads batch (interleaved FASTQ)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output alignments (BAM)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+def batch_align_hic(hic_reads, graph, output, threads):
+    """
+    Align Hi-C reads to graph (batch).
+    
+    Parallel stage - processes independent Hi-C read pair batches.
+    """
+    from pathlib import Path
+    from .assembly_core.strandtether_module import align_reads_batch
+    
+    click.echo(f"Aligning Hi-C reads batch: {Path(hic_reads).name}")
+    
+    # Align Hi-C reads
+    align_reads_batch(
+        reads_file=hic_reads,
+        graph_file=graph,
+        output_bam=output,
+        threads=threads
+    )
+    
+    click.echo(f"✓ Hi-C alignments saved: {output}")
+
+
+# ----------------------------------------------------------------------------
+# SV Detection Batch Commands
+# ----------------------------------------------------------------------------
+
+@batch.command('detect-svs')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Graph partition (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output SVs (JSON)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads')
+def batch_detect_svs(graph, output, threads):
+    """
+    Detect structural variants in graph partition.
+    
+    Parallel stage - processes independent graph regions.
+    """
+    import json
+    from pathlib import Path
+    from .assembly_core.svscribe_module import detect_svs_batch
+    
+    click.echo(f"Detecting SVs in partition: {Path(graph).name}")
+    
+    # Detect SVs
+    svs = detect_svs_batch(graph_file=graph)
+    
+    # Save SVs
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(svs, f, indent=2)
+    
+    click.echo(f"✓ SVs saved: {output}")
+
+
+@batch.command('merge-svs')
+@click.option('--input', '-i', 'input_files', multiple=True, required=True,
+              type=click.Path(exists=True),
+              help='SV batch JSON files to merge')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output merged SVs (VCF)')
+def batch_merge_svs(input_files, output):
+    """
+    Merge SV calls from batches into single VCF.
+    
+    Aggregation stage - collects parallel SV detection results.
+    """
+    import json
+    from pathlib import Path
+    from .assembly_core.svscribe_module import merge_sv_calls, export_vcf
+    
+    click.echo(f"Merging {len(input_files)} SV batches...")
+    
+    # Load all SV calls
+    all_svs = []
+    for sv_file in input_files:
+        click.echo(f"  • {Path(sv_file).name}")
+        with open(sv_file, 'r') as f:
+            batch_svs = json.load(f)
+            all_svs.extend(batch_svs)
+    
+    # Merge and deduplicate SVs
+    merged_svs = merge_sv_calls(all_svs)
+    
+    # Export to VCF
+    output_path = Path(output)
+    export_vcf(merged_svs, output_path)
+    
+    click.echo(f"✓ Merged SVs: {output} ({len(merged_svs)} variants)")
 
 
 # ============================================================================

@@ -329,7 +329,7 @@ def read_fastq(
         >>> # Sample first 10k reads
         >>> reads = list(read_fastq("large.fq", sample_size=10000))
     """
-    from .technology_handling_core_module import ReadTechnology, infer_technology_from_length
+    from ..preprocessing.read_classification_utility import ReadTechnology, infer_technology_from_length
     
     filepath = Path(filepath)
     
@@ -404,7 +404,7 @@ def read_fastq_pairs(
     Yields:
         Tuples of (read1, read2)
     """
-    from .technology_handling_core_module import ReadTechnology
+    from ..preprocessing.read_classification_utility import ReadTechnology
     
     if technology is None:
         technology = ReadTechnology.ILLUMINA
@@ -553,7 +553,7 @@ def read_fasta(
     Yields:
         SeqRead objects (without quality scores)
     """
-    from .technology_handling_core_module import ReadTechnology
+    from ..preprocessing.read_classification_utility import ReadTechnology
     
     filepath = Path(filepath)
     
@@ -870,7 +870,7 @@ class ReadCollection:
         Returns:
             List of ultra-long reads
         """
-        from .technology_handling_core_module import ReadTechnology
+        from ..preprocessing.read_classification_utility import ReadTechnology
         return self._reads_by_tech.get(ReadTechnology.ONT_ULTRALONG, [])
     
     def get_short_reads(self, max_length: int = 1000) -> List[SeqRead]:
@@ -959,7 +959,7 @@ class ReadCollection:
         Returns:
             Tuple of (regular_ont_reads, ultra_long_reads)
         """
-        from .technology_handling_core_module import ReadTechnology
+        from ..preprocessing.read_classification_utility import ReadTechnology
         regular = self._reads_by_tech.get(ReadTechnology.ONT_REGULAR, [])
         ultra_long = self._reads_by_tech.get(ReadTechnology.ONT_ULTRALONG, [])
         

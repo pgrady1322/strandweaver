@@ -164,7 +164,13 @@ pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver
 
 ## 🚀 Quick Start
 
-### Basic Long Read Assembly Example (PacBio)
+StrandWeaver offers two execution modes:
+- **Python CLI** (default): Simple single-node execution
+- **Nextflow** (optional): HPC cluster support with automatic parallelization
+
+### Python CLI Mode
+
+**Basic Long Read Assembly Example (PacBio)**
 ```bash
 strandweaver assemble \
   --hifi hifi_reads.fastq \
@@ -172,7 +178,8 @@ strandweaver assemble \
   --threads 8
 ```
 
-### Hybrid Assembly with Multiple Ultra-Long Read Types
+**Hybrid Assembly with Multiple Ultra-Long Read Types**
+
 *Note:* The --ont-ul flag is used for path-finding reads. Any platform of long reads can be provided, but shorter long reads will degrade the assembly. The ont-ul name is retained for clarity / comparison with other assemblers.
 ```bash
 strandweaver assemble \
@@ -183,7 +190,8 @@ strandweaver assemble \
   --threads 16
 ```
 
-### Mixed Technology Assembly with Hi-C
+**Mixed Technology Assembly with Hi-C**
+
 *Note:* ANY platform of proximity ligation tech can be provided. StrandWeaver will optimize for Hi-C and Omni-C just as well as Pore-C and CiFi.
 ```bash
 strandweaver assemble \
@@ -193,6 +201,43 @@ strandweaver assemble \
   --output assembly.fasta \
   --threads 16
 ```
+
+### Nextflow Mode (HPC/Cloud)
+
+**Local Execution**
+```bash
+nextflow run strandweaver/nextflow/main.nf \
+  --hifi hifi_reads.fastq \
+  --ont ont_reads.fastq \
+  --hic_r1 hic_R1.fastq \
+  --hic_r2 hic_R2.fastq \
+  --outdir results/ \
+  -profile local
+```
+
+**SLURM Cluster with Singularity**
+```bash
+nextflow run strandweaver/nextflow/main.nf \
+  --hifi hifi_reads.fastq \
+  --ont ont_reads.fastq \
+  --ont_ul ultralong_reads.fastq \
+  --hic_r1 hic_R1.fastq \
+  --hic_r2 hic_R2.fastq \
+  --outdir results/ \
+  -profile slurm,singularity \
+  -resume
+```
+
+**Huge Genome Mode** (parallel k-mer extraction)
+```bash
+nextflow run strandweaver/nextflow/main.nf \
+  --hifi hifi_reads.fastq \
+  --huge \
+  --outdir results/ \
+  -profile slurm
+```
+
+See [nextflow/README.md](nextflow/README.md) for complete Nextflow documentation.
 
 ---
 

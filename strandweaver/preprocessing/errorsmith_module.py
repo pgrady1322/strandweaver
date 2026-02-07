@@ -49,6 +49,9 @@ import re
 import math
 import hashlib
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Third-party visualization imports (optional)
 try:
@@ -1182,7 +1185,13 @@ class PacBioCorrector(BaseCorrector):
         
         # Skip correction for very high quality reads
         if quality:
-            avg_quality = sum(quality) / len(quality) if quality else 0
+            # Convert ASCII quality to Phred scores if needed
+            if isinstance(quality, str):
+                phred_scores = [ord(q) - 33 for q in quality]
+                avg_quality = sum(phred_scores) / len(phred_scores)
+            else:
+                avg_quality = sum(quality) / len(quality) if quality else 0
+            
             if avg_quality >= 40:  # Q40+ reads, skip correction
                 return read
         
@@ -1966,6 +1975,150 @@ def collect_kmer_spectrum(kmer_counts: Dict[str, int], profile: ErrorProfile):
 
 
 # ============================================================================
+# BATCH PROCESSING FUNCTIONS (Nextflow Integration)
+# ============================================================================
+
+def profile_technology(
+    reads_file: str,
+    technology: str,
+    k_size: int = 21,
+    sample_size: int = 100000,
+    threads: int = 1
+) -> Dict[str, Any]:
+    """
+    Profile sequencing errors for a specific technology.
+    
+    This function analyzes reads to build an error profile including k-mer
+    spectrum, error rate estimates, and common error patterns. Used by
+    Nextflow batch processing for the sequential profiling stage.
+    
+    Args:
+        reads_file: Path to FASTQ file
+        technology: 'hifi', 'ont', or 'illumina'
+        k_size: K-mer size for spectrum analysis
+        sample_size: Number of reads to sample for profiling
+        threads: Number of threads to use
+    
+    Returns:
+        Dict with error profile:
+        {
+            'technology': str,
+            'k_size': int,
+            'kmer_spectrum': dict,
+            'error_rate': float,
+            'mean_quality': float,
+            'read_count': int,
+            'base_count': int,
+            'gc_content': float
+        }
+    """
+    from ..io_utils import read_fastq
+    
+    logger.info(f"Profiling {technology} reads from {reads_file}")
+    
+    # Initialize k-mer spectrum
+    kmer_counts = Counter()
+    quality_scores = []
+    read_lengths = []
+    total_reads = 0
+    total_bases = 0
+    gc_count = 0
+    
+    # Sample reads and build profile
+    for read in read_fastq(reads_file):
+        if total_reads >= sample_size:
+            break
+        
+        seq = read.sequence
+        read_lengths.append(len(seq))
+        total_bases += len(seq)
+        gc_count += seq.count('G') + seq.count('C')
+        
+        # Extract k-mers
+        for i in range(len(seq) - k_size + 1):
+            kmer = seq[i:i + k_size]
+            if 'N' not in kmer:  # Skip k-mers with ambiguous bases
+                kmer_counts[kmer] += 1
+        
+        # Collect quality scores (convert from ASCII to Phred scores)
+        if read.quality:
+            # Convert ASCII quality scores to Phred scores (Phred+33 encoding)
+            phred_scores = [ord(q) - 33 for q in read.quality]
+            quality_scores.extend(phred_scores)
+        
+        total_reads += 1
+    
+    # Calculate statistics
+    mean_quality = np.mean(quality_scores) if quality_scores else 30.0
+    error_rate = 10 ** (-mean_quality / 10) if quality_scores else 0.01
+    gc_content = gc_count / total_bases if total_bases > 0 else 0.5
+    
+    # Build k-mer spectrum (frequency distribution)
+    frequency_dist = Counter(kmer_counts.values())
+    kmer_spectrum = {str(k): v for k, v in sorted(frequency_dist.items())}
+    
+    profile = {
+        'technology': technology,
+        'k_size': k_size,
+        'kmer_spectrum': kmer_spectrum,
+        'error_rate': float(error_rate),
+        'mean_quality': float(mean_quality),
+        'read_count': total_reads,
+        'base_count': total_bases,
+        'gc_content': float(gc_content),
+        'mean_read_length': float(np.mean(read_lengths)) if read_lengths else 0.0
+    }
+    
+    logger.info(f"Profile complete: {total_reads} reads, error rate={error_rate:.4f}")
+    
+    return profile
+
+
+def correct_batch(
+    reads_file: str,
+    technology: str,
+    error_profile: Dict[str, Any],
+    output_file: str,
+    threads: int = 1
+) -> None:
+    """
+    Correct errors in a batch of reads.
+    
+    This function applies technology-specific error correction to a batch
+    of reads using a pre-computed error profile. Used by Nextflow for
+    parallel batch correction.
+    
+    Args:
+        reads_file: Input FASTQ batch
+        technology: Technology type ('hifi', 'ont', 'illumina')
+        error_profile: Pre-computed error profile from profile_technology()
+        output_file: Output corrected FASTQ
+        threads: Number of threads to use
+    """
+    from ..io_utils import read_fastq, write_fastq
+    
+    logger.info(f"Correcting {technology} reads batch: {Path(reads_file).name}")
+    
+    # Create corrector for technology
+    corrector = get_corrector(
+        technology=technology,
+        error_profile=error_profile,
+        k_size=error_profile.get('k_size', 21)
+    )
+    
+    # Correct reads
+    corrected_reads = []
+    for read in read_fastq(reads_file):
+        corrected = corrector.correct_read(read)
+        corrected_reads.append(corrected)
+    
+    # Write output
+    write_fastq(corrected_reads, output_file)
+    
+    logger.info(f"Corrected {len(corrected_reads)} reads → {output_file}")
+
+
+# ============================================================================
 # MODULE EXPORTS
 # ============================================================================
 
@@ -2001,4 +2154,8 @@ __all__ = [
     'ErrorProfile',
     'ErrorVisualizer',
     'collect_kmer_spectrum',
+    
+    # Section 7: Batch Processing (Nextflow)
+    'profile_technology',
+    'correct_batch',
 ]

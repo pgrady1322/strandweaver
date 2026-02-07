@@ -179,6 +179,8 @@ class Anchor:
 # ============================================================================
 # De Bruijn Graph Builder
 # ============================================================================
+
+class DeBruijnGraphBuilder:
     """
     Builder class for constructing de Bruijn graphs from long reads.
     
@@ -267,6 +269,20 @@ class Anchor:
         # Step 4: Compact into unitigs
         graph = self._compact_graph(graph)
         logger.info(f"Compacted to: {len(graph.nodes)} unitigs, {len(graph.edges)} edges")
+        
+        # Step 4b: Trim error tips (short low-coverage dead-end unitigs)
+        # Uses node coverage from k-mer counting — no read re-mapping needed
+        pre_cleanup_nodes = len(graph.nodes)
+        graph = self._trim_tips(graph)
+        
+        # Step 4c: Pop error bubbles (collapse near-identical parallel paths)
+        # Heterozygous bubbles (real variation) are PROTECTED
+        graph = self._pop_error_bubbles(graph)
+        
+        # Step 4d: Re-compact if cleanup removed anything (creates new linear chains)
+        if len(graph.nodes) < pre_cleanup_nodes:
+            graph = self._compact_graph(graph)
+            logger.info(f"Re-compacted to: {len(graph.nodes)} unitigs, {len(graph.edges)} edges")
         
         # Step 5: Annotate with ML k recommendations
         if ml_k_model is not None:
@@ -505,62 +521,83 @@ class Anchor:
         # Map (k-1)-mer -> node_id
         kmer_to_node: Dict[str, int] = {}
         
+        # Track which (prefix, suffix) edges we've already added to avoid duplicates
+        seen_edges: set = set()
+        
         for kmer, count in kmer_counts.items():
-            # Get prefix and suffix (k-1)-mers
-            prefix = kmer[:-1]  # First k-1 bases
-            suffix = kmer[1:]   # Last k-1 bases
+            # CRITICAL FIX: Add edges for BOTH orientations of each canonical k-mer.
+            # Canonical k-mers only preserve one strand's directionality.
+            # E.g., if genome has ...GTAC→TACG... but GTACG is canonicalized to
+            # CGTAC (its RC), we'd only get edge CGTA→GTAC, missing GTAC→TACG.
+            # By adding both orientations, both strands are represented in the graph.
+            rc_kmer = self._reverse_complement(kmer)
+            orientations = [kmer] if kmer == rc_kmer else [kmer, rc_kmer]
             
-            # Create nodes if they don't exist
-            if prefix not in kmer_to_node:
-                node_id = self.next_node_id
-                self.next_node_id += 1
-                graph.nodes[node_id] = DBGNode(
-                    id=node_id,
-                    seq=prefix,
-                    coverage=0.0,
-                    length=len(prefix)
+            for oriented_kmer in orientations:
+                # Get prefix and suffix (k-1)-mers
+                prefix = oriented_kmer[:-1]  # First k-1 bases
+                suffix = oriented_kmer[1:]   # Last k-1 bases
+                
+                # Skip if we've already added this exact edge
+                edge_key = (prefix, suffix)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                
+                # Create nodes if they don't exist
+                if prefix not in kmer_to_node:
+                    node_id = self.next_node_id
+                    self.next_node_id += 1
+                    graph.nodes[node_id] = DBGNode(
+                        id=node_id,
+                        seq=prefix,
+                        coverage=0.0,
+                        length=len(prefix)
+                    )
+                    kmer_to_node[prefix] = node_id
+                
+                if suffix not in kmer_to_node:
+                    node_id = self.next_node_id
+                    self.next_node_id += 1
+                    graph.nodes[node_id] = DBGNode(
+                        id=node_id,
+                        seq=suffix,
+                        coverage=0.0,
+                        length=len(suffix)
+                    )
+                    kmer_to_node[suffix] = node_id
+                
+                # Create edge from prefix to suffix
+                from_id = kmer_to_node[prefix]
+                to_id = kmer_to_node[suffix]
+                
+                edge_id = self.next_edge_id
+                self.next_edge_id += 1
+                
+                edge = DBGEdge(
+                    id=edge_id,
+                    from_id=from_id,
+                    to_id=to_id,
+                    coverage=float(count),
+                    overlap_len=self.base_k - 1
                 )
-                kmer_to_node[prefix] = node_id
-            
-            if suffix not in kmer_to_node:
-                node_id = self.next_node_id
-                self.next_node_id += 1
-                graph.nodes[node_id] = DBGNode(
-                    id=node_id,
-                    seq=suffix,
-                    coverage=0.0,
-                    length=len(suffix)
-                )
-                kmer_to_node[suffix] = node_id
-            
-            # Create edge from prefix to suffix
-            from_id = kmer_to_node[prefix]
-            to_id = kmer_to_node[suffix]
-            
-            edge_id = self.next_edge_id
-            self.next_edge_id += 1
-            
-            edge = DBGEdge(
-                id=edge_id,
-                from_id=from_id,
-                to_id=to_id,
-                coverage=float(count),
-                overlap_len=self.base_k - 1
-            )
-            
-            graph.edges[edge_id] = edge
-            graph.out_edges[from_id].add(edge_id)
-            graph.in_edges[to_id].add(edge_id)
-            
-            # Update node coverage
-            graph.nodes[from_id].coverage += count
-            graph.nodes[to_id].coverage += count
+                
+                graph.edges[edge_id] = edge
+                graph.out_edges[from_id].add(edge_id)
+                graph.in_edges[to_id].add(edge_id)
+                
+                # Update node coverage
+                graph.nodes[from_id].coverage += count
+                graph.nodes[to_id].coverage += count
         
         # Normalize node coverage by degree
         for node_id, node in graph.nodes.items():
             total_degree = len(graph.out_edges[node_id]) + len(graph.in_edges[node_id])
             if total_degree > 0:
                 node.coverage /= total_degree
+        
+        logger.info(f"Built bidirectional graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges "
+                     f"from {len(kmer_counts)} canonical k-mers")
         
         return graph
     
@@ -648,11 +685,15 @@ class Anchor:
             unitig_id = self.next_node_id
             self.next_node_id += 1
             
-            # Concatenate sequences (overlapping by k-1)
+            # Concatenate sequences: adjacent nodes overlap by k-2 characters
+            # (the suffix of one (k-1)-mer / prefix of the next (k-1)-mer).
+            # For raw nodes len=k-1, so seq[(k-2):] == seq[-1:] (1 char). 
+            # For unitig nodes (re-compaction), seq[(k-2):] correctly 
+            # preserves the full non-overlapping suffix.
+            overlap = self.base_k - 2
             seq_parts = [graph.nodes[path[0]].seq]
             for node_id in path[1:]:
-                # Add last base of each subsequent node
-                seq_parts.append(graph.nodes[node_id].seq[-1])
+                seq_parts.append(graph.nodes[node_id].seq[overlap:])
             
             unitig_seq = ''.join(seq_parts)
             
@@ -666,7 +707,8 @@ class Anchor:
                 length=len(unitig_seq)
             )
             
-            compacted.nodes[unitig_id] = unitig_node
+            # Use add_node() to properly initialize edge dictionaries
+            compacted.add_node(unitig_node)
             
             # Map all old nodes to this unitig
             for old_id in path:
@@ -675,18 +717,22 @@ class Anchor:
         # Add singleton nodes (not in any path)
         for node_id, node in graph.nodes.items():
             if node_id not in unitig_map:
-                compacted.nodes[node.id] = node
+                # Use add_node() to properly initialize edge dictionaries
+                compacted.add_node(node)
                 unitig_map[node_id] = node.id
         
         # Rebuild edges between unitigs
         edge_set = set()  # Track unique (from, to) pairs
+        self_loop_count = 0
+        inter_unitig_count = 0
         
         for edge_id, edge in graph.edges.items():
             from_unitig = unitig_map[edge.from_id]
             to_unitig = unitig_map[edge.to_id]
             
-            # Skip self-loops and duplicates
+            # Skip self-loops (internal path edges)
             if from_unitig == to_unitig:
+                self_loop_count += 1
                 continue
             
             edge_key = (from_unitig, to_unitig)
@@ -694,6 +740,7 @@ class Anchor:
                 continue
             
             edge_set.add(edge_key)
+            inter_unitig_count += 1
             
             new_edge_id = self.next_edge_id
             self.next_edge_id += 1
@@ -706,11 +753,408 @@ class Anchor:
                 overlap_len=self.base_k - 1
             )
             
-            compacted.edges[new_edge_id] = new_edge
-            compacted.out_edges[from_unitig].add(new_edge_id)
-            compacted.in_edges[to_unitig].add(new_edge_id)
+            # Use add_edge() to properly update edge dictionaries
+            compacted.add_edge(new_edge)
+        
+        logger.info(f"  Compaction: {self_loop_count} self-loops filtered, {inter_unitig_count} inter-unitig edges preserved")
         
         return compacted
+    
+    # ====================================================================
+    # Graph Simplification: Tip Trimming & Bubble Popping
+    # ====================================================================
+    
+    def _trim_tips(self, graph: DBGGraph) -> DBGGraph:
+        """
+        Remove short, low-coverage dead-end unitigs (tips).
+        
+        Tips are short chains ending at dead-ends, typically caused by
+        sequencing errors that create divergent k-mers. High-coverage
+        tips (real contig/chromosome ends) are PRESERVED.
+        
+        Coverage comes from k-mer counting during graph construction —
+        no read re-mapping is needed.
+        
+        Args:
+            graph: Compacted DBG graph
+            
+        Returns:
+            Graph with error-derived tips removed
+        """
+        max_tip_length = self.base_k * 2  # Tips shorter than 2*k bases
+        
+        # Calculate median coverage for relative threshold
+        coverages = [n.coverage for n in graph.nodes.values() if n.coverage > 0]
+        if not coverages:
+            logger.info("  Tip trimming: no nodes with coverage, skipping")
+            return graph
+        
+        sorted_cov = sorted(coverages)
+        median_coverage = sorted_cov[len(sorted_cov) // 2]
+        # Tips below 15% of median coverage are error-derived;
+        # floor of 1.5 prevents removal when overall coverage is very low
+        coverage_threshold = max(median_coverage * 0.15, 1.5)
+        
+        tips_removed = 0
+        nodes_to_remove: Set[int] = set()
+        edges_to_remove: Set[int] = set()
+        
+        for node_id in list(graph.nodes.keys()):
+            if node_id in nodes_to_remove:
+                continue
+            
+            in_deg = len(graph.in_edges.get(node_id, set()))
+            out_deg = len(graph.out_edges.get(node_id, set()))
+            
+            # Isolated orphan (no edges at all): evaluate directly as tip
+            if in_deg == 0 and out_deg == 0:
+                node = graph.nodes[node_id]
+                if node.length <= max_tip_length and node.coverage < coverage_threshold:
+                    nodes_to_remove.add(node_id)
+                    tips_removed += 1
+                continue
+            
+            # Must be a dead-end: one side open, other side connected
+            if not ((in_deg == 0 and out_deg > 0) or (out_deg == 0 and in_deg > 0)):
+                continue
+            
+            # Walk from dead-end toward nearest branch point
+            tip_nodes, tip_length = self._walk_tip(graph, node_id, nodes_to_remove)
+            
+            if tip_length > max_tip_length:
+                continue  # Too long — likely a real contig end
+            
+            # Coverage check: protect high-coverage tips (real chromosome ends)
+            avg_coverage = sum(graph.nodes[n].coverage for n in tip_nodes) / len(tip_nodes)
+            if avg_coverage >= coverage_threshold:
+                continue  # High coverage relative to graph median — keep
+            
+            # Mark tip chain for removal
+            for nid in tip_nodes:
+                nodes_to_remove.add(nid)
+                for eid in graph.out_edges.get(nid, set()):
+                    edges_to_remove.add(eid)
+                for eid in graph.in_edges.get(nid, set()):
+                    edges_to_remove.add(eid)
+            tips_removed += 1
+        
+        # Perform removal
+        for eid in edges_to_remove:
+            if eid in graph.edges:
+                edge = graph.edges[eid]
+                del graph.edges[eid]
+                graph.out_edges[edge.from_id].discard(eid)
+                graph.in_edges[edge.to_id].discard(eid)
+        
+        for nid in nodes_to_remove:
+            if nid in graph.nodes:
+                del graph.nodes[nid]
+                graph.out_edges.pop(nid, None)
+                graph.in_edges.pop(nid, None)
+        
+        logger.info(f"  Tip trimming: removed {tips_removed} tips "
+                     f"({len(nodes_to_remove)} nodes, {len(edges_to_remove)} edges)")
+        logger.info(f"    Thresholds: length <= {max_tip_length}bp, "
+                     f"coverage < {coverage_threshold:.1f}x (median={median_coverage:.1f}x)")
+        
+        return graph
+    
+    def _walk_tip(self, graph: DBGGraph, start_id: int,
+                   already_marked: Set[int]) -> Tuple[List[int], int]:
+        """
+        Walk from a dead-end node along a linear chain toward a branch point.
+        
+        Returns:
+            (node_ids_in_tip, total_sequence_length)
+        """
+        chain = [start_id]
+        total_length = graph.nodes[start_id].length
+        
+        in_deg = len(graph.in_edges.get(start_id, set()))
+        out_deg = len(graph.out_edges.get(start_id, set()))
+        
+        # Determine walk direction (away from dead-end, toward interior)
+        if in_deg == 0 and out_deg > 0:
+            direction = 'forward'
+        elif out_deg == 0 and in_deg > 0:
+            direction = 'backward'
+        else:
+            return chain, total_length
+        
+        current = start_id
+        visited = {start_id}
+        
+        while True:
+            if direction == 'forward':
+                out_edges = graph.out_edges.get(current, set())
+                if len(out_edges) != 1:
+                    break  # Fork or second dead-end
+                edge_id = next(iter(out_edges))
+                if edge_id not in graph.edges:
+                    break
+                next_id = graph.edges[edge_id].to_id
+                # Stop if next node has multiple inputs (convergence/branch)
+                if len(graph.in_edges.get(next_id, set())) != 1:
+                    break
+            else:  # backward
+                in_edges = graph.in_edges.get(current, set())
+                if len(in_edges) != 1:
+                    break
+                edge_id = next(iter(in_edges))
+                if edge_id not in graph.edges:
+                    break
+                next_id = graph.edges[edge_id].from_id
+                if len(graph.out_edges.get(next_id, set())) != 1:
+                    break
+            
+            if next_id in visited or next_id in already_marked:
+                break
+            if next_id not in graph.nodes:
+                break
+            
+            chain.append(next_id)
+            visited.add(next_id)
+            # Sequence length: add node length minus k-2 overlap with previous
+            total_length += graph.nodes[next_id].length - (self.base_k - 2)
+            current = next_id
+            
+            # Check if we reached another dead-end (isolated fragment)
+            cur_in = len(graph.in_edges.get(current, set()))
+            cur_out = len(graph.out_edges.get(current, set()))
+            if direction == 'forward' and cur_out == 0:
+                break  # End of isolated chain
+            if direction == 'backward' and cur_in == 0:
+                break
+        
+        return chain, total_length
+    
+    def _pop_error_bubbles(self, graph: DBGGraph) -> DBGGraph:
+        """
+        Collapse short parallel paths (bubbles) caused by sequencing errors.
+        
+        A bubble is two paths between the same source and sink nodes.
+        
+        Decision logic:
+          - Error bubble:  paths differ by <= max_error_differences
+            → collapse to the higher-coverage arm
+          - Heterozygous bubble: paths differ by more
+            → PROTECT both paths (real biological variation)
+        
+        Coverage comes from k-mer counting — no read re-mapping needed.
+        
+        Args:
+            graph: DBG graph (ideally after tip trimming)
+            
+        Returns:
+            Graph with error bubbles collapsed, heterozygous bubbles intact
+        """
+        max_bubble_arm_length = self.base_k * 10
+        # For HiFi (0.1% error): 1-2 substitutions per arm is error-derived.
+        # Anything beyond that is potential heterozygosity → protect.
+        max_error_differences = 2
+        
+        bubbles_found = 0
+        bubbles_popped = 0
+        bubbles_protected = 0
+        nodes_to_remove: Set[int] = set()
+        edges_to_remove: Set[int] = set()
+        
+        # Check each potential source node (out_degree >= 2)
+        for source_id in list(graph.nodes.keys()):
+            out_edge_ids = list(graph.out_edges.get(source_id, set()))
+            if len(out_edge_ids) < 2:
+                continue
+            
+            # Check all pairs of outgoing edges for bubble structures
+            for i in range(len(out_edge_ids)):
+                for j in range(i + 1, len(out_edge_ids)):
+                    if out_edge_ids[i] not in graph.edges or out_edge_ids[j] not in graph.edges:
+                        continue
+                    
+                    arm_a_start = graph.edges[out_edge_ids[i]].to_id
+                    arm_b_start = graph.edges[out_edge_ids[j]].to_id
+                    
+                    # Skip if either arm already marked for removal
+                    if arm_a_start in nodes_to_remove or arm_b_start in nodes_to_remove:
+                        continue
+                    
+                    # Walk each arm to find if they converge at the same sink
+                    path_a, sink_a = self._walk_bubble_arm(
+                        graph, arm_a_start, max_bubble_arm_length, nodes_to_remove)
+                    path_b, sink_b = self._walk_bubble_arm(
+                        graph, arm_b_start, max_bubble_arm_length, nodes_to_remove)
+                    
+                    if sink_a is None or sink_b is None:
+                        continue  # Arm doesn't converge cleanly
+                    if sink_a != sink_b:
+                        continue  # Different sinks — not a bubble
+                    
+                    bubbles_found += 1
+                    
+                    # Compare sequences to decide: pop or protect
+                    seq_a = self._get_path_sequence(graph, path_a)
+                    seq_b = self._get_path_sequence(graph, path_b)
+                    n_differences = self._count_differences(seq_a, seq_b)
+                    
+                    if n_differences is None:
+                        # Lengths too different — treat as complex, protect
+                        bubbles_protected += 1
+                        continue
+                    
+                    if n_differences <= max_error_differences:
+                        # ── Error bubble → pop (keep higher-coverage arm) ──
+                        cov_a = sum(graph.nodes[n].coverage for n in path_a) / max(len(path_a), 1)
+                        cov_b = sum(graph.nodes[n].coverage for n in path_b) / max(len(path_b), 1)
+                        
+                        remove_path = path_b if cov_a >= cov_b else path_a
+                        keep_idx = i if cov_a >= cov_b else j
+                        remove_idx = j if cov_a >= cov_b else i
+                        
+                        for nid in remove_path:
+                            nodes_to_remove.add(nid)
+                            for eid in graph.out_edges.get(nid, set()):
+                                edges_to_remove.add(eid)
+                            for eid in graph.in_edges.get(nid, set()):
+                                edges_to_remove.add(eid)
+                        # Also remove the source→removed_arm edge
+                        edges_to_remove.add(out_edge_ids[remove_idx])
+                        
+                        bubbles_popped += 1
+                    else:
+                        # ── Heterozygous bubble → PROTECT ──
+                        bubbles_protected += 1
+        
+        # Perform removal
+        for eid in edges_to_remove:
+            if eid in graph.edges:
+                edge = graph.edges[eid]
+                del graph.edges[eid]
+                graph.out_edges[edge.from_id].discard(eid)
+                graph.in_edges[edge.to_id].discard(eid)
+        
+        for nid in nodes_to_remove:
+            if nid in graph.nodes:
+                del graph.nodes[nid]
+                graph.out_edges.pop(nid, None)
+                graph.in_edges.pop(nid, None)
+        
+        logger.info(f"  Bubble popping: found {bubbles_found} bubbles — "
+                     f"popped {bubbles_popped} (error), "
+                     f"protected {bubbles_protected} (heterozygous)")
+        
+        return graph
+    
+    def _walk_bubble_arm(
+        self, graph: DBGGraph, start_id: int,
+        max_length: int, excluded: Set[int]
+    ) -> Tuple[List[int], Optional[int]]:
+        """
+        Walk from a bubble arm start along a linear chain until convergence.
+        
+        Returns:
+            (path_node_ids, sink_node_id) or (path, None) if no convergence
+        """
+        path = [start_id]
+        total_length = graph.nodes[start_id].length if start_id in graph.nodes else 0
+        current = start_id
+        
+        while total_length <= max_length:
+            out_edges = graph.out_edges.get(current, set())
+            if len(out_edges) != 1:
+                break  # Fork or dead-end — arm doesn't continue linearly
+            
+            edge_id = next(iter(out_edges))
+            if edge_id not in graph.edges:
+                break
+            
+            next_id = graph.edges[edge_id].to_id
+            if next_id in excluded or next_id not in graph.nodes:
+                break
+            
+            # If next node has multiple incoming edges, it's the sink
+            if len(graph.in_edges.get(next_id, set())) >= 2:
+                return path, next_id
+            
+            # Next node must be linear (in=1) to continue the arm
+            if len(graph.in_edges.get(next_id, set())) != 1:
+                break
+            
+            path.append(next_id)
+            total_length += graph.nodes[next_id].length - (self.base_k - 2)
+            current = next_id
+        
+        # Check if current node's sole out-neighbor is a convergence sink
+        out_edges = graph.out_edges.get(current, set())
+        if len(out_edges) == 1:
+            edge_id = next(iter(out_edges))
+            if edge_id in graph.edges:
+                next_id = graph.edges[edge_id].to_id
+                if len(graph.in_edges.get(next_id, set())) >= 2:
+                    return path, next_id
+        
+        return path, None  # No convergence found
+    
+    def _get_path_sequence(self, graph: DBGGraph, path_node_ids: List[int]) -> str:
+        """Concatenate sequences along a path, trimming k-2 overlaps."""
+        if not path_node_ids:
+            return ""
+        
+        first_node = graph.nodes.get(path_node_ids[0])
+        if not first_node:
+            return ""
+        
+        seq = first_node.seq
+        overlap = self.base_k - 2  # Adjacent nodes share k-2 chars
+        
+        for nid in path_node_ids[1:]:
+            node = graph.nodes.get(nid)
+            if node and len(node.seq) > overlap:
+                seq += node.seq[overlap:]
+        
+        return seq
+    
+    def _count_differences(self, seq_a: str, seq_b: str) -> Optional[int]:
+        """
+        Count differences between two bubble arm sequences.
+        
+        Returns None if sequences are too different in length (>5%),
+        indicating a complex structural difference rather than simple errors.
+        """
+        if not seq_a or not seq_b:
+            return None
+        
+        len_a, len_b = len(seq_a), len(seq_b)
+        
+        # Length difference > 5% → not a simple substitution bubble
+        if abs(len_a - len_b) / max(len_a, len_b) > 0.05:
+            return None
+        
+        # Same length: fast mismatch count
+        if len_a == len_b:
+            return sum(1 for a, b in zip(seq_a, seq_b) if a != b)
+        
+        # Different lengths: edit distance (limit to short seqs for performance)
+        if max(len_a, len_b) > 500:
+            return None
+        
+        return self._edit_distance(seq_a, seq_b)
+    
+    def _edit_distance(self, seq_a: str, seq_b: str) -> int:
+        """Compute edit distance with two-row DP (memory-efficient)."""
+        m, n = len(seq_a), len(seq_b)
+        prev = list(range(n + 1))
+        curr = [0] * (n + 1)
+        
+        for i in range(1, m + 1):
+            curr[0] = i
+            for j in range(1, n + 1):
+                if seq_a[i - 1] == seq_b[j - 1]:
+                    curr[j] = prev[j - 1]
+                else:
+                    curr[j] = 1 + min(prev[j], curr[j - 1], prev[j - 1])
+            prev, curr = curr, prev
+        
+        return prev[n]
     
     def _attach_regional_k(
         self,

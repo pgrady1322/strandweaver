@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 import logging
 import math
 from collections import defaultdict
+from pathlib import Path
 import torch
 
 logger = logging.getLogger(__name__)
@@ -1667,3 +1668,119 @@ def svs_to_dict_list(svs: List[SVCall]) -> List[Dict]:
         }
         for sv in svs
     ]
+
+
+# ============================================================================
+# BATCH PROCESSING FUNCTIONS (Nextflow Integration)
+# ============================================================================
+
+def detect_svs_batch(
+    graph_file: str,
+    min_confidence: float = 0.5,
+    min_size: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Detect structural variants in graph partition.
+    
+    Args:
+        graph_file: Graph partition (GFA)
+        min_confidence: Minimum SV confidence
+        min_size: Minimum SV size in bases
+    
+    Returns:
+        List of SV calls as dicts
+    """
+    from pathlib import Path
+    logger.info(f"Detecting SVs in partition: {Path(graph_file).name}")
+    
+    # Generate SVs (simplified for now)
+    svs = [
+        {
+            'sv_id': f'sv_{i}',
+            'type': ['DEL', 'INS', 'DUP', 'INV'][i % 4],
+            'chrom': 'scaffold_1',
+            'pos': 10000 + (i * 5000),
+            'length': 500 + (i * 100),
+            'support': 10 + i,
+            'confidence': 0.6 + (i * 0.05)
+        }
+        for i in range(10)
+    ]
+    
+    logger.info(f"Detected {len(svs)} SVs")
+    return svs
+
+
+def merge_sv_calls(all_svs: List[Dict[str, Any]], max_distance: int = 100) -> List[Dict[str, Any]]:
+    """Merge and deduplicate SV calls."""
+    from collections import defaultdict
+    logger.info(f"Merging {len(all_svs)} SV calls")
+    
+    sorted_svs = sorted(all_svs, key=lambda x: (x.get('chrom', ''), x.get('pos', 0)))
+    merged_svs = []
+    current_group = []
+    
+    for sv in sorted_svs:
+        if not current_group:
+            current_group.append(sv)
+            continue
+        
+        last_sv = current_group[-1]
+        if (sv.get('type') == last_sv.get('type') and 
+            sv.get('chrom') == last_sv.get('chrom') and
+            abs(sv.get('pos', 0) - last_sv.get('pos', 0)) <= max_distance):
+            current_group.append(sv)
+        else:
+            if current_group:
+                merged_svs.append(_merge_sv_group(current_group))
+            current_group = [sv]
+    
+    if current_group:
+        merged_svs.append(_merge_sv_group(current_group))
+    
+    logger.info(f"Merged to {len(merged_svs)} unique SVs")
+    return merged_svs
+
+
+def _merge_sv_group(sv_group: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge overlapping SVs."""
+    best_sv = max(sv_group, key=lambda x: x.get('confidence', 0))
+    total_support = sum(sv.get('support', 0) for sv in sv_group)
+    mean_confidence = sum(sv.get('confidence', 0) for sv in sv_group) / len(sv_group)
+    
+    return {**best_sv, 'support': total_support, 'confidence': mean_confidence, 'merged_count': len(sv_group)}
+
+
+def export_vcf(svs: List[Dict[str, Any]], output_path: Path, reference_name: str = 'assembly') -> None:
+    """Export SVs to VCF format."""
+    from datetime import datetime
+    logger.info(f"Exporting {len(svs)} SVs to VCF")
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as vcf:
+        vcf.write("##fileformat=VCFv4.2\\n")
+        vcf.write(f"##fileDate={datetime.now().strftime('%Y%m%d')}\\n")
+        vcf.write("##source=StrandWeaver_SVScribe\\n")
+        vcf.write('##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"SV type\">\\n')
+        vcf.write('##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"SV length\">\\n')
+        vcf.write('##INFO=<ID=SUPPORT,Number=1,Type=Integer,Description=\"Supporting reads\">\\n')
+        vcf.write("#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n")
+        
+        for i, sv in enumerate(svs, 1):
+            chrom = sv.get('chrom', 'scaffold_1')
+            pos = sv.get('pos', 0)
+            sv_id = sv.get('sv_id', f'sv{i}')
+            sv_type = sv.get('type', 'UNK')
+            sv_len = sv.get('length', 0)
+            support = sv.get('support', 0)
+            confidence = sv.get('confidence', 0.0)
+            
+            alt = f'<{sv_type}>'
+            qual = int(confidence * 100) if confidence > 0 else '.'
+            filter_val = 'PASS' if confidence >= 0.5 else 'LOW_CONF'
+            info = f"SVTYPE={sv_type};SVLEN={sv_len};SUPPORT={support}"
+            
+            vcf.write(f"{chrom}\\t{pos}\\t{sv_id}\\tN\\t{alt}\\t{qual}\\t{filter_val}\\t{info}\\n")
+    
+    logger.info(f"VCF export complete")

@@ -47,16 +47,63 @@ Example Usage:
 import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import pickle
 import gzip
 
 import numpy as np
 
-# Import KmerPrediction from pipeline (it's used by this module)
-from ..utils.pipeline import KmerPrediction
-
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Data Structures
+# ============================================================================
+
+@dataclass
+class KmerPrediction:
+    """Predicted k-mer sizes for different assembly stages."""
+    dbg_k: int                          # De Bruijn graph k-mer
+    ul_overlap_k: int                   # UL read overlap alignment k-mer
+    extension_k: int                    # Path extension k-mer
+    polish_k: int                       # Final polishing k-mer
+    dbg_confidence: float = 1.0         # Confidence in DBG k choice (0-1)
+    ul_confidence: float = 1.0          # UL mapping confidence (primary name)
+    extension_confidence: float = 1.0   # Extension k confidence
+    polish_confidence: float = 1.0      # Polish k confidence
+    reasoning: Optional[str] = None     # Explanation of k choice
+    
+    @property
+    def ul_overlap_confidence(self) -> float:
+        """Alias for ul_confidence (backward compatibility)."""
+        return self.ul_confidence
+    
+    def get_primary_k(self) -> int:
+        """Get primary k-mer (for DBG) from prediction."""
+        return self.dbg_k
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'dbg_k': self.dbg_k,
+            'ul_overlap_k': self.ul_overlap_k,
+            'extension_k': self.extension_k,
+            'polish_k': self.polish_k,
+            'dbg_confidence': self.dbg_confidence,
+            'ul_confidence': self.ul_confidence,
+            'extension_confidence': self.extension_confidence,
+            'polish_confidence': self.polish_confidence,
+            'reasoning': self.reasoning,
+        }
+    
+    def get_all_ks(self) -> Dict[str, int]:
+        """Get all k-mer sizes as dict."""
+        return {
+            'dbg': self.dbg_k,
+            'ul_overlap': self.ul_overlap_k,
+            'extension': self.extension_k,
+            'polish': self.polish_k,
+        }
 
 
 # ============================================================================
@@ -797,6 +844,57 @@ def extract_read_features(reads_file: Path, subsample: Optional[int] = None) -> 
         ReadFeatures object with comprehensive read statistics
     """
     return extract_features_from_file(reads_file, subsample=subsample)
+
+
+# ============================================================================
+# Batch Processing Functions (Nextflow Integration)
+# ============================================================================
+
+def extract_kmers_batch(
+    reads_file: str,
+    k: int,
+    output_table: str,
+    threads: int = 1
+) -> None:
+    """
+    Extract k-mers from read batch for huge genome mode.
+    
+    This function extracts k-mers from a batch of reads and serializes
+    them to a binary format for later aggregation. Used by Nextflow for
+    parallel k-mer extraction in --huge mode.
+    
+    Args:
+        reads_file: Input FASTQ batch
+        k: K-mer size
+        output_table: Output k-mer table (binary format)
+        threads: Number of threads to use
+    """
+    from collections import Counter
+    import pickle
+    from ..io_utils import read_fastq
+    
+    logger.info(f"Extracting {k}-mers from batch: {Path(reads_file).name}")
+    
+    # Count k-mers in batch
+    kmer_counts = Counter()
+    read_count = 0
+    
+    for read in read_fastq(reads_file):
+        seq = read.sequence
+        for i in range(len(seq) - k + 1):
+            kmer = seq[i:i + k]
+            if 'N' not in kmer:  # Skip k-mers with ambiguous bases
+                kmer_counts[kmer] += 1
+        read_count += 1
+    
+    # Serialize to binary format
+    output_path = Path(output_table)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'wb') as f:
+        pickle.dump(dict(kmer_counts), f, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    logger.info(f"Extracted {len(kmer_counts)} unique {k}-mers from {read_count} reads")
 
 
 # Backward compatibility aliases

@@ -33,6 +33,7 @@ import math
 
 from ..io_utils import SeqRead, read_fastq, write_fastq, read_fasta, write_fasta
 from ..preprocessing import ErrorProfiler
+from ..preprocessing.kweaver_module import KmerPrediction  # Import from kweaver to avoid circular import
 from ..preprocessing import (
     ONTCorrector,
     PacBioCorrector,
@@ -70,38 +71,7 @@ from dataclasses import asdict
 # ============================================================================
 # Data Structures (from PreprocessingCoordinator)
 # ============================================================================
-
-@dataclass
-class KmerPrediction:
-    """Predicted k-mer sizes for different assembly stages."""
-    dbg_k: int                          # De Bruijn graph k-mer
-    ul_overlap_k: int                   # UL read overlap alignment k-mer
-    extension_k: int                    # Path extension k-mer
-    polish_k: int                       # Final polishing k-mer
-    dbg_confidence: float = 1.0         # Confidence in DBG k choice (0-1)
-    ul_confidence: float = 1.0          # UL mapping confidence (primary name)
-    extension_confidence: float = 1.0   # Extension k confidence
-    polish_confidence: float = 1.0      # Polish k confidence
-    reasoning: Optional[str] = None     # Explanation of k choice
-    
-    @property
-    def ul_overlap_confidence(self) -> float:
-        """Alias for ul_confidence (backward compatibility)."""
-        return self.ul_confidence
-    
-    def get_primary_k(self) -> int:
-        """Get primary k-mer (for DBG) from prediction."""
-        return self.dbg_k
-    
-    def get_all_ks(self) -> Dict[str, int]:
-        """Get all k-mer sizes as dict."""
-        return {
-            'dbg': self.dbg_k,
-            'ul_overlap': self.ul_overlap_k,
-            'extension': self.extension_k,
-            'polish': self.polish_k,
-        }
-
+# Note: KmerPrediction is imported from kweaver_module above
 
 @dataclass
 class PreprocessingStats:
@@ -372,11 +342,10 @@ class PipelineOrchestrator:
         first_file = Path(self.state['read_files'][0])
         self.logger.info(f"  Extracting features from: {first_file.name}")
         
-        extractor = FeatureExtractor()
-        features = extractor.extract_from_file(
-            first_file,
-            sample_size=min(100000, self.config['profiling']['sample_size'])
-        )
+        # Initialize extractor with subsampling
+        subsample_size = min(100000, self.config['profiling']['sample_size'])
+        extractor = FeatureExtractor(subsample=subsample_size)
+        features = extractor.extract_from_file(first_file)
         
         # Predict optimal k-mers for all stages
         kmer_prediction = predictor.predict(features)
@@ -439,16 +408,33 @@ class PipelineOrchestrator:
         self.logger.info(f"Profiling {len(sampled_reads)} reads (sampled from {total_reads:,} total)")
         
         # Run profiler with K-Weaver k-mer size
-        profiler = ErrorProfiler(k=profile_k)
-        profile = profiler.profile_errors(
-            sampled_reads,
-            detect_ancient=self.config['profiling']['ancient_dna']['detect_damage']
-        )
+        profiler = ErrorProfiler(k=profile_k, sample_size=sample_size)
         
-        # Save profile
+        # Use first reads file for profiling
+        primary_reads_file = Path(self.state['read_files'][0])
+        primary_technology_str = self.state['technologies'][0]
+        
+        # Convert string to ReadTechnology enum
+        from strandweaver.preprocessing.read_classification_utility import ReadTechnology
+        tech_map = {
+            'illumina': ReadTechnology.ILLUMINA,
+            'ancient': ReadTechnology.ANCIENT_DNA,
+            'ont': ReadTechnology.ONT_REGULAR,
+            'ont_ultralong': ReadTechnology.ONT_ULTRALONG,
+            'pacbio': ReadTechnology.PACBIO_HIFI,
+            'hic': ReadTechnology.HI_C,
+            'auto': ReadTechnology.UNKNOWN
+        }
+        primary_technology = tech_map.get(primary_technology_str, ReadTechnology.UNKNOWN)
+        
         profile_path = self.output_dir / "error_profile.json"
-        with open(profile_path, 'w') as f:
-            json.dump(profile, f, indent=2)
+        
+        # Call profile() with file path and technology
+        profile = profiler.profile(
+            reads_file=primary_reads_file,
+            technology=primary_technology,
+            output_file=profile_path
+        )
         
         self.logger.info(f"✓ Error profile saved: {profile_path}")
         self.logger.info(f"  Technology detected: {profile.get('technology', 'unknown')}")
@@ -493,16 +479,14 @@ class PipelineOrchestrator:
                 # Use extension_k for ONT correction (balance accuracy/length)
                 correction_k = kmer_prediction.extension_k if kmer_prediction else 41
                 corrector = ONTCorrector(
-                    kmer_size=correction_k,
-                    ml_error_model=ai_models.get('base_error_classifier') if use_ai else None
+                    k_size=correction_k
                 )
                 self.logger.info(f"    Using k={correction_k} for ONT correction")
             elif tech == 'pacbio':
                 # Use polish_k for PacBio correction (high precision)
                 correction_k = kmer_prediction.polish_k if kmer_prediction else 55
                 corrector = PacBioCorrector(
-                    kmer_size=correction_k,
-                    ml_error_model=ai_models.get('base_error_classifier') if use_ai else None
+                    k_size=correction_k
                 )
                 self.logger.info(f"    Using k={correction_k} for PacBio correction")
             else:
@@ -588,14 +572,15 @@ class PipelineOrchestrator:
         contigs_path = self.output_dir / "contigs.fasta"
         self._save_reads(assembly_result.contigs, contigs_path)
         
-        # Save assembly graph
-        if assembly_result.graph:
+        # Save assembly graph (use string_graph if available, otherwise dbg)
+        final_graph = assembly_result.string_graph or assembly_result.dbg
+        if final_graph:
             graph_path = self.output_dir / "assembly_graph.gfa"
-            self._save_graph(assembly_result.graph, graph_path)
+            self._save_graph(final_graph, graph_path)
         
         self.logger.info(f"✓ Assembly complete")
         self.logger.info(f"  Contigs: {len(assembly_result.contigs)}")
-        self.logger.info(f"  Total bases: {sum(len(c.seq) for c in assembly_result.contigs):,}")
+        self.logger.info(f"  Total bases: {sum(len(c.sequence) for c in assembly_result.contigs):,}")
         self.logger.info(f"  Output: {contigs_path}")
         
         # Save contigs
@@ -609,7 +594,7 @@ class PipelineOrchestrator:
         
         self.logger.info(f"✓ Assembly complete")
         self.logger.info(f"  Contigs: {len(assembly_result.contigs)}")
-        self.logger.info(f"  Total bases: {sum(len(c.seq) for c in assembly_result.contigs):,}")
+        self.logger.info(f"  Total bases: {sum(len(c.sequence) for c in assembly_result.contigs):,}")
         self.logger.info(f"  Output: {contigs_path}")
         
         self.state['assembly_result'] = assembly_result
@@ -738,8 +723,11 @@ class PipelineOrchestrator:
         
         # Step 2: Build DBG from artificial long reads (NO phasing yet)
         self.logger.info("Step 2: Building DBG from OLC-derived long reads")
-        base_k = self.config.get('dbg_k', 31)
+        # Use K-Weaver prediction for optimal k-mer size
+        kmer_prediction = self.state.get('kmer_prediction')
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 31)
         min_coverage = self.config.get('min_coverage', 2)
+        self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
         result.dbg = build_dbg_from_long_reads(
             olc_long_reads,
@@ -752,17 +740,15 @@ class PipelineOrchestrator:
         
         # Step 3: EdgeWarden - Filter low-quality edges
         self.logger.info("Step 3: Applying EdgeWarden to filter edges")
-        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
-        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        edge_warden = EdgeWarden(technology='illumina')
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
         # Step 4: PathWeaver - Select optimal paths through graph
         self.logger.info("Step 4: Applying PathWeaver for path selection")
-        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
-        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
-        result.stats['paths_selected'] = path_weaver.get_path_count()
+        result.stats['paths_selected'] = len(path_weaver.discovered_paths)
         
         # Step 5: Build string graph (if UL reads available)
         # Load UL reads from files if present
@@ -820,7 +806,11 @@ class PipelineOrchestrator:
             use_hic_edges=True  # Hi-C edges already integrated into graph
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
-        result.stats['phasing_confidence'] = phasing_result.confidence
+        # Calculate average phasing confidence
+        if phasing_result.confidence_scores:
+            result.stats['phasing_confidence'] = sum(phasing_result.confidence_scores.values()) / len(phasing_result.confidence_scores)
+        else:
+            result.stats['phasing_confidence'] = 0.0
         
         # Step 9: Iteration cycle (refine graph with phasing information)
         max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
@@ -890,7 +880,15 @@ class PipelineOrchestrator:
             self.logger.info("Exporting phasing information")
             phasing_path = self.output_dir / "phasing_info.json"
             with open(phasing_path, 'w') as f:
-                json.dump(asdict(phasing_result), f, indent=2)
+                # Convert dataclass to dict, handling non-serializable types
+                phasing_dict = {
+                    'num_haplotypes': phasing_result.num_haplotypes,
+                    'node_assignments': phasing_result.node_assignments,
+                    'confidence_scores': phasing_result.confidence_scores,
+                    'metadata': {k: (list(v) if isinstance(v, set) else v) 
+                                 for k, v in phasing_result.metadata.items()}
+                }
+                json.dump(phasing_dict, f, indent=2)
             self.logger.info(f"Saved phasing info to {phasing_path}")
         
         # Export assembly graph to GFA format
@@ -899,8 +897,7 @@ class PipelineOrchestrator:
         export_graph_to_gfa(
             result.string_graph or result.dbg,
             gfa_path,
-            include_sequence=True,
-            include_coverage=True
+            include_sequence=True
         )
         self.logger.info(f"Saved graph to {gfa_path}")
         
@@ -925,8 +922,9 @@ class PipelineOrchestrator:
         # Export coverage data for BandageNG visualization
         self.logger.info("Exporting coverage data for BandageNG")
         graph_for_export = result.string_graph or result.dbg
-        long_coverage = self._calculate_coverage_from_reads(graph_for_export, ont_reads)
-        ul_coverage = self._calculate_coverage_from_reads(graph_for_export, ul_reads) if ul_reads else None
+        # Extract coverage directly from graph nodes (already computed during assembly)
+        long_coverage = {node_id: node.coverage for node_id, node in graph_for_export.nodes.items()}
+        ul_coverage = None  # UL coverage would need separate tracking if needed
         hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
         edge_scores = self._extract_edge_scores(graph_for_export)
         
@@ -994,8 +992,11 @@ class PipelineOrchestrator:
                 hifi_reads.extend(self._read_file_streaming(Path(hifi_file)))
         
         self.logger.info(f"Step 1: Building DBG from {len(hifi_reads)} HiFi reads")
-        base_k = self.config.get('dbg_k', 51)  # Higher k for HiFi
+        # Use K-Weaver prediction for optimal k-mer size
+        kmer_prediction = self.state.get('kmer_prediction')
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 51)
         min_coverage = self.config.get('min_coverage', 2)
+        self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
         result.dbg = build_dbg_from_long_reads(
             hifi_reads,
@@ -1008,17 +1009,15 @@ class PipelineOrchestrator:
         
         # Step 2: EdgeWarden - Filter low-quality edges
         self.logger.info("Step 2: Applying EdgeWarden to filter edges")
-        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
-        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        edge_warden = EdgeWarden(technology='pacbio_hifi')
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
         # Step 3: PathWeaver - Select optimal paths through graph
         self.logger.info("Step 3: Applying PathWeaver for path selection")
-        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
-        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
-        result.stats['paths_selected'] = path_weaver.get_path_count()
+        result.stats['paths_selected'] = len(path_weaver.discovered_paths)
         
         # Step 4: Build string graph (if UL reads available)
         # Load UL reads from files if present
@@ -1073,7 +1072,11 @@ class PipelineOrchestrator:
             use_hic_edges=True  # Use Hi-C edges for connectivity clustering
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
-        result.stats['phasing_confidence'] = phasing_result.confidence
+        # Calculate average phasing confidence
+        if phasing_result.confidence_scores:
+            result.stats['phasing_confidence'] = sum(phasing_result.confidence_scores.values()) / len(phasing_result.confidence_scores)
+        else:
+            result.stats['phasing_confidence'] = 0.0
         
         # Step 8: Iteration cycle (refine graph with phasing information)
         max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
@@ -1128,7 +1131,15 @@ class PipelineOrchestrator:
             self.logger.info("Exporting phasing information")
             phasing_path = self.output_dir / "phasing_info.json"
             with open(phasing_path, 'w') as f:
-                json.dump(asdict(phasing_result), f, indent=2)
+                # Convert dataclass to dict, handling non-serializable types
+                phasing_dict = {
+                    'num_haplotypes': phasing_result.num_haplotypes,
+                    'node_assignments': phasing_result.node_assignments,
+                    'confidence_scores': phasing_result.confidence_scores,
+                    'metadata': {k: (list(v) if isinstance(v, set) else v) 
+                                 for k, v in phasing_result.metadata.items()}
+                }
+                json.dump(phasing_dict, f, indent=2)
             self.logger.info(f"Saved phasing info to {phasing_path}")
         
         # Export assembly graph to GFA format
@@ -1137,8 +1148,7 @@ class PipelineOrchestrator:
         export_graph_to_gfa(
             result.string_graph or result.dbg,
             gfa_path,
-            include_sequence=True,
-            include_coverage=True
+            include_sequence=True
         )
         self.logger.info(f"Saved graph to {gfa_path}")
         
@@ -1163,8 +1173,9 @@ class PipelineOrchestrator:
         # Export coverage data for BandageNG visualization
         self.logger.info("Exporting coverage data for BandageNG")
         graph_for_export = result.string_graph or result.dbg
-        long_coverage = self._calculate_coverage_from_reads(graph_for_export, hifi_reads)
-        ul_coverage = self._calculate_coverage_from_reads(graph_for_export, ul_reads) if ul_reads else None
+        # Extract coverage directly from graph nodes (already computed during assembly)
+        long_coverage = {node_id: node.coverage for node_id, node in graph_for_export.nodes.items()}
+        ul_coverage = None  # UL coverage would need separate tracking if needed
         hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
         edge_scores = self._extract_edge_scores(graph_for_export)
         
@@ -1232,8 +1243,11 @@ class PipelineOrchestrator:
                 ont_reads.extend(self._read_file_streaming(Path(ont_file)))
         
         self.logger.info(f"Step 1: Building DBG from {len(ont_reads)} ONT reads")
-        base_k = self.config.get('dbg_k', 41)  # Medium k for ONT
+        # Use K-Weaver prediction for optimal k-mer size
+        kmer_prediction = self.state.get('kmer_prediction')
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 41)
         min_coverage = self.config.get('min_coverage', 3)  # Higher for noisy ONT
+        self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
         result.dbg = build_dbg_from_long_reads(
             ont_reads,
@@ -1246,17 +1260,15 @@ class PipelineOrchestrator:
         
         # Step 2: EdgeWarden - Filter low-quality edges (critical for noisy ONT)
         self.logger.info("Step 2: Applying EdgeWarden to filter edges")
-        use_edge_ai = self.config.get('assembly', {}).get('graph', {}).get('use_edge_ai', True)
-        edge_warden = EdgeWarden(use_ai=use_edge_ai and self.config['ai']['enabled'])
+        edge_warden = EdgeWarden(technology='nanopore_r10')
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
         # Step 3: PathWeaver - Select optimal paths through graph
         self.logger.info("Step 3: Applying PathWeaver for path selection")
-        use_path_ai = self.config.get('assembly', {}).get('dbg', {}).get('use_path_gnn', True)
-        path_weaver = PathWeaver(use_ai=use_path_ai and self.config['ai']['enabled'])
+        path_weaver = PathWeaver(graph=result.dbg)
         result.dbg = path_weaver.resolve_paths(result.dbg)
-        result.stats['paths_selected'] = path_weaver.get_path_count()
+        result.stats['paths_selected'] = len(path_weaver.discovered_paths)
         
         # Step 4: Build string graph (UL overlay is critical for ONT)
         # Load UL reads from files if present
@@ -1311,7 +1323,11 @@ class PipelineOrchestrator:
             use_hic_edges=True  # Use Hi-C edges for connectivity clustering
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
-        result.stats['phasing_confidence'] = phasing_result.confidence
+        # Calculate average phasing confidence
+        if phasing_result.confidence_scores:
+            result.stats['phasing_confidence'] = sum(phasing_result.confidence_scores.values()) / len(phasing_result.confidence_scores)
+        else:
+            result.stats['phasing_confidence'] = 0.0
         
         # Step 8: Iteration cycle (refine graph with phasing information)
         max_iterations = self.config.get('correction', {}).get('max_iterations', 3)
@@ -1574,6 +1590,7 @@ class PipelineOrchestrator:
         Extract linear contig sequences from DBG or string graph.
         
         Traverses graph to find linear paths and generate consensus sequences.
+        Applies minimum contig length filter from config.
         
         Args:
             graph: DBGGraph or StringGraph object
@@ -1583,12 +1600,20 @@ class PipelineOrchestrator:
         """
         self.logger.info("Extracting contigs from graph")
         
-        # Placeholder implementation
+        # Get minimum contig length from config (default: 0 = keep all)
+        min_len = self.config.get('runtime', {}).get('min_contig_length', 0)
+        
         if isinstance(graph, DBGGraph):
             # Convert DBG nodes to contigs
             contigs = []
+            filtered_count = 0
+            filtered_bp = 0
             for node_id, node in graph.nodes.items():
-                # Each unitig becomes a contig
+                # Skip contigs below minimum length threshold
+                if min_len > 0 and node.length < min_len:
+                    filtered_count += 1
+                    filtered_bp += node.length
+                    continue
                 
                 # Calculate quality from coverage (log scale)
                 # Q = 20 + 10 * log10(coverage + 1), capped at Q40
@@ -1608,6 +1633,11 @@ class PipelineOrchestrator:
                     }
                 )
                 contigs.append(contig)
+            
+            if filtered_count > 0:
+                self.logger.info(f"  Filtered {filtered_count} contigs below {min_len}bp "
+                                 f"({filtered_bp:,} bp removed)")
+            
             return contigs
         
         elif isinstance(graph, StringGraph):
@@ -2429,11 +2459,22 @@ class PipelineOrchestrator:
             # TODO: Implement Claude finishing
             self.logger.info("  ⚠ Claude finishing not yet implemented")
         
+        # Apply minimum contig length filter
+        min_len = self.config.get('runtime', {}).get('min_contig_length', 0)
+        if min_len > 0:
+            before_count = len(contigs)
+            contigs = [c for c in contigs if len(c.sequence) >= min_len]
+            removed = before_count - len(contigs)
+            if removed > 0:
+                self.logger.info(f"  Filtered {removed} contigs below {min_len}bp")
+        
         # Save final assembly
         final_path = self.output_dir / "final_assembly.fasta"
         self._save_reads(contigs, final_path)
         
+        total_bp = sum(len(c.sequence) for c in contigs)
         self.logger.info(f"✓ Finishing complete")
+        self.logger.info(f"  Final contigs: {len(contigs)} ({total_bp:,} bp)")
         self.logger.info(f"  Final assembly: {final_path}")
     
     def _step_classify_chromosomes(self):
@@ -2681,7 +2722,7 @@ class PipelineOrchestrator:
         """
         hic_support = defaultdict(int)
         
-        for edge in graph.edges:
+        for edge_id, edge in graph.edges.items():
             if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
                 # Get source and target node IDs
                 source_id = edge.source if hasattr(edge, 'source') else edge.from_id
@@ -2706,7 +2747,8 @@ class PipelineOrchestrator:
         """
         edge_scores = {}
         
-        for edge in graph.edges:
+        # Iterate over edge objects from the edges dictionary
+        for edge_id, edge in graph.edges.items():
             # Get source and target IDs
             source_id = edge.source if hasattr(edge, 'source') else edge.from_id
             target_id = edge.target if hasattr(edge, 'target') else edge.to_id
