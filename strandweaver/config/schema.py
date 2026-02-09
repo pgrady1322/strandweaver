@@ -22,6 +22,16 @@ DEFAULT_CONFIG = {
     'ai': {
         'enabled': True,  # Master AI switch (use ML models by default)
         'use_classical_fallback': True,  # Fall back to heuristics if model fails
+        'model_dir': None,  # Central directory for all trained model weights
+                            # When set, individual model_path entries are resolved
+                            # relative to this directory unless they are absolute paths.
+                            # Expected layout:
+                            #   <model_dir>/
+                            #     kweaver/          – KWeaverPredictor pkl files
+                            #     error_classifier/ – BaseErrorClassifier pkl
+                            #     edgewarden/       – EdgeWarden per-tech pkl files
+                            #     pathgnn/          – PathGNN .pt checkpoint
+                            #     sv_detector/      – SVScribe .pt checkpoint
         
         # Error Correction AI
         'correction': {
@@ -64,14 +74,6 @@ DEFAULT_CONFIG = {
                 'model_path': None,
                 'sv_confidence': 0.75,
             },
-        },
-        
-        # Claude API (experimental)
-        'claude': {
-            'enabled': False,
-            'api_key': None,  # Set via environment or config
-            'model': 'claude-3-opus-20240229',
-            'use_for_finishing': False,
         },
     },
     

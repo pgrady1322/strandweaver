@@ -21,7 +21,7 @@ process BUILD_GRAPH {
     script:
     def input_arg = huge_mode ? "--kmer-tables ${reads_or_kmers}" : "--reads ${reads_or_kmers}"
     """
-    strandweaver build-graph \\
+    strandweaver nf-build-graph \\
         ${input_arg} \\
         --kmer-predictions ${kmer_predictions} \\
         --output assembly_graph.gfa \\

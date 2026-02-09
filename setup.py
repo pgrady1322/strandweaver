@@ -34,20 +34,41 @@ def read_requirements(filename):
         return [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 # Basic requirements (always installed)
-install_requires = read_requirements("requirements.txt")
-
-# Add Hi-C dependencies to default install (scipy and scikit-learn)
-install_requires.extend([
+_req_file = read_requirements("requirements.txt")
+install_requires = _req_file if _req_file else [
+    # Bioinformatics
+    "biopython>=1.79",
+    "pysam>=0.19.0",
+    # Numerical / data
+    "numpy>=1.21.0",
     "scipy>=1.9.0",
+    "pandas>=1.3.0",
+    # Graph processing
+    "networkx>=2.6.0",
+    # Hi-C / Phasing
     "scikit-learn>=1.3.0",
-])
+    # CLI / IO
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.62.0",
+    "h5py>=3.5.0",
+    # Performance
+    "numba>=0.54.0",
+    "joblib>=1.1.0",
+]
 
 # Optional dependencies
+_dev_reqs = read_requirements("requirements-dev.txt")
 extras_require = {
-    "dev": read_requirements("requirements-dev.txt"),
+    "dev": _dev_reqs if _dev_reqs else [
+        "pytest>=7.0.0",
+        "pytest-cov>=4.0.0",
+        "matplotlib>=3.4.0",
+        "seaborn>=0.11.0",
+    ],
     "ai": [
         "torch>=2.0.0",
-        "pytorch-geometric>=2.3.0",
+        "torch-geometric>=2.3.0",
         "xgboost>=2.0.0",
     ],
 }

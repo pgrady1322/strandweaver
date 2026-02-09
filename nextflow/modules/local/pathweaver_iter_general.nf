@@ -1,10 +1,10 @@
 /*
 ========================================================================================
-    Process: PathWeaver Pass A (SEQUENTIAL - GNN requires full graph)
+    Process: PathWeaver General Iteration (SEQUENTIAL - GNN requires full graph)
 ========================================================================================
 */
 
-process PATHWEAVER_PASS_A {
+process PATHWEAVER_ITER_GENERAL {
     label 'process_gpu'
     publishDir "${params.outdir}/assembly", mode: 'copy'
     
@@ -12,15 +12,15 @@ process PATHWEAVER_PASS_A {
     path graph
     
     output:
-    path "pathweaver_pass_a.gfa", emit: graph
-    path "paths_a.json", emit: paths
+    path "pathweaver_iter_general.gfa", emit: graph
+    path "paths_general.json", emit: paths
     
     script:
     """
-    strandweaver pathweaver-pass-a \\
+    strandweaver nf-pathweaver-iter-general \\
         --graph ${graph} \\
-        --output pathweaver_pass_a.gfa \\
-        --paths paths_a.json \\
+        --output pathweaver_iter_general.gfa \\
+        --paths paths_general.json \\
         --enable-ai ${params.enable_ai} \\
         --threads ${task.cpus} \\
         --device ${task.accelerator ? 'cuda' : 'cpu'}

@@ -20,7 +20,7 @@ process DETECT_SVS_BATCH {
     def ul_arg = ul_routes ? "--ul-routes ${ul_routes}" : ""
     def hic_arg = hic_phasing ? "--hic-phasing ${hic_phasing}" : ""
     """
-    python3 -m strandweaver.cli batch detect-svs \\
+    strandweaver batch detect-svs \\
         --graph ${graph_partition} \\
         ${ul_arg} \\
         ${hic_arg} \\

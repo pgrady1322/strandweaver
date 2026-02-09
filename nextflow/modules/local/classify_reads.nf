@@ -39,7 +39,7 @@ process MERGE_CORRECTED {
     def ont_arg = ont_corrected ? "-i ${ont_corrected.join(' -i ')}" : ""
     def all_inputs = [hifi_arg, ont_arg].findAll{ it }.join(' ')
     """
-    python3 -m strandweaver.cli batch merge-corrected \\
+    strandweaver batch merge-corrected \\
         ${all_inputs} \\
         --output corrected_reads.fastq.gz
     """
@@ -82,7 +82,7 @@ process EDGEWARDEN_FILTER {
     
     script:
     """
-    strandweaver edgewarden-filter \\
+    strandweaver nf-edgewarden-filter \\
         --graph ${graph} \\
         --edge-scores ${edge_scores} \\
         --output filtered_graph.gfa \\
@@ -107,7 +107,7 @@ process THREADCOMPASS_AGGREGATE {
     
     script:
     """
-    strandweaver threadcompass-aggregate \\
+    strandweaver nf-threadcompass-aggregate \\
         --mappings ${ul_mappings} \\
         --graph ${graph} \\
         --output ul_routes.json \\
@@ -131,7 +131,7 @@ process STRANDTETHER_PHASE {
     
     script:
     """
-    strandweaver strandtether-phase \\
+    strandweaver nf-strandtether-phase \\
         --contacts ${hic_contacts} \\
         --graph ${graph} \\
         --output-matrix contact_matrix.h5 \\
@@ -142,7 +142,7 @@ process STRANDTETHER_PHASE {
     """
 }
 
-process PATHWEAVER_PASS_B {
+process PATHWEAVER_ITER_STRICT {
     label 'process_gpu'
     publishDir "${params.outdir}/assembly", mode: 'copy'
     
@@ -153,18 +153,18 @@ process PATHWEAVER_PASS_B {
     
     output:
     path "final_graph.gfa", emit: graph
-    path "paths_b.json", emit: paths
+    path "paths_strict.json", emit: paths
     
     script:
     def ul_arg = ul_routes ? "--ul-routes ${ul_routes}" : ""
     def hic_arg = hic_phasing ? "--hic-phasing ${hic_phasing}" : ""
     """
-    strandweaver pathweaver-pass-b \\
+    strandweaver nf-pathweaver-iter-strict \\
         --graph ${graph} \\
         ${ul_arg} \\
         ${hic_arg} \\
         --output final_graph.gfa \\
-        --paths paths_b.json \\
+        --paths paths_strict.json \\
         --enable-ai ${params.enable_ai} \\
         --preserve-heterozygosity ${params.preserve_heterozygosity} \\
         --min-identity ${params.min_identity} \\
@@ -210,7 +210,7 @@ process EXPORT_ASSEMBLY {
     script:
     def sv_arg = sv_vcf ? "--svs ${sv_vcf}" : ""
     """
-    strandweaver export-assembly \\
+    strandweaver nf-export-assembly \\
         --graph ${graph} \\
         ${sv_arg} \\
         --output-fasta assembly.fasta \\

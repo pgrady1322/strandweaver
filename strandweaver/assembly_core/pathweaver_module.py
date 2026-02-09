@@ -3454,6 +3454,32 @@ class PathWeaver:
         if self.misassembly_detector:
             self.logger.info("Scanning for putative misassemblies...")
             for path in valid_paths:
+                # Collect per-node metadata from graph
+                kmer_spectrum = {}
+                strand_data = {}
+                gc_content = {}
+                graph_topology = {}
+                for nid in path.node_ids:
+                    node = self.graph.nodes.get(nid)
+                    if node:
+                        # GC content from sequence
+                        if hasattr(node, 'seq') and node.seq:
+                            seq_upper = node.seq.upper()
+                            gc_count = seq_upper.count('G') + seq_upper.count('C')
+                            gc_content[nid] = gc_count / max(len(seq_upper), 1)
+                        # Graph topology from adjacency
+                        if hasattr(self.graph, 'out_edges') and hasattr(self.graph, 'in_edges'):
+                            graph_topology[nid] = {
+                                'in_degree': len(self.graph.in_edges.get(nid, set())),
+                                'out_degree': len(self.graph.out_edges.get(nid, set())),
+                            }
+                        # Metadata-sourced signals
+                        if hasattr(node, 'metadata') and node.metadata:
+                            if 'kmer_spectrum' in node.metadata:
+                                kmer_spectrum[nid] = node.metadata['kmer_spectrum']
+                            if 'strand_data' in node.metadata:
+                                strand_data[nid] = node.metadata['strand_data']
+                
                 # Detect misassemblies in this path
                 flags = self.misassembly_detector.detect_in_path(
                     contig_id=path.path_id,
@@ -3461,6 +3487,10 @@ class PathWeaver:
                     edge_ids=[f"{e.from_node_id}_{e.to_node_id}" for e in path.edges],
                     edgewarden_scores={f"{e.from_node_id}_{e.to_node_id}": e.confidence for e in path.edges},
                     coverage_data={node_id: self._get_node_coverage(node_id) for node_id in path.node_ids},
+                    kmer_spectrum=kmer_spectrum or None,
+                    strand_data=strand_data or None,
+                    gc_content=gc_content or None,
+                    graph_topology=graph_topology or None,
                 )
                 
                 # Store flags in path metadata
@@ -3636,12 +3666,42 @@ class PathWeaver:
         if self.misassembly_detector:
             self.logger.info("Scanning (multi-start) for putative misassemblies...")
             for path in valid_paths:
+                # Collect per-node metadata from graph
+                kmer_spectrum = {}
+                strand_data = {}
+                gc_content = {}
+                graph_topology = {}
+                for nid in path.node_ids:
+                    node = self.graph.nodes.get(nid)
+                    if node:
+                        # GC content from sequence
+                        if hasattr(node, 'seq') and node.seq:
+                            seq_upper = node.seq.upper()
+                            gc_count = seq_upper.count('G') + seq_upper.count('C')
+                            gc_content[nid] = gc_count / max(len(seq_upper), 1)
+                        # Graph topology from adjacency
+                        if hasattr(self.graph, 'out_edges') and hasattr(self.graph, 'in_edges'):
+                            graph_topology[nid] = {
+                                'in_degree': len(self.graph.in_edges.get(nid, set())),
+                                'out_degree': len(self.graph.out_edges.get(nid, set())),
+                            }
+                        # Metadata-sourced signals
+                        if hasattr(node, 'metadata') and node.metadata:
+                            if 'kmer_spectrum' in node.metadata:
+                                kmer_spectrum[nid] = node.metadata['kmer_spectrum']
+                            if 'strand_data' in node.metadata:
+                                strand_data[nid] = node.metadata['strand_data']
+                
                 flags = self.misassembly_detector.detect_in_path(
                     contig_id=path.path_id,
                     node_ids=path.node_ids,
                     edge_ids=[f"{e.from_node_id}_{e.to_node_id}" for e in path.edges],
                     edgewarden_scores={f"{e.from_node_id}_{e.to_node_id}": e.confidence for e in path.edges},
                     coverage_data={node_id: self._get_node_coverage(node_id) for node_id in path.node_ids},
+                    kmer_spectrum=kmer_spectrum or None,
+                    strand_data=strand_data or None,
+                    gc_content=gc_content or None,
+                    graph_topology=graph_topology or None,
                 )
                 path.misassembly_flags = flags
 

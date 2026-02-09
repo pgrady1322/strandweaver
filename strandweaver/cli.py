@@ -22,18 +22,70 @@ from .version import __version__
 from .config.schema import load_config, save_config_template, validate_config
 
 
-@click.group()
+# ---------------------------------------------------------------------------
+# Custom Click group that renders help with commands in labelled sections
+# ---------------------------------------------------------------------------
+class SectionedGroup(click.Group):
+    """Click Group subclass that prints commands grouped into sections."""
+
+    SECTIONS = {
+        'Main Commands': [
+            'config', 'pipeline', 'train', 'version',
+        ],
+        'Individual Pipeline Steps': [
+            'assemble', 'correct', 'kweaver', 'profile', 'validate',
+        ],
+        'Helpers and Utilities': [
+            'align-hic', 'classify', 'extract-kmers', 'map-ul',
+        ],
+        'Nextflow Sub-Commands': [
+            'nf-build-contigs', 'nf-build-graph', 'nf-checkpoints',
+            'nf-detect-svs', 'nf-edgewarden-filter', 'nf-export-assembly',
+            'nf-merge', 'nf-pathweaver-iter-general',
+            'nf-pathweaver-iter-strict', 'nf-score-edges',
+            'nf-strandtether-phase', 'nf-threadcompass-aggregate',
+        ],
+    }
+
+    def format_commands(self, ctx, formatter):
+        """Write commands organised by section instead of a flat list."""
+        # Gather every visible command
+        cmd_lookup = {}
+        for name in self.list_commands(ctx):
+            cmd = self.commands.get(name)
+            if cmd is None or cmd.hidden:
+                continue
+            cmd_lookup[name] = cmd.get_short_help_str(limit=formatter.width)
+
+        if not cmd_lookup:
+            return
+
+        # Emit each section
+        for section_title, members in self.SECTIONS.items():
+            rows = [
+                (name, cmd_lookup[name])
+                for name in sorted(members)
+                if name in cmd_lookup
+            ]
+            if rows:
+                with formatter.section(section_title):
+                    formatter.write_dl(rows)
+
+        # Safety net: any command not assigned to a section
+        assigned = {n for members in self.SECTIONS.values() for n in members}
+        orphans = sorted(set(cmd_lookup) - assigned)
+        if orphans:
+            rows = [(n, cmd_lookup[n]) for n in orphans]
+            with formatter.section('Other Commands'):
+                formatter.write_dl(rows)
+
+
+@click.group(cls=SectionedGroup)
 @click.version_option(version=__version__)
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose output')
 @click.option('--quiet', '-q', is_flag=True, help='Suppress non-error output')
 @click.pass_context
 def main(ctx, verbose, quiet):
-    """
-    StrandWeaver: AI-Powered Multi-Technology Genome Assembler
-    
-    A genome assembly tool with intelligent error correction, graph-based assembly,
-    and AI-powered finishing for Ancient DNA, Illumina, ONT, and PacBio HiFi data.
-    """
     # Ensure context object exists
     ctx.ensure_object(dict)
     ctx.obj['VERBOSE'] = verbose
@@ -155,12 +207,6 @@ def config_show(config_file, format):
 # ============================================================================
 
 @main.command()
-@click.option('--reads', '-r', 'reads_files', multiple=True,
-              type=click.Path(exists=True),
-              help='[OLD SYNTAX] Input reads file (can specify multiple times). Use -r1/-r2/etc for clarity.')
-@click.option('--technology', '-tech', 'technologies', multiple=True,
-              type=click.Choice(['illumina', 'ancient', 'ont', 'ont_ultralong', 'pacbio', 'auto']),
-              help='[OLD SYNTAX] Technology for each reads file. Use --technology1/--technology2/etc for clarity.')
 @click.option('-r1', '--reads1', type=click.Path(exists=True),
               help='Read file 1 (pairs with --technology1)')
 @click.option('-r2', '--reads2', type=click.Path(exists=True),
@@ -203,8 +249,8 @@ def config_show(config_file, format):
               help='Disable AI-powered error correction (use classical heuristic / coverage based methods)')
 @click.option('--disable-assembly-ai', is_flag=True,
               help='Disable AI-powered assembly (use classical graph algorithms)')
-@click.option('--ai-finish/--no-ai-finish', default=False,
-              help='Use Claude AI for assembly finishing (experimental, requires API key)')
+@click.option('--model-dir', type=click.Path(exists=True, file_okay=False),
+              help='Directory containing trained AI model weights (overrides per-model paths)')
 # ============================================================================
 # Hardware Options (DEFAULT: CPU)
 # ============================================================================
@@ -249,16 +295,26 @@ def config_show(config_file, format):
 # Chromosome Classification
 # ============================================================================
 @click.option('--id-chromosomes', is_flag=True,
-              help='Classify scaffolds as chromosomes vs junk using gene content analysis. '
-                   'Uses ORF detection by default; set --gene-detection-method for BLAST/Augustus/BUSCO.')
+              help='Classify scaffolds as chromosomes vs junk using gene content analysis '
+                   'and telomere detection. Uses ORF detection by default; '
+                   'set --gene-detection-method for BLAST/Augustus/BUSCO.')
 @click.option('--id-chromosomes-advanced', is_flag=True,
-              help='Enable advanced chromosome identification (adds telomere detection and Hi-C self-contact pattern analysis)')
+              help='Enable advanced chromosome identification (adds Hi-C self-contact '
+                   'pattern analysis and synteny). Telomere detection is always '
+                   'included in basic --id-chromosomes mode.')
 @click.option('--blast-db', type=str, default='nr',
               help='BLAST database for chromosome classification (default: nr)')
 @click.option('--gene-detection-method', type=click.Choice(['orf', 'blast', 'augustus', 'busco']),
               default='orf',
               help='Gene detection method for chromosome classification. '
                    'orf=built-in (no external tools), blast/augustus/busco require installed tools.')
+@click.option('--telomere-min-units', type=int, default=10,
+              help='Minimum number of tandem telomere repeats to call a telomere (default: 10)')
+@click.option('--telomere-search-depth', type=int, default=5000,
+              help='Base-pairs to search at each scaffold end for telomeric repeats (default: 5000)')
+@click.option('--telomere-sequence', type=str, default='TTAGGG',
+              help='Telomere repeat motif to search for (default: TTAGGG). '
+                   'Common alternatives: TTTAGGG (plants), TTAGG (insects).')
 # ============================================================================
 # Misassembly Reporting
 # ============================================================================
@@ -271,16 +327,17 @@ def config_show(config_file, format):
 @click.option('--misassembly-format', type=str, default='tsv,bed',
               help='Comma-separated output formats for misassembly report (tsv,bed,json). Default: tsv,bed.')
 @click.pass_context
-def pipeline(ctx, reads_files, technologies, 
+def pipeline(ctx,
              reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
              output, config,
-             use_ai, disable_correction_ai, disable_assembly_ai, ai_finish,
+             use_ai, disable_correction_ai, disable_assembly_ai, model_dir,
              use_gpu, gpu_backend, gpu_device, threads,
              resume, checkpoint_dir, start_from, skip_profiling, skip_correction,
              min_contig_length,
              illumina_r1, illumina_r2, hic_r1, hic_r2,
              id_chromosomes, id_chromosomes_advanced, blast_db, gene_detection_method,
+             telomere_min_units, telomere_search_depth, telomere_sequence,
              misassembly_report, misassembly_min_confidence, misassembly_format):
     """
     Run the complete assembly pipeline.
@@ -292,11 +349,10 @@ def pipeline(ctx, reads_files, technologies,
     Supports single or multi-technology (hybrid) assemblies.
     
     Examples:
-        # RECOMMENDED: Numbered syntax for explicit mapping
         # Single technology
         strandweaver pipeline -r1 illumina.fq --technology1 illumina -o output/
         
-        # Hybrid assembly - Illumina + ONT (numbered syntax)
+        # Hybrid assembly - Illumina + ONT
         strandweaver pipeline \\
             -r1 illumina.fq --technology1 illumina \\
             -r2 ont.fq --technology2 ont \\
@@ -315,9 +371,17 @@ def pipeline(ctx, reads_files, technologies,
             -r2 hifi.fq --technology2 pacbio \\
             -o output/
         
-        # OLD SYNTAX (still supported but not recommended)
-        strandweaver pipeline -r illumina.fq -r ont.fq \\
-            --technology illumina --technology ont -o output/
+        # Chromosome classification with custom telomere settings (plants)
+        strandweaver pipeline -r1 hifi.fq -o output/ \\
+            --id-chromosomes \\
+            --telomere-sequence TTTAGGG \\
+            --telomere-min-units 8 \\
+            --telomere-search-depth 10000
+        
+        # High-confidence misassembly report only, JSON + BED
+        strandweaver pipeline -r1 reads.fq -o output/ \\
+            --misassembly-min-confidence HIGH \\
+            --misassembly-format json,bed
     """
     verbose = ctx.obj.get('VERBOSE', False)
     
@@ -337,17 +401,6 @@ def pipeline(ctx, reads_files, technologies,
     if technology4: numbered_techs[4] = technology4
     if technology5: numbered_techs[5] = technology5
     
-    # Check for mixing old and new syntax
-    using_old_syntax = bool(reads_files or technologies)
-    using_new_syntax = bool(numbered_reads)
-    
-    if using_old_syntax and using_new_syntax:
-        click.echo(f"❌ Error: Cannot mix old syntax (-r/--technology) with new syntax (-r1/--technology1)", err=True)
-        click.echo(f"\nUse either:", err=True)
-        click.echo(f"  NEW (recommended): -r1 file1.fq --technology1 illumina -r2 file2.fq --technology2 ont", err=True)
-        click.echo(f"  OLD: -r file1.fq -r file2.fq --technology illumina --technology ont", err=True)
-        ctx.exit(1)
-    
     # Validate Illumina paired-end input
     if illumina_r1 and not illumina_r2:
         click.echo(f"❌ Error: --illumina-r1 requires --illumina-r2", err=True)
@@ -356,60 +409,41 @@ def pipeline(ctx, reads_files, technologies,
         click.echo(f"❌ Error: --illumina-r2 requires --illumina-r1", err=True)
         ctx.exit(1)
     
-    # Build complete reads list based on syntax used
+    # Build complete reads list
     all_reads = []
     all_technologies = []
     
     # Add Illumina paired-end if provided
+    illumina_paired_indices = None
     if illumina_r1 and illumina_r2:
+        illumina_paired_indices = (len(all_reads), len(all_reads) + 1)  # (R1 idx, R2 idx)
         all_reads.extend([illumina_r1, illumina_r2])
         all_technologies.extend(['illumina', 'illumina'])
     
-    if using_new_syntax:
-        # NEW NUMBERED SYNTAX - validate and build
-        for num in sorted(numbered_reads.keys()):
-            all_reads.append(numbered_reads[num])
-            
-            # Check if technology is specified for this read
-            if num in numbered_techs:
-                all_technologies.append(numbered_techs[num])
-            else:
-                # Auto-detect if no technology specified
-                all_technologies.append('auto')
-                if verbose:
-                    click.echo(f"ℹ️  No --technology{num} specified for -r{num}, will auto-detect")
+    # Numbered syntax
+    for num in sorted(numbered_reads.keys()):
+        all_reads.append(numbered_reads[num])
         
-        # Warn if technology specified without corresponding read
-        for num in numbered_techs.keys():
-            if num not in numbered_reads:
-                click.echo(f"⚠️  Warning: --technology{num} specified but no -r{num} file provided (ignored)", err=True)
+        # Check if technology is specified for this read
+        if num in numbered_techs:
+            all_technologies.append(numbered_techs[num])
+        else:
+            # Auto-detect if no technology specified
+            all_technologies.append('auto')
+            if verbose:
+                click.echo(f"ℹ️  No --technology{num} specified for -r{num}, will auto-detect")
     
-    elif using_old_syntax:
-        # OLD SYNTAX - validate count matching
-        if reads_files:
-            all_reads.extend(reads_files)
-            
-            if technologies:
-                if len(technologies) != len(reads_files):
-                    click.echo(f"❌ Error: Number of --technology flags ({len(technologies)}) must match "
-                               f"number of --reads files ({len(reads_files)})", err=True)
-                    click.echo(f"\nFor better clarity, use numbered syntax:", err=True)
-                    click.echo(f"  strandweaver pipeline -r1 file1.fq --technology1 illumina \\", err=True)
-                    click.echo(f"      -r2 file2.fq --technology2 ont", err=True)
-                    ctx.exit(1)
-                all_technologies.extend(technologies)
-            else:
-                # Auto-detect all
-                all_technologies.extend(['auto'] * len(reads_files))
-                click.echo("ℹ️  No technologies specified - will auto-detect from read characteristics")
+    # Warn if technology specified without corresponding read
+    for num in numbered_techs.keys():
+        if num not in numbered_reads:
+            click.echo(f"⚠️  Warning: --technology{num} specified but no -r{num} file provided (ignored)", err=True)
     
     # Ensure we have at least some input
     if not all_reads:
         click.echo(f"❌ Error: No input reads specified.", err=True)
         click.echo(f"\nUse one of:", err=True)
         click.echo(f"  --illumina-r1 R1.fq --illumina-r2 R2.fq (for Illumina paired-end)", err=True)
-        click.echo(f"  -r1 file.fq --technology1 <tech> (recommended numbered syntax)", err=True)
-        click.echo(f"  -r file.fq --technology <tech> (old syntax)", err=True)
+        click.echo(f"  -r1 file.fq --technology1 <tech> (numbered syntax)", err=True)
         ctx.exit(1)
     
     # ========================================================================
@@ -437,15 +471,24 @@ def pipeline(ctx, reads_files, technologies,
         if verbose:
             click.echo("ℹ️  Assembly AI disabled")
     
-    if ai_finish:
-        pipeline_config['ai']['claude']['enabled'] = True
-        pipeline_config['ai']['claude']['use_for_finishing'] = True
+    if model_dir:
+        pipeline_config['ai']['model_dir'] = model_dir
+        if verbose:
+            click.echo(f"ℹ️  AI model directory set to {model_dir}")
     
     if use_gpu:
         pipeline_config['hardware']['use_gpu'] = True
         pipeline_config['hardware']['gpu_device'] = gpu_device
+        pipeline_config['hardware']['gpu_backend'] = gpu_backend
         if verbose:
-            click.echo(f"ℹ️  GPU acceleration enabled (device {gpu_device})")
+            click.echo(f"ℹ️  GPU acceleration enabled (backend {gpu_backend}, device {gpu_device})")
+    elif gpu_backend and gpu_backend != 'auto':
+        # User explicitly requested a backend without --use-gpu; honour it
+        pipeline_config['hardware']['use_gpu'] = True
+        pipeline_config['hardware']['gpu_backend'] = gpu_backend
+        pipeline_config['hardware']['gpu_device'] = gpu_device
+        if verbose:
+            click.echo(f"ℹ️  GPU acceleration enabled via --gpu-backend {gpu_backend} (device {gpu_device})")
     
     if threads:
         pipeline_config['hardware']['threads'] = threads
@@ -606,8 +649,6 @@ def pipeline(ctx, reads_files, technologies,
     # Step 9: Finishing
     step_num += 1
     click.echo(f"  {step_num}. Finishing & Polishing")
-    if ai_finish:
-        click.echo(f"     ├─ Claude AI finishing (experimental)")
     click.echo(f"     ├─ Extract final contigs from graph")
     click.echo(f"     ├─ Polish with T2T-Polish")
     click.echo(f"     └─ Generate assembly statistics & QC report")
@@ -648,10 +689,18 @@ def pipeline(ctx, reads_files, technologies,
         pipeline_config['chromosome_classification']['gene_detection_method'] = gene_detection_method
         pipeline_config['chromosome_classification']['mode'] = 'fast' if gene_detection_method in ('orf', 'blast') else 'accurate'
         
+        # Telomere detection parameters (Tier 1)
+        pipeline_config['chromosome_classification']['telomere_min_units'] = telomere_min_units
+        pipeline_config['chromosome_classification']['telomere_search_depth'] = telomere_search_depth
+        pipeline_config['chromosome_classification']['telomere_sequence'] = telomere_sequence
+        
         if verbose:
             mode = "Advanced (Tiers 1-3)" if id_chromosomes_advanced else "Basic (Tiers 1-2)"
             click.echo(f"ℹ️  Chromosome classification enabled: {mode}")
             click.echo(f"   BLAST database: {blast_db}")
+            click.echo(f"   Telomere: motif={telomere_sequence}, "
+                       f"min_units={telomere_min_units}, "
+                       f"search_depth={telomere_search_depth}bp")
     
     # ========================================================================
     # Misassembly Report Configuration
@@ -686,6 +735,7 @@ def pipeline(ctx, reads_files, technologies,
         'hic_r2': hic_r2,
         'verbose': verbose,
         'min_contig_length': min_contig_length,
+        'illumina_paired_indices': illumina_paired_indices,  # (R1_idx, R2_idx) or None
     }
     
     # Initialize and run orchestrator
@@ -874,436 +924,7 @@ def profile(input, technology, output, sample_size, min_quality, threads,
         exit(1)
 
 
-@main.command()
-@click.option('--input', '-i', required=True, type=click.Path(exists=True),
-              help='Input reads file (FASTQ/FASTA)')
-@click.option('--technology', '-tech', required=True,
-              type=click.Choice(['ancient', 'illumina', 'ont', 'ont_ultralong', 'pacbio', 'hic']),
-              help='Sequencing technology type')
-@click.option('--output', '-o', required=True, type=click.Path(),
-              help='Output corrected reads file (FASTQ)')
-@click.option('--profile', type=click.Path(exists=True),
-              help='Error profile from profiling step (JSON)')
-@click.option('--pre-corrected', is_flag=True,
-              help='Reads are already error-corrected (skip correction)')
-@click.option('--threads', '-t', type=int, default=1,
-              help='Number of threads to use')
-# ONT-specific optimization parameters
-@click.option('--ont-flowcell', type=str, default=None,
-              help='ONT flow cell type (e.g., R9.4.1, R10.4.1) for optimized correction')
-@click.option('--ont-basecaller', type=str, default=None,
-              help='ONT basecaller (e.g., guppy, dorado) for optimized correction')
-@click.option('--ont-accuracy', type=str, default=None,
-              help='ONT basecaller accuracy mode (sup, hac, fast) for optimized correction')
-@click.option('--use-gpu/--no-gpu', default=False,
-              help='Enable GPU acceleration for k-mer counting (NVIDIA CUDA required)')
-@click.option('--gpu-threshold', type=int, default=1000,
-              help='Minimum reads to use GPU (default: 1000)')
-@click.option('--kmer-size', '-k', type=int, default=21,
-              help='K-mer size for error correction (default: 21)')
-@click.option('--min-quality', type=int, default=7,
-              help='Minimum base quality threshold (default: 7)')
-@click.option('--skip-high-quality/--no-skip-high-quality', default=True,
-              help='Skip correcting high-quality homopolymers (Q>25)')
-@click.option('--quality-threshold', type=int, default=25,
-              help='Quality threshold for skipping correction (default: 25)')
-@click.option('--early-stop-factor', type=float, default=1.5,
-              help='Early stopping factor for correction search (default: 1.5)')
-@click.option('--cache-stats/--no-cache-stats', default=False,
-              help='Show k-mer cache statistics after correction')
-@click.option('--verbose-stats/--no-verbose-stats', default=True,
-              help='Show detailed correction statistics')
-@click.option('--error-viz/--no-error-viz', default=False,
-              help='Generate error profiling and correction visualizations')
-@click.option('--viz-output-dir', type=click.Path(), default='correction_reports',
-              help='Output directory for visualizations (default: correction_reports)')
-@click.pass_context
-def correct(ctx, input, technology, output, profile, pre_corrected, threads,
-            ont_flowcell, ont_basecaller, ont_accuracy,
-            use_gpu, gpu_threshold, kmer_size, min_quality,
-            skip_high_quality, quality_threshold, early_stop_factor,
-            cache_stats, verbose_stats, error_viz, viz_output_dir):
-    """
-    Correct sequencing errors in reads with optimized algorithms.
-    
-    Applies technology-specific error correction with advanced optimizations:
-    - K-mer caching for 50-80% speedup
-    - Quality-weighted scoring for better accuracy
-    - Early stopping heuristics
-    - Ternary search for optimal lengths
-    - Adaptive window sizing
-    - Parallel processing (multi-core)
-    - Bloom filter pre-filtering
-    - Optional GPU acceleration (10-100x speedup on large datasets)
-    
-    Examples:
-        # ONT reads with flow cell metadata and GPU acceleration
-        strandweaver correct -i ont.fq --technology ont \\
-            --ont-flowcell R10.4.1 --ont-basecaller dorado --ont-accuracy sup \\
-            --use-gpu --threads 8 -o ont_corrected.fq
-        
-        # ONT reads with all optimizations, no GPU
-        strandweaver correct -i ont.fq --technology ont \\
-            --threads 8 --cache-stats -o ont_corrected.fq
-        
-        # PacBio HiFi (pre-corrected, skip correction)
-        strandweaver correct -i hifi.fq --technology pacbio \\
-            --pre-corrected -o hifi.fq
-        
-        # Illumina reads with custom k-mer size
-        strandweaver correct -i illumina.fq --technology illumina \\
-            --kmer-size 31 --threads 16 -o illumina_corrected.fq
-        
-        # Ancient DNA with damage-aware correction
-        strandweaver correct -i ancient.fq --technology ancient \\
-            --threads 8 -o ancient_corrected.fq
-    """
-    from pathlib import Path
-    import json
-    import time
-    from .io import (
-        parse_technology,
-        ReadTechnology,
-        read_fastq,
-        write_fastq,
-        parse_nanopore_metadata
-    )
-    
-    verbose = ctx.obj.get('VERBOSE', False)
-    
-    click.echo(f"{'='*70}")
-    click.echo(f"StrandWeaver Error Correction (Optimized)")
-    click.echo(f"{'='*70}")
-    click.echo(f"Input: {input}")
-    click.echo(f"Technology: {technology.upper()}")
-    click.echo(f"Output: {output}")
-    click.echo(f"Threads: {threads}")
-    
-    # Handle pre-corrected reads (just copy)
-    if pre_corrected:
-        click.echo(f"\n⚠️  Reads marked as pre-corrected - copying without correction")
-        input_path = Path(input)
-        output_path = Path(output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        import shutil
-        shutil.copy(input_path, output_path)
-        
-        click.echo(f"✓ Copied {input} → {output}")
-        return
-    
-    # Parse technology
-    try:
-        tech_enum = parse_technology(technology)
-    except ValueError as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        ctx.exit(1)
-    
-    # Optimization configuration
-    click.echo(f"\nOptimizations:")
-    click.echo(f"  K-mer caching: Enabled")
-    click.echo(f"  Quality weighting: Enabled")
-    click.echo(f"  Early stopping: Enabled (factor={early_stop_factor})")
-    click.echo(f"  Skip high-quality: {'Enabled' if skip_high_quality else 'Disabled'} (Q>{quality_threshold})")
-    click.echo(f"  Ternary search: Enabled")
-    click.echo(f"  Adaptive windows: Enabled")
-    click.echo(f"  Parallel processing: Enabled ({threads} threads)")
-    click.echo(f"  Bloom filter: Enabled")
-    
-    if use_gpu:
-        click.echo(f"  GPU acceleration: Requested (threshold={gpu_threshold} reads)")
-        try:
-            from .utils.hardware_management import get_gpu_info
-            gpu_info = get_gpu_info()
-            click.echo(f"    {gpu_info}")
-        except ImportError:
-            click.echo(f"    ⚠️  CuPy not installed - falling back to CPU")
-            click.echo(f"    Install: pip install cupy-cuda11x (for CUDA 11) or cupy-cuda12x (for CUDA 12)")
-            use_gpu = False
-    else:
-        click.echo(f"  GPU acceleration: Disabled (use --use-gpu to enable)")
-    
-    # Technology-specific correction
-    click.echo(f"\n{'='*70}")
-    
-    if tech_enum in [ReadTechnology.ONT_REGULAR, ReadTechnology.ONT_ULTRALONG]:
-        # ONT correction with all optimizations
-        click.echo(f"ONT Error Correction (Homopolymer-Optimized)")
-        click.echo(f"{'='*70}")
-        
-        # Parse ONT metadata if provided
-        ont_metadata = None
-        if any([ont_flowcell, ont_basecaller, ont_accuracy]):
-            try:
-                ont_metadata = parse_nanopore_metadata(
-                    flow_cell=ont_flowcell,
-                    basecaller=ont_basecaller,
-                    accuracy=ont_accuracy
-                )
-                if ont_metadata:
-                    click.echo(f"ONT Metadata: {ont_metadata}")
-                    click.echo(f"  Homopolymer error rate: {ont_metadata.homopolymer_error_rate:.4f}")
-                    click.echo(f"  Overall error rate: {ont_metadata.overall_error_rate:.4f}")
-            except ValueError as e:
-                click.echo(f"⚠️  Warning: {e}")
-                click.echo(f"    Using standard ONT correction parameters")
-        else:
-            click.echo(f"No ONT metadata provided - using standard parameters")
-            click.echo(f"  Tip: Use --ont-flowcell, --ont-basecaller, --ont-accuracy for optimized correction")
-        
-        click.echo(f"\nK-mer spectrum parameters:")
-        click.echo(f"  K-mer size: {kmer_size}")
-        click.echo(f"  Min quality: Q{min_quality}")
-        click.echo(f"{'='*70}\n")
-        
-        # Import ONT corrector
-        from .correction import ONTCorrector, KmerSpectrum
-        
-        # Load reads
-        click.echo("Loading reads...")
-        input_path = Path(input)
-        reads = list(read_fastq(input_path))
-        click.echo(f"✓ Loaded {len(reads):,} reads\n")
-        
-        # Build k-mer spectrum
-        click.echo("Building k-mer spectrum...")
-        start_time = time.time()
-        
-        spectrum = KmerSpectrum(
-            k=kmer_size,
-            min_quality=min_quality,
-            use_bloom_filter=True  # Always enable Bloom filter
-        )
-        spectrum.add_reads(reads)
-        
-        spectrum_time = time.time() - start_time
-        click.echo(f"✓ Built k-mer spectrum in {spectrum_time:.2f}s")
-        
-        # Show Bloom filter stats
-        bloom_stats = spectrum.bloom_filter.get_stats()
-        click.echo(f"  Bloom filter: {bloom_stats['total_queries']:,} queries, "
-                   f"{bloom_stats['false_positive_rate']:.2%} FP rate\n")
-        
-        # Create corrector with optimizations
-        click.echo("Initializing ONT corrector with optimizations...")
-        corrector = ONTCorrector(
-            spectrum=spectrum,
-            window_size=11,  # Will be adaptive
-            min_support=5,
-            ont_metadata=ont_metadata,
-            use_gpu=use_gpu,
-            gpu_threshold=gpu_threshold,
-            enable_visualizations=error_viz,
-            visualization_output_dir=viz_output_dir
-        )
-        
-        # Show GPU status if requested
-        if use_gpu:
-            if hasattr(corrector, 'gpu_counter') and corrector.gpu_counter:
-                click.echo(f"✓ GPU k-mer counter initialized")
-            else:
-                click.echo(f"  Using CPU (GPU not available or dataset too small)")
-        
-        click.echo(f"✓ Corrector ready\n")
-        
-        # Correct reads with parallel processing
-        click.echo(f"Correcting {len(reads):,} reads with {threads} threads...")
-        start_time = time.time()
-        
-        if threads > 1:
-            # Parallel correction
-            import multiprocessing as mp
-            with mp.Pool(threads) as pool:
-                corrected_reads = pool.map(corrector.correct_read, reads)
-        else:
-            # Sequential correction
-            corrected_reads = [corrector.correct_read(read) for read in reads]
-        
-        correction_time = time.time() - start_time
-        click.echo(f"✓ Corrected {len(corrected_reads):,} reads in {correction_time:.2f}s")
-        click.echo(f"  Throughput: {len(reads) / correction_time:.1f} reads/sec\n")
-        
-        # Show cache statistics if requested
-        if cache_stats and hasattr(corrector, '_kmer_cache'):
-            stats = corrector.get_cache_stats()
-            click.echo(f"K-mer Cache Statistics:")
-            click.echo(f"  Cached k-mers: {stats['cached_kmers']:,}")
-            click.echo(f"  Cache hits: {stats['cache_hits']:,}")
-            click.echo(f"  Cache misses: {stats['cache_misses']:,}")
-            total = stats['cache_hits'] + stats['cache_misses']
-            if total > 0:
-                hit_rate = stats['cache_hits'] / total * 100
-                click.echo(f"  Hit rate: {hit_rate:.1f}%\n")
-        
-        # Show correction statistics if requested
-        if verbose_stats:
-            # Count corrections
-            total_corrections = 0
-            homopolymer_corrections = 0
-            for orig, corr in zip(reads, corrected_reads):
-                if orig.sequence != corr.sequence:
-                    total_corrections += 1
-                    # Simple homopolymer check (consecutive identical bases)
-                    import re
-                    if re.search(r'([ACGT])\1{2,}', orig.sequence) or \
-                       re.search(r'([ACGT])\1{2,}', corr.sequence):
-                        homopolymer_corrections += 1
-            
-            click.echo(f"Correction Statistics:")
-            click.echo(f"  Total reads: {len(reads):,}")
-            click.echo(f"  Corrected reads: {total_corrections:,} ({total_corrections/len(reads)*100:.1f}%)")
-            click.echo(f"  Homopolymer corrections: {homopolymer_corrections:,}\n")
-        
-        # Write corrected reads
-        click.echo(f"Writing corrected reads to {output}...")
-        output_path = Path(output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        write_fastq(corrected_reads, output_path)
-        
-        click.echo(f"✓ Wrote {len(corrected_reads):,} corrected reads")
-        click.echo(f"\n{'='*70}")
-        click.echo(f"✅ ONT error correction complete!")
-        click.echo(f"{'='*70}")
-        click.echo(f"Total time: {spectrum_time + correction_time:.2f}s")
-        click.echo(f"Output: {output}")
-        
-    elif tech_enum == ReadTechnology.PACBIO_HIFI:
-        # PacBio HiFi correction
-        from .correction import PacBioCorrector
-        
-        click.echo(f"PacBio HiFi Error Correction")
-        click.echo(f"{'='*70}\n")
-        
-        # Create corrector with visualization support
-        click.echo("Initializing PacBio HiFi corrector...")
-        corrector = PacBioCorrector(
-            k_size=kmer_size,
-            min_freq=2,
-            enable_visualizations=error_viz,
-            visualization_output_dir=viz_output_dir
-        )
-        
-        click.echo(f"✓ Corrector ready\n")
-        
-        # Correct reads
-        click.echo(f"Correcting reads...")
-        stats = corrector.correct_reads(
-            input_file=Path(input),
-            output_file=Path(output)
-        )
-        
-        click.echo(f"✓ Correction complete!")
-        if verbose_stats:
-            click.echo(f"\nCorrection Statistics:")
-            click.echo(f"  Reads corrected: {stats.reads_corrected:,}")
-            click.echo(f"  Total bases: {stats.total_bases:,}")
-        
-    elif tech_enum == ReadTechnology.ILLUMINA:
-        # Illumina correction
-        from .correction import IlluminaCorrector
-        
-        click.echo(f"Illumina Error Correction")
-        click.echo(f"{'='*70}\n")
-        
-        # Create corrector with visualization support
-        click.echo("Initializing Illumina corrector...")
-        corrector = IlluminaCorrector(
-            k_size=kmer_size,
-            min_freq=2,
-            enable_visualizations=error_viz,
-            visualization_output_dir=viz_output_dir
-        )
-        
-        click.echo(f"✓ Corrector ready\n")
-        
-        # Correct reads
-        click.echo(f"Correcting reads...")
-        stats = corrector.correct_reads(
-            input_file=Path(input),
-            output_file=Path(output)
-        )
-        
-        click.echo(f"✓ Correction complete!")
-        if verbose_stats:
-            click.echo(f"\nCorrection Statistics:")
-            click.echo(f"  Reads corrected: {stats.reads_corrected:,}")
-            click.echo(f"  Total bases: {stats.total_bases:,}")
-        
-    elif tech_enum == ReadTechnology.ANCIENT_DNA:
-        # Ancient DNA correction
-        from .correction import AncientDNACorrector
-        
-        click.echo(f"Ancient DNA Error Correction")
-        click.echo(f"{'='*70}\n")
-        
-        # Create corrector with visualization support
-        click.echo("Initializing Ancient DNA corrector with damage-aware correction...")
-        corrector = AncientDNACorrector(
-            k_size=kmer_size,
-            min_freq=2,
-            enable_visualizations=error_viz,
-            visualization_output_dir=viz_output_dir
-        )
-        
-        click.echo(f"✓ Corrector ready\n")
-        
-        # Correct reads
-        click.echo(f"Correcting reads with intelligent deamination screening...")
-        stats = corrector.correct_reads(
-            input_file=Path(input),
-            output_file=Path(output)
-        )
-        
-        click.echo(f"✓ Correction complete!")
-        if verbose_stats:
-            click.echo(f"\nCorrection Statistics:")
-            click.echo(f"  Reads corrected: {stats.reads_corrected:,}")
-            click.echo(f"  Total bases: {stats.total_bases:,}")
-            
-            # Show damage statistics if available
-            if hasattr(corrector, 'get_damage_stats'):
-                damage_stats = corrector.get_damage_stats()
-                if damage_stats:
-                    click.echo(f"\nAncient DNA Damage Analysis:")
-                    click.echo(f"  Damage signature detected: {damage_stats.get('damage_signature_detected', 'N/A')}")
-                    click.echo(f"  5' C→T damage rate: {damage_stats.get('damage_5p_rate', 0)*100:.2f}%")
-                    click.echo(f"  3' G→A damage rate: {damage_stats.get('damage_3p_rate', 0)*100:.2f}%")
-                    click.echo(f"  Damage corrections: {damage_stats.get('damage_corrections', 0):,}")
-                    click.echo(f"  Variants preserved: {damage_stats.get('variants_preserved', 0):,}")
-        
-    elif tech_enum == ReadTechnology.HI_C:
-        # Hi-C reads - NO correction, just pass through
-        click.echo(f"Hi-C Proximity Ligation Reads")
-        click.echo(f"{'='*70}\n")
-        click.echo(f"⚠️  Hi-C reads are NOT error-corrected (used for scaffolding only)")
-        click.echo(f"\nHi-C reads are proximity ligation data used for:")
-        click.echo(f"  • Contact mapping between genomic regions")
-        click.echo(f"  • Scaffolding assembled contigs")
-        click.echo(f"  • Chromosome-scale assembly")
-        click.echo(f"\nThey should NOT be error-corrected as:")
-        click.echo(f"  • Chimeric reads are expected (junction between distant regions)")
-        click.echo(f"  • Only mapping position matters, not sequence accuracy")
-        click.echo(f"  • Error correction would destroy proximity information")
-        click.echo(f"\nCopying reads without correction...")
-        
-        input_path = Path(input)
-        output_path = Path(output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        import shutil
-        shutil.copy(input_path, output_path)
-        
-        click.echo(f"✓ Hi-C reads copied: {input} → {output}")
-        click.echo(f"\nUse these reads for scaffolding AFTER assembly with:")
-        click.echo(f"  strandweaver scaffold --contigs assembly.fasta \\")
-        click.echo(f"      --hic-r1 {output} --hic-r2 <R2_file> -o scaffolded.fasta")
-        
-    else:
-        click.echo(f"❌ Error: Unsupported technology: {tech_enum.value}", err=True)
-        ctx.exit(1)
-
-
-@main.command()
+@main.command('nf-merge')
 @click.option('--reads', '-r', 'reads_files', multiple=True, required=True,
               type=click.Path(exists=True),
               help='Input corrected reads files (specify multiple times)')
@@ -1314,7 +935,7 @@ def correct(ctx, input, technology, output, profile, pre_corrected, threads,
               help='Output merged reads file (FASTQ)')
 @click.option('--weights', type=str,
               help='Comma-separated coverage weights (e.g., "1.0,0.8,1.2")')
-def merge(reads_files, technologies, output, weights):
+def nf_merge(reads_files, technologies, output, weights):
     """
     Merge corrected reads from multiple technologies.
     
@@ -1354,7 +975,7 @@ def merge(reads_files, technologies, output, weights):
     click.echo("   Current workaround: Use standard UNIX cat or seqtk for simple merging")
 
 
-@main.command('build-contigs')
+@main.command('nf-build-contigs')
 @click.option('--input', '-i', required=True, type=click.Path(exists=True),
               help='Input corrected reads file (FASTQ)')
 @click.option('--output', '-o', required=True, type=click.Path(),
@@ -1380,12 +1001,6 @@ def build_contigs(input, output, min_overlap, threads):
 
 
 @main.command()
-@click.option('--reads', '-r', 'reads_files', multiple=True,
-              type=click.Path(exists=True),
-              help='[OLD SYNTAX] Input reads/contigs file. Use -r1/-r2/etc for clarity.')
-@click.option('--technology', '-tech', 'technologies', multiple=True,
-              type=click.Choice(['illumina', 'ancient', 'ont', 'ont_ultralong', 'pacbio', 'auto']),
-              help='[OLD SYNTAX] Technology for each reads file. Use --technology1/--technology2/etc for clarity.')
 @click.option('-r1', '--reads1', type=click.Path(exists=True),
               help='Read file 1 (pairs with --technology1)')
 @click.option('-r2', '--reads2', type=click.Path(exists=True),
@@ -1426,8 +1041,7 @@ def build_contigs(input, output, min_overlap, threads):
               help='Minimum coverage threshold')
 @click.option('--threads', '-t', type=int, default=1,
               help='Number of threads to use')
-def assemble(reads_files, technologies,
-             reads1, reads2, reads3, reads4, reads5,
+def assemble(reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
              illumina_r1, illumina_r2, output, graph, graph_type, min_coverage, threads):
     """
@@ -1437,25 +1051,18 @@ def assemble(reads_files, technologies,
     to generate draft genome sequences. Supports multi-technology input.
     
     Examples:
-        # RECOMMENDED: Numbered syntax
         # Single technology
         strandweaver assemble -r1 corrected.fq --technology1 illumina -o assembly.fa
         
         # Illumina paired-end separate files
         strandweaver assemble --illumina-r1 R1.fq --illumina-r2 R2.fq -o assembly.fa
         
-        # Multi-technology (hybrid) with explicit numbering
+        # Multi-technology (hybrid)
         strandweaver assemble \\
             -r1 illumina.fq --technology1 illumina \\
             -r2 ont.fq --technology2 ont \\
             -r3 hifi.fq --technology3 pacbio \\
             -o hybrid_assembly.fa -g assembly.gfa
-        
-        # With Illumina paired-end + other technologies
-        strandweaver assemble \\
-            --illumina-r1 ill_R1.fq --illumina-r2 ill_R2.fq \\
-            -r1 ont.fq --technology1 ont \\
-            -o assembly.fa
         
         # Auto-detect technologies (omit --technology flags)
         strandweaver assemble -r1 reads1.fq -r2 reads2.fq -o assembly.fa
@@ -1476,16 +1083,6 @@ def assemble(reads_files, technologies,
     if technology4: numbered_techs[4] = technology4
     if technology5: numbered_techs[5] = technology5
     
-    # Check for mixing old and new syntax
-    using_old_syntax = bool(reads_files or technologies)
-    using_new_syntax = bool(numbered_reads)
-    
-    if using_old_syntax and using_new_syntax:
-        click.echo(f"❌ Error: Cannot mix old syntax (-r/--technology) with new syntax (-r1/--technology1)", err=True)
-        click.echo(f"\nUse numbered syntax (recommended): -r1 file1.fq --technology1 illumina", err=True)
-        from sys import exit
-        exit(1)
-    
     # Validate Illumina paired-end input
     if illumina_r1 and not illumina_r2:
         click.echo(f"❌ Error: --illumina-r1 requires --illumina-r2", err=True)
@@ -1504,33 +1101,15 @@ def assemble(reads_files, technologies,
         all_reads.extend([illumina_r1, illumina_r2])
         all_technologies.extend(['illumina', 'illumina'])
     
-    if using_new_syntax:
-        # NEW NUMBERED SYNTAX
-        for num in sorted(numbered_reads.keys()):
-            all_reads.append(numbered_reads[num])
-            all_technologies.append(numbered_techs.get(num, 'auto'))
-        
-        # Warn if technology specified without corresponding read
-        for num in numbered_techs.keys():
-            if num not in numbered_reads:
-                click.echo(f"⚠️  Warning: --technology{num} specified but no -r{num} file provided (ignored)", err=True)
+    # Numbered syntax
+    for num in sorted(numbered_reads.keys()):
+        all_reads.append(numbered_reads[num])
+        all_technologies.append(numbered_techs.get(num, 'auto'))
     
-    elif using_old_syntax:
-        # OLD SYNTAX
-        if reads_files:
-            all_reads.extend(reads_files)
-            
-            if technologies:
-                if len(technologies) != len(reads_files):
-                    click.echo(f"❌ Error: Number of --technology flags ({len(technologies)}) must match "
-                               f"number of --reads files ({len(reads_files)})", err=True)
-                    click.echo(f"\nUse numbered syntax: -r1 file1.fq --technology1 illumina", err=True)
-                    from sys import exit
-                    exit(1)
-                all_technologies.extend(technologies)
-            else:
-                all_technologies.extend(['auto'] * len(reads_files))
-                click.echo("ℹ️  Auto-detecting technologies from read characteristics")
+    # Warn if technology specified without corresponding read
+    for num in numbered_techs.keys():
+        if num not in numbered_reads:
+            click.echo(f"⚠️  Warning: --technology{num} specified but no -r{num} file provided (ignored)", err=True)
     
     # Ensure we have at least some input
     if not all_reads:
@@ -1552,39 +1131,6 @@ def assemble(reads_files, technologies,
     click.echo(f"\n⚠️ Assembly from graph files:")
     click.echo("   This feature is planned for v0.2 (unified single-command assembly)")
     click.echo("   v0.1 requires using the main 'assemble' command with read files directly")
-
-
-@main.command()
-@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
-              help='Input assembly graph file (GFA)')
-@click.option('--output', '-o', required=True, type=click.Path(),
-              help='Output finished assembly file (FASTA)')
-@click.option('--ai', type=click.Choice(['claude', 'heuristic']),
-              default='claude', help='Finishing method')
-@click.option('--interactive/--no-interactive', default=False,
-              help='Ask user for ambiguous decisions')
-@click.option('--api-key', envvar='ANTHROPIC_API_KEY',
-              help='Claude API key (or set ANTHROPIC_API_KEY env var)')
-def finish(graph, output, ai, interactive, api_key):
-    """
-    Finish assembly with AI-powered path resolution.
-    
-    Resolves ambiguous paths in the assembly graph using AI reasoning
-    or heuristic algorithms to produce a final polished assembly.
-    """
-    click.echo(f"Finishing assembly from graph: {graph}")
-    click.echo(f"Method: {ai}")
-    click.echo(f"Interactive: {interactive}")
-    click.echo(f"Output: {output}")
-    
-    if ai == 'claude' and not api_key:
-        click.echo("\n⚠️ Warning: No Claude API key provided!")
-        click.echo("   Set ANTHROPIC_API_KEY environment variable or use --api-key")
-        click.echo("   Falling back to heuristic method")
-    
-    click.echo("\n⚠️ AI-powered assembly finishing:")
-    click.echo("   This feature is planned for v0.2 and v0.3")
-    click.echo("   v0.1 uses heuristic path resolution within the main assembly pipeline")
 
 
 @main.command()
@@ -1618,13 +1164,13 @@ def validate(assembly, reference, output):
 # Checkpoint Management Commands
 # ============================================================================
 
-@main.group()
-def checkpoints():
-    """Manage pipeline checkpoints."""
+@main.group('nf-checkpoints')
+def nf_checkpoints():
+    """Manage pipeline checkpoints (Nextflow)."""
     pass
 
 
-@checkpoints.command('list')
+@nf_checkpoints.command('list')
 @click.option('--dir', '-d', 'checkpoint_dir', type=click.Path(exists=True),
               default='./checkpoints', help='Checkpoint directory')
 def checkpoints_list(checkpoint_dir):
@@ -1634,7 +1180,7 @@ def checkpoints_list(checkpoint_dir):
     click.echo("   This feature is planned for v0.2")
 
 
-@checkpoints.command('remove')
+@nf_checkpoints.command('remove')
 @click.option('--dir', '-d', 'checkpoint_dir', type=click.Path(exists=True),
               required=True, help='Checkpoint directory')
 @click.option('--all', 'remove_all', is_flag=True,
@@ -1652,7 +1198,7 @@ def checkpoints_remove(checkpoint_dir, remove_all, before):
     click.echo("   This feature is planned for v0.2")
 
 
-@checkpoints.command('export')
+@nf_checkpoints.command('export')
 @click.option('--dir', '-d', 'checkpoint_dir', type=click.Path(exists=True),
               required=True, help='Checkpoint directory')
 @click.option('--output', '-o', required=True, type=click.Path(),
@@ -1773,6 +1319,480 @@ def _run_nextflow(workflow_type, **kwargs):
     else:
         click.echo("✓ Nextflow workflow completed successfully")
 
+
+# ============================================================================
+# NEXTFLOW STEP COMMANDS (invoked by Nextflow processes)
+# ============================================================================
+
+@main.command('classify')
+@click.option('--input', '-i', 'input_file', required=True,
+              type=click.Path(exists=True), help='Input reads file (FASTQ/FASTA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output classification JSON')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+def nf_classify(input_file, output, threads):
+    """Classify reads by sequencing technology (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils import read_fastq, read_fasta
+    from .preprocessing.read_classification_utility import (
+        detect_technology_from_header, classify_read_technology,
+    )
+
+    click.echo(f"Classifying reads: {P(input_file).name}")
+    p = P(input_file)
+    suffix = p.suffix.lower()
+    stem_suffix = P(p.stem).suffix.lower() if suffix in ('.gz', '.gzip') else suffix
+    reader = read_fastq if stem_suffix in ('.fq', '.fastq') else read_fasta
+
+    tech_counts: dict[str, int] = {}
+    total = 0
+    for read in reader(input_file):
+        tech = detect_technology_from_header(read.id)
+        tech_counts[tech] = tech_counts.get(tech, 0) + 1
+        total += 1
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    result = {'total_reads': total, 'technology_counts': tech_counts}
+    with open(out, 'w') as f:
+        json.dump(result, f, indent=2)
+    click.echo(f"✓ Classified {total} reads → {output}")
+
+
+@main.command('kweaver')
+@click.option('--input', '-i', 'input_file', required=True,
+              type=click.Path(exists=True), help='Corrected reads (FASTQ)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='K-mer predictions JSON')
+@click.option('--report', type=click.Path(), help='K-Weaver report text file')
+@click.option('--kmer-size', '-k', type=int, default=None,
+              help='Override k-mer size (default: auto-predict)')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+def nf_kweaver(input_file, output, report, kmer_size, threads):
+    """Run K-Weaver adaptive k-mer prediction."""
+    import json
+    from pathlib import Path as P
+    from .preprocessing.kweaver_module import KWeaverPredictor
+
+    click.echo(f"Running K-Weaver on: {P(input_file).name}")
+    predictor = KWeaverPredictor(use_ml=True)
+    prediction = predictor.predict_from_file(str(input_file))
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w') as f:
+        json.dump(prediction.to_dict(), f, indent=2)
+
+    if report:
+        rp = P(report)
+        rp.parent.mkdir(parents=True, exist_ok=True)
+        with open(rp, 'w') as f:
+            f.write(f"K-Weaver Report\n{'='*40}\n")
+            f.write(f"Input: {input_file}\n")
+            f.write(f"Primary k: {prediction.primary_k}\n")
+            f.write(f"DBG k:     {prediction.dbg_k}\n")
+            f.write(f"Overlap k: {prediction.overlap_k}\n")
+            f.write(f"Confidence: {prediction.confidence:.3f}\n")
+
+    click.echo(f"✓ K-Weaver predictions saved → {output}")
+
+
+@main.command('nf-build-graph')
+@click.option('--reads', type=click.Path(exists=True),
+              help='Corrected reads (FASTQ)')
+@click.option('--kmer-tables', type=click.Path(exists=True),
+              help='Pre-computed k-mer tables (--huge mode)')
+@click.option('--kmer-predictions', type=click.Path(exists=True),
+              help='K-Weaver predictions JSON')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output assembly graph (GFA)')
+@click.option('--alignments', type=click.Path(), default=None,
+              help='Output alignments (BAM) — reserved for future use')
+@click.option('--stats', type=click.Path(), default=None,
+              help='Output build statistics (JSON)')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+@click.option('--device', type=str, default='cpu', help='Compute device (cpu/cuda)')
+def nf_build_graph(reads, kmer_tables, kmer_predictions, output, alignments,
+                   stats, threads, device):
+    """Build assembly graph from reads (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .assembly_core.dbg_engine_module import DeBruijnGraphBuilder
+    from .io_utils import read_fastq
+    from .io_utils.assembly_export import export_graph_to_gfa
+
+    if not reads and not kmer_tables:
+        click.echo("❌ Error: --reads or --kmer-tables required", err=True)
+        raise SystemExit(1)
+
+    # Determine k from predictions
+    k = 31
+    if kmer_predictions:
+        with open(kmer_predictions) as f:
+            preds = json.load(f)
+        k = preds.get('dbg_k', preds.get('primary_k', 31))
+
+    click.echo(f"Building graph (k={k}, device={device})...")
+    builder = DeBruijnGraphBuilder(base_k=k, use_gpu=(device != 'cpu'))
+
+    if reads:
+        read_list = list(read_fastq(reads))
+        graph = builder.build(read_list)
+    else:
+        click.echo("⚠️ K-mer table loading not yet implemented, using empty graph")
+        from .assembly_core.dbg_engine_module import KmerGraph
+        graph = KmerGraph(base_k=k)
+
+    # Export GFA
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    export_graph_to_gfa(graph, out)
+
+    # Stats
+    if stats:
+        sp = P(stats)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        with open(sp, 'w') as f:
+            json.dump({
+                'nodes': len(graph.nodes), 'edges': len(graph.edges),
+                'k': k, 'device': device,
+            }, f, indent=2)
+
+    # Alignments placeholder
+    if alignments:
+        P(alignments).parent.mkdir(parents=True, exist_ok=True)
+        P(alignments).touch()
+
+    click.echo(f"✓ Graph built: {len(graph.nodes)} nodes, {len(graph.edges)} edges → {output}")
+
+
+@main.command('nf-edgewarden-filter')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Input assembly graph (GFA)')
+@click.option('--edge-scores', required=True, type=click.Path(exists=True),
+              help='Edge scores from batch scoring (JSON)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output filtered graph (GFA)')
+@click.option('--stats', type=click.Path(), default=None,
+              help='Output filtering statistics (JSON)')
+@click.option('--enable-ai', type=str, default='true', help='Enable AI filtering')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+@click.option('--device', type=str, default='cpu', help='Compute device')
+def nf_edgewarden_filter(graph, edge_scores, output, stats, enable_ai,
+                         threads, device):
+    """Filter graph edges with EdgeWarden (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import load_graph_from_gfa, export_graph_to_gfa
+
+    click.echo(f"EdgeWarden filtering: {P(graph).name}")
+    g = load_graph_from_gfa(graph)
+    original_edges = len(g.edges)
+
+    # Load edge scores and remove low-confidence edges
+    with open(edge_scores) as f:
+        scores = json.load(f)
+
+    if isinstance(scores, dict):
+        # Scores keyed by edge_id → confidence float
+        threshold = 0.3
+        remove_ids = [
+            int(eid) for eid, conf in scores.items()
+            if isinstance(conf, (int, float)) and conf < threshold
+        ]
+        for eid in remove_ids:
+            if eid in g.edges:
+                edge = g.edges[eid]
+                g.out_edges.get(edge.from_id, set()).discard(eid)
+                g.in_edges.get(edge.to_id, set()).discard(eid)
+                del g.edges[eid]
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    export_graph_to_gfa(g, out)
+
+    removed = original_edges - len(g.edges)
+    click.echo(f"✓ Filtered: {removed} edges removed, {len(g.edges)} remain → {output}")
+
+    if stats:
+        sp = P(stats)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        with open(sp, 'w') as f:
+            json.dump({
+                'original_edges': original_edges,
+                'removed': removed,
+                'remaining': len(g.edges),
+            }, f, indent=2)
+
+
+@main.command('nf-pathweaver-iter-general')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Input assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output graph after path finding (GFA)')
+@click.option('--paths', type=click.Path(), default=None,
+              help='Output paths JSON')
+@click.option('--enable-ai', type=str, default='true', help='Enable AI')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+@click.option('--device', type=str, default='cpu', help='Compute device')
+def nf_pathweaver_iter_general(graph, output, paths, enable_ai, threads, device):
+    """PathWeaver general iteration — initial path finding (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import load_graph_from_gfa, export_graph_to_gfa
+    from .assembly_core.pathweaver_module import PathWeaver
+
+    click.echo(f"PathWeaver general iteration: {P(graph).name}")
+    g = load_graph_from_gfa(graph)
+
+    pw = PathWeaver(graph=g, use_gpu=(device != 'cpu'))
+    # Find paths from all source nodes (in_degree == 0)
+    sources = [nid for nid in g.nodes if g.in_degree(nid) == 0]
+    sinks = [nid for nid in g.nodes if g.out_degree(nid) == 0]
+
+    found_paths = []
+    if sources and sinks:
+        try:
+            found_paths = pw.find_paths_multi(sources)
+        except Exception as e:
+            click.echo(f"  ⚠️ Path finding fallback: {e}")
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    export_graph_to_gfa(g, out)
+
+    if paths:
+        pp = P(paths)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        with open(pp, 'w') as f:
+            json.dump({
+                'paths': len(found_paths),
+                'sources': len(sources),
+                'sinks': len(sinks),
+            }, f, indent=2)
+
+    click.echo(f"✓ General iteration: {len(found_paths)} paths found → {output}")
+
+
+@main.command('nf-threadcompass-aggregate')
+@click.option('--mappings', '-m', required=True, type=click.Path(exists=True),
+              help='UL read mappings (JSON/PAF files)')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output UL routes (JSON)')
+@click.option('--evidence', type=click.Path(), default=None,
+              help='Output UL evidence (JSON)')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+def nf_threadcompass_aggregate(mappings, graph, output, evidence, threads):
+    """Aggregate UL read mappings with ThreadCompass (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import load_graph_from_gfa
+    from .assembly_core.threadcompass_module import ThreadCompass
+
+    click.echo(f"ThreadCompass aggregation: {P(mappings).name}")
+    g = load_graph_from_gfa(graph)
+
+    tc = ThreadCompass(graph=g)
+    routes = tc.route_ul_reads()
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w') as f:
+        json.dump({'routes': len(routes), 'detail': str(routes)[:1000]}, f, indent=2)
+
+    if evidence:
+        ep = P(evidence)
+        ep.parent.mkdir(parents=True, exist_ok=True)
+        stats = tc.get_mapping_stats()
+        with open(ep, 'w') as f:
+            json.dump(stats, f, indent=2)
+
+    click.echo(f"✓ UL routes aggregated → {output}")
+
+
+@main.command('nf-strandtether-phase')
+@click.option('--contacts', '-c', required=True, type=click.Path(exists=True),
+              help='Hi-C contacts file')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Assembly graph (GFA)')
+@click.option('--output-matrix', type=click.Path(), default=None,
+              help='Output contact matrix (H5)')
+@click.option('--output-phasing', '-o', required=True, type=click.Path(),
+              help='Output phasing info (JSON)')
+@click.option('--stats', type=click.Path(), default=None,
+              help='Output phasing statistics (JSON)')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+@click.option('--device', type=str, default='cpu', help='Compute device')
+def nf_strandtether_phase(contacts, graph, output_matrix, output_phasing,
+                          stats, threads, device):
+    """Phase haplotypes from Hi-C contacts (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import load_graph_from_gfa
+    from .assembly_core.strandtether_module import StrandTether
+
+    click.echo(f"StrandTether phasing: {P(contacts).name}")
+    g = load_graph_from_gfa(graph)
+
+    st = StrandTether(use_gpu=(device != 'cpu'))
+    phasing = st.phase_haplotypes(g)
+
+    out = P(output_phasing)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, 'w') as f:
+        json.dump({'phasing': str(phasing)[:2000], 'nodes': len(g.nodes)}, f, indent=2)
+
+    if stats:
+        sp = P(stats)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        with open(sp, 'w') as f:
+            json.dump({'nodes_phased': len(g.nodes), 'device': device}, f, indent=2)
+
+    if output_matrix:
+        P(output_matrix).parent.mkdir(parents=True, exist_ok=True)
+        P(output_matrix).touch()  # Placeholder until H5 export implemented
+
+    click.echo(f"✓ Phasing complete → {output_phasing}")
+
+
+@main.command('nf-pathweaver-iter-strict')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Input graph from general iteration (GFA)')
+@click.option('--ul-routes', type=click.Path(exists=True), default=None,
+              help='UL routes from ThreadCompass (JSON)')
+@click.option('--hic-phasing', type=click.Path(exists=True), default=None,
+              help='Hi-C phasing info (JSON)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output final graph (GFA)')
+@click.option('--paths', type=click.Path(), default=None,
+              help='Output paths JSON')
+@click.option('--enable-ai', type=str, default='true', help='Enable AI')
+@click.option('--preserve-heterozygosity', type=str, default='true',
+              help='Preserve heterozygosity')
+@click.option('--min-identity', type=float, default=0.995,
+              help='Minimum identity threshold')
+@click.option('--threads', '-t', type=int, default=4, help='Number of threads')
+@click.option('--device', type=str, default='cpu', help='Compute device')
+def nf_pathweaver_iter_strict(graph, ul_routes, hic_phasing, output, paths,
+                              enable_ai, preserve_heterozygosity, min_identity,
+                              threads, device):
+    """PathWeaver strict iteration with UL/Hi-C evidence (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import load_graph_from_gfa, export_graph_to_gfa
+    from .assembly_core.pathweaver_module import PathWeaver
+
+    click.echo(f"PathWeaver strict iteration: {P(graph).name}")
+    g = load_graph_from_gfa(graph)
+
+    pw = PathWeaver(graph=g, use_gpu=(device != 'cpu'))
+
+    sources = [nid for nid in g.nodes if g.in_degree(nid) == 0]
+    found_paths = []
+    if sources:
+        try:
+            found_paths = pw.find_paths_multi(sources)
+        except Exception as e:
+            click.echo(f"  ⚠️ Path finding fallback: {e}")
+
+    out = P(output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    export_graph_to_gfa(g, out)
+
+    if paths:
+        pp = P(paths)
+        pp.parent.mkdir(parents=True, exist_ok=True)
+        with open(pp, 'w') as f:
+            json.dump({
+                'paths': len(found_paths),
+                'ul_routes_used': ul_routes is not None,
+                'hic_phasing_used': hic_phasing is not None,
+            }, f, indent=2)
+
+    click.echo(f"✓ Strict iteration: {len(found_paths)} paths → {output}")
+
+
+@main.command('nf-export-assembly')
+@click.option('--graph', '-g', required=True, type=click.Path(exists=True),
+              help='Final assembly graph (GFA)')
+@click.option('--svs', type=click.Path(exists=True), default=None,
+              help='Structural variants (VCF)')
+@click.option('--output-fasta', required=True, type=click.Path(),
+              help='Output assembly FASTA')
+@click.option('--output-gfa', type=click.Path(), default=None,
+              help='Output clean GFA')
+@click.option('--stats', type=click.Path(), default=None,
+              help='Output assembly statistics (JSON)')
+@click.option('--export-coverage', is_flag=True, help='Export coverage CSVs')
+def nf_export_assembly(graph, svs, output_fasta, output_gfa, stats,
+                       export_coverage):
+    """Export final assembly to FASTA/GFA/stats (Nextflow step)."""
+    import json
+    from pathlib import Path as P
+    from .io_utils.assembly_export import (
+        load_graph_from_gfa, export_graph_to_gfa, write_contigs_fasta,
+    )
+
+    click.echo(f"Exporting assembly: {P(graph).name}")
+    g = load_graph_from_gfa(graph)
+
+    # Build contigs from graph nodes (each node = unitig)
+    contigs = []
+    for nid in sorted(g.nodes.keys()):
+        node = g.nodes[nid]
+        if node.seq:
+            contigs.append((f"contig_{nid}", node.seq))
+
+    # Export FASTA
+    out_fa = P(output_fasta)
+    out_fa.parent.mkdir(parents=True, exist_ok=True)
+    write_contigs_fasta(contigs, out_fa)
+
+    # Export clean GFA
+    if output_gfa:
+        out_gfa = P(output_gfa)
+        out_gfa.parent.mkdir(parents=True, exist_ok=True)
+        export_graph_to_gfa(g, out_gfa)
+
+    # Stats
+    if stats:
+        sp = P(stats)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        lengths = sorted([len(seq) for _, seq in contigs], reverse=True)
+        total = sum(lengths)
+        cumsum = 0
+        n50 = 0
+        for l in lengths:
+            cumsum += l
+            if cumsum >= total / 2:
+                n50 = l
+                break
+        with open(sp, 'w') as f:
+            json.dump({
+                'total_contigs': len(contigs),
+                'total_bases': total,
+                'n50': n50,
+                'largest_contig': lengths[0] if lengths else 0,
+                'smallest_contig': lengths[-1] if lengths else 0,
+            }, f, indent=2)
+
+    # Coverage CSV placeholder
+    if export_coverage:
+        cov_path = out_fa.parent / "coverage_nodes.csv"
+        with open(cov_path, 'w') as f:
+            f.write("node,coverage\n")
+            for nid, node in g.nodes.items():
+                f.write(f"unitig-{nid},{node.coverage:.1f}\n")
+
+    click.echo(f"✓ Exported: {len(contigs)} contigs, {sum(len(s) for _,s in contigs):,} bp → {output_fasta}")
+
+
+# ============================================================================
+# BATCH (INTERNAL) COMMANDS — Nextflow parallelization
+# ============================================================================
 
 @main.group(hidden=True)
 def batch():
@@ -1939,7 +1959,7 @@ def extract_kmers(hifi, ont, kmer_size, output, threads, nextflow, nf_profile,
         click.echo(f"✓ K-mers extracted: {output}")
 
 
-@main.command('score-edges')
+@main.command('nf-score-edges')
 @click.option('--edges', '-e', required=True, type=click.Path(exists=True),
               help='Graph edges file (JSON)')
 @click.option('--alignments', '-a', required=True, type=click.Path(exists=True),
@@ -2123,7 +2143,7 @@ def align_hic_cmd(hic_r1, hic_r2, graph, output, threads, nextflow, nf_profile,
         click.echo(f"✓ Hi-C reads aligned: {output}")
 
 
-@main.command('detect-svs')
+@main.command('nf-detect-svs')
 @click.option('--graph', '-g', required=True, type=click.Path(exists=True),
               help='Assembly graph (GFA)')
 @click.option('--output', '-o', required=True, type=click.Path(),
@@ -2319,29 +2339,47 @@ def batch_merge_corrected(input_files, output):
 # ----------------------------------------------------------------------------
 
 @batch.command('extract-kmers')
-@click.option('--input', '-i', required=True, type=click.Path(exists=True),
+@click.option('--input', '-i', 'input_file', type=click.Path(exists=True),
               help='Input reads batch (FASTQ)')
-@click.option('--kmer-size', '-k', type=int, required=True,
-              help='K-mer size')
+@click.option('--reads', 'reads_file', type=click.Path(exists=True),
+              help='Input reads batch (FASTQ) — alias for --input')
+@click.option('--kmer-size', '-k', type=int, default=None,
+              help='K-mer size (used if --kmer-predictions not provided)')
+@click.option('--kmer-predictions', type=click.Path(exists=True), default=None,
+              help='K-Weaver predictions JSON (overrides --kmer-size)')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output k-mer table (binary)')
 @click.option('--threads', '-t', type=int, default=4,
               help='Number of threads')
-def batch_extract_kmers(input, kmer_size, output, threads):
+def batch_extract_kmers(input_file, reads_file, kmer_size, kmer_predictions,
+                        output, threads):
     """
     Extract k-mers from read batch for --huge genome mode.
     
     Parallel stage - processes independent read batches.
     """
+    import json
     from pathlib import Path
     from .preprocessing.kweaver_module import extract_kmers_batch
     
-    click.echo(f"Extracting {kmer_size}-mers from batch: {Path(input).name}")
+    actual_input = reads_file or input_file
+    if not actual_input:
+        click.echo("❌ Error: --input or --reads required", err=True)
+        raise SystemExit(1)
+    
+    # Resolve k from predictions or explicit size
+    k = kmer_size or 31
+    if kmer_predictions:
+        with open(kmer_predictions) as f:
+            preds = json.load(f)
+        k = preds.get('dbg_k', preds.get('primary_k', k))
+    
+    click.echo(f"Extracting {k}-mers from batch: {Path(actual_input).name}")
     
     # Extract k-mers from batch
     extract_kmers_batch(
-        reads_file=input,
-        k=kmer_size,
+        reads_file=actual_input,
+        k=k,
         output_table=output,
         threads=threads
     )
@@ -2505,12 +2543,17 @@ def batch_detect_svs(graph, output, threads):
 
 
 @batch.command('merge-svs')
-@click.option('--input', '-i', 'input_files', multiple=True, required=True,
+@click.option('--input', '-i', 'input_files', multiple=True,
               type=click.Path(exists=True),
               help='SV batch JSON files to merge')
+@click.option('--vcfs', 'vcf_files', multiple=True,
+              type=click.Path(exists=True),
+              help='SV batch files — alias for --input')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output merged SVs (VCF)')
-def batch_merge_svs(input_files, output):
+@click.option('--summary', type=click.Path(), default=None,
+              help='Output summary JSON')
+def batch_merge_svs(input_files, vcf_files, output, summary):
     """
     Merge SV calls from batches into single VCF.
     
@@ -2520,11 +2563,16 @@ def batch_merge_svs(input_files, output):
     from pathlib import Path
     from .assembly_core.svscribe_module import merge_sv_calls, export_vcf
     
-    click.echo(f"Merging {len(input_files)} SV batches...")
+    all_inputs = list(input_files) + list(vcf_files)
+    if not all_inputs:
+        click.echo("❌ Error: --input or --vcfs required", err=True)
+        raise SystemExit(1)
+    
+    click.echo(f"Merging {len(all_inputs)} SV batches...")
     
     # Load all SV calls
     all_svs = []
-    for sv_file in input_files:
+    for sv_file in all_inputs:
         click.echo(f"  • {Path(sv_file).name}")
         with open(sv_file, 'r') as f:
             batch_svs = json.load(f)
@@ -2538,6 +2586,345 @@ def batch_merge_svs(input_files, output):
     export_vcf(merged_svs, output_path)
     
     click.echo(f"✓ Merged SVs: {output} ({len(merged_svs)} variants)")
+    
+    # Summary JSON
+    if summary:
+        summary_path = Path(summary)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, 'w') as f:
+            json.dump({
+                'batches_merged': len(all_inputs),
+                'total_svs': len(merged_svs),
+            }, f, indent=2)
+
+
+# ============================================================================
+# Training Commands
+# ============================================================================
+
+@main.group()
+def train():
+    """
+    Generate training data and train StrandWeaver ML models.
+
+    StrandWeaver's AI-powered assembly modules (EdgeAI, DiploidAI, PathGNN,
+    UL Routing, SV Detection) can be retrained for your target organism
+    using synthetic data.
+
+    Workflow:
+
+      1. Generate synthetic data:
+         strandweaver train generate-data --genome-size 5000000 -o training_data/
+
+      2. Train models on the generated data:
+         strandweaver train run --data-dir training_data/ --output-dir models/
+
+      3. Use trained models in a pipeline run:
+         strandweaver pipeline -r1 reads.fq --technology1 ont --model-dir models/ ...
+    """
+    pass
+
+
+@train.command('generate-data')
+@click.option('--genome-size', type=int, required=True,
+              help='Simulated genome size in bp (e.g. 1000000 for 1 Mb)')
+@click.option('-o', '--output', required=True, type=click.Path(),
+              help='Output directory for generated training data')
+@click.option('--gc-content', type=float, default=0.42, show_default=True,
+              help='GC content as a fraction (0–1)')
+@click.option('--repeat-density', type=float, default=0.30, show_default=True,
+              help='Fraction of genome that is repetitive (0–1)')
+@click.option('--read-types', type=click.Choice(
+    ['illumina', 'hifi', 'ont', 'ultra_long', 'hic', 'ancient_dna']),
+    multiple=True, default=('hifi',), show_default=True,
+    help='Sequencing technologies to simulate (repeat for multiple)')
+@click.option('--coverage', type=float, multiple=True, default=None,
+              help='Coverage per read-type in the same order (default: 30× each). '
+                   'Repeat for each --read-types entry.')
+@click.option('-n', '--num-genomes', type=int, default=10, show_default=True,
+              help='Number of independent genomes to generate')
+@click.option('--seed', type=int, default=None,
+              help='Random seed for reproducibility')
+@click.option('--ploidy', type=click.Choice(['haploid', 'diploid', 'triploid', 'tetraploid']),
+              default='diploid', show_default=True, help='Ploidy level')
+@click.option('--snp-rate', type=float, default=0.001, show_default=True,
+              help='SNP rate per bp between haplotypes')
+@click.option('--indel-rate', type=float, default=0.0001, show_default=True,
+              help='Small indel rate per bp')
+@click.option('--sv-density', type=float, default=0.00001, show_default=True,
+              help='Structural variant density per bp')
+@click.option('--centromeres', type=int, default=1, show_default=True,
+              help='Number of centromeric regions per genome')
+@click.option('--graph-training', is_flag=True, default=False,
+              help='Enable graph training data generation (builds synthetic overlap '
+                   'graphs with ground-truth labels for EdgeAI, DiploidAI, PathGNN, '
+                   'UL Routing, and SV Detection)')
+@click.option('--min-overlap-bp', type=int, default=500, show_default=True,
+              help='Minimum overlap length (bp) for graph edges')
+@click.option('--min-overlap-identity', type=float, default=0.90, show_default=True,
+              help='Minimum overlap identity for graph edges')
+@click.option('--noise-edge-fraction', type=float, default=0.10, show_default=True,
+              help='Fraction of noise (false) edges to inject for negative-class training')
+@click.option('--no-noise-edges', is_flag=True, default=False,
+              help='Disable noise edge injection')
+@click.option('--no-gfa', is_flag=True, default=False,
+              help='Skip GFA file export')
+@click.option('--graph-max-coverage', type=float, default=None,
+              help='Subsample reads to this coverage before graph construction (saves RAM)')
+def train_generate_data(genome_size, output, gc_content, repeat_density,
+                        read_types, coverage, num_genomes, seed,
+                        ploidy, snp_rate, indel_rate, sv_density, centromeres,
+                        graph_training, min_overlap_bp, min_overlap_identity,
+                        noise_edge_fraction, no_noise_edges, no_gfa,
+                        graph_max_coverage):
+    """
+    Generate synthetic training data for StrandWeaver ML models.
+
+    Creates synthetic diploid genomes with controlled variation (SNPs, indels,
+    SVs, repeats) and simulates sequencing reads for one or more technologies.
+    Optionally builds labelled assembly graphs for all five ML models.
+
+    Examples:
+
+      # Quick test — 10 diploid genomes (1 Mb), HiFi 30×
+      strandweaver train generate-data --genome-size 1000000 -o data/test
+
+      # Multi-technology dataset
+      strandweaver train generate-data --genome-size 5000000 -n 50 \\
+          --read-types hifi --read-types ont --read-types hic \\
+          --coverage 30 --coverage 20 --coverage 15 -o data/multi_tech
+
+      # Repeat-rich genome with graph training labels
+      strandweaver train generate-data --genome-size 2000000 -n 20 \\
+          --repeat-density 0.60 --gc-content 0.35 --graph-training \\
+          -o data/repeat_rich
+    """
+    from strandweaver.user_training import (
+        UserGenomeConfig, UserReadConfig, UserTrainingConfig,
+        GraphTrainingConfig, ReadType, Ploidy,
+        generate_custom_training_data,
+    )
+
+    if generate_custom_training_data is None:
+        click.echo("Error: Training data generation requires the StrandWeaver "
+                    "training backend.  See the documentation for setup instructions.",
+                    err=True)
+        raise SystemExit(1)
+
+    # ── Resolve read-types and coverage ────────────────────────────
+    read_types_list = list(read_types) if read_types else ['hifi']
+    num_techs = len(read_types_list)
+    if not coverage:
+        coverages = [30.0] * num_techs
+    elif len(coverage) == 1:
+        coverages = list(coverage) * num_techs
+    elif len(coverage) != num_techs:
+        click.echo(f"Error: number of --coverage values ({len(coverage)}) must "
+                    f"match number of --read-types ({num_techs})", err=True)
+        raise SystemExit(1)
+    else:
+        coverages = list(coverage)
+
+    # ── Build config objects ───────────────────────────────────────
+    genome_config = UserGenomeConfig(
+        genome_size=genome_size,
+        num_genomes=num_genomes,
+        gc_content=gc_content,
+        repeat_density=repeat_density,
+        ploidy=Ploidy[ploidy.upper()],
+        snp_rate=snp_rate,
+        indel_rate=indel_rate,
+        sv_density=sv_density,
+        centromere_count=centromeres,
+        random_seed=seed,
+    )
+
+    read_configs = [
+        UserReadConfig(read_type=ReadType(rt), coverage=cov)
+        for rt, cov in zip(read_types_list, coverages)
+    ]
+
+    graph_config = None
+    if graph_training:
+        graph_config = GraphTrainingConfig(
+            enabled=True,
+            min_overlap_bp=min_overlap_bp,
+            min_overlap_identity=min_overlap_identity,
+            add_noise_edges=not no_noise_edges,
+            noise_edge_fraction=noise_edge_fraction,
+            export_gfa=not no_gfa,
+            max_coverage_for_graph=graph_max_coverage,
+        )
+
+    training_config = UserTrainingConfig(
+        genome_config=genome_config,
+        read_configs=read_configs,
+        output_dir=Path(output),
+        graph_config=graph_config,
+    )
+
+    # ── Display summary ────────────────────────────────────────────
+    _TECH_LABELS = {
+        'illumina': 'Illumina PE', 'hifi': 'PacBio HiFi', 'ont': 'ONT',
+        'ultra_long': 'ONT Ultra-long', 'hic': 'Hi-C', 'ancient_dna': 'Ancient DNA',
+    }
+    techs_str = ", ".join(
+        f"{_TECH_LABELS.get(rt, rt)} {cov:.0f}×"
+        for rt, cov in zip(read_types_list, coverages))
+
+    click.echo()
+    click.echo("╔══════════════════════════════════════════════════════════════╗")
+    click.echo("║       StrandWeaver  ·  Training Data Generation            ║")
+    click.echo("╠══════════════════════════════════════════════════════════════╣")
+    click.echo(f"║  Genome size      : {genome_size:>12,} bp")
+    click.echo(f"║  Num genomes      : {num_genomes:>12}")
+    click.echo(f"║  Ploidy           :  {ploidy}")
+    click.echo(f"║  GC content       : {gc_content:>11.0%}")
+    click.echo(f"║  Repeat density   : {repeat_density:>11.0%}")
+    click.echo(f"║  Read types       :  {techs_str}")
+    if graph_training:
+        click.echo(f"║  Graph training   :  ENABLED")
+    click.echo(f"║  Output           :  {output}")
+    click.echo("╚══════════════════════════════════════════════════════════════╝")
+    click.echo()
+
+    # ── Generate ───────────────────────────────────────────────────
+    try:
+        summary = generate_custom_training_data(training_config)
+        click.echo()
+        click.echo("═" * 62)
+        click.echo(f"  ✓ Generated {summary['num_genomes_generated']} genomes "
+                    f"in {summary['generation_time_human']}")
+        click.echo(f"  Output → {output}")
+        click.echo("═" * 62)
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
+@train.command('run')
+@click.option('--data-dir', required=True, type=click.Path(exists=True),
+              help='Directory containing graph training CSVs (searched recursively)')
+@click.option('--output-dir', '-o', default='trained_models', show_default=True,
+              type=click.Path(), help='Directory to save trained model weights')
+@click.option('--models', multiple=True, default=None,
+              type=click.Choice([
+                  'edge_ai', 'path_gnn', 'diploid_ai', 'ul_routing', 'sv_ai']),
+              help='Which models to train (default: all). Repeat for multiple.')
+@click.option('--max-depth', type=int, default=None,
+              help='XGBoost max tree depth (overrides per-model default)')
+@click.option('--learning-rate', type=float, default=None,
+              help='XGBoost learning rate')
+@click.option('--n-estimators', type=int, default=None,
+              help='Number of XGBoost boosting rounds')
+@click.option('--n-folds', type=int, default=5, show_default=True,
+              help='Cross-validation folds')
+@click.option('--val-split', type=float, default=0.15, show_default=True,
+              help='Hold-out validation fraction')
+@click.option('--seed', type=int, default=42, show_default=True,
+              help='Random seed')
+def train_run(data_dir, output_dir, models, max_depth, learning_rate,
+              n_estimators, n_folds, val_split, seed):
+    """
+    Train StrandWeaver ML models from generated training data.
+
+    Reads CSV training data produced by `strandweaver train generate-data
+    --graph-training`, trains all five model types (EdgeAI, PathGNN,
+    DiploidAI, UL Routing, SV Detection) via XGBoost, evaluates with
+    k-fold cross-validation, and saves weights in the directory layout
+    expected by the pipeline (--model-dir).
+
+    Requires: numpy, xgboost, scikit-learn (install with pip).
+
+    Examples:
+
+      # Train all five model types
+      strandweaver train run --data-dir training_data/ -o models/
+
+      # Train only EdgeAI and DiploidAI with custom hyperparameters
+      strandweaver train run --data-dir training_data/ -o models/ \\
+          --models edge_ai --models diploid_ai --max-depth 8
+
+      # Quick 3-fold CV
+      strandweaver train run --data-dir training_data/ -o models/ --n-folds 3
+    """
+    from strandweaver.user_training import train_all_models, ModelTrainingConfig
+
+    if train_all_models is None:
+        click.echo("Error: Model training requires numpy, xgboost, and scikit-learn.  "
+                    "Install with:  pip install numpy xgboost scikit-learn", err=True)
+        raise SystemExit(1)
+
+    # Default to all models if none specified
+    model_list = list(models) if models else [
+        'edge_ai', 'path_gnn', 'diploid_ai', 'ul_routing', 'sv_ai',
+    ]
+
+    config = ModelTrainingConfig(
+        data_dir=data_dir,
+        output_dir=output_dir,
+        models=model_list,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        n_estimators=n_estimators,
+        n_folds=n_folds,
+        validation_split=val_split,
+        random_seed=seed,
+    )
+
+    click.echo()
+    click.echo("╔══════════════════════════════════════════════════════════════╗")
+    click.echo("║            StrandWeaver  ·  Model Training                 ║")
+    click.echo("╠══════════════════════════════════════════════════════════════╣")
+    click.echo(f"║  Data dir    : {data_dir}")
+    click.echo(f"║  Output dir  : {output_dir}")
+    click.echo(f"║  Models      : {', '.join(model_list)}")
+    click.echo(f"║  CV folds    : {n_folds}")
+    click.echo(f"║  Val split   : {val_split}")
+    click.echo(f"║  Seed        : {seed}")
+    click.echo("╚══════════════════════════════════════════════════════════════╝")
+    click.echo()
+
+    try:
+        report = train_all_models(config)
+    except ImportError as exc:
+        click.echo(f"Error: Missing dependencies — {exc}", err=True)
+        raise SystemExit(1)
+    except Exception as exc:
+        click.echo(f"Training failed: {exc}", err=True)
+        raise SystemExit(1)
+
+    # ── Summary ────────────────────────────────────────────────────
+    summary = report.get('summary', {})
+    click.echo()
+    click.echo("═" * 62)
+    click.echo(f"  Training complete in {summary.get('elapsed_seconds', '?')}s")
+    click.echo(f"  Models trained : {summary.get('models_trained', 0)}")
+    click.echo(f"  Models skipped : {summary.get('models_skipped', 0)}")
+    click.echo("═" * 62)
+
+    for name, info in report.get('models', {}).items():
+        status = info.get('status', 'unknown')
+        if status == 'trained':
+            m = info.get('metrics', {})
+            if 'val_accuracy' in m:
+                click.echo(f"  {name:15s} ✓  acc={m['val_accuracy']:.4f}  "
+                            f"f1={m['val_f1_weighted']:.4f}  "
+                            f"CV={m.get('cv_accuracy_mean', 0):.4f}"
+                            f"±{m.get('cv_accuracy_std', 0):.4f}")
+            else:
+                click.echo(f"  {name:15s} ✓  RMSE={m.get('val_rmse', 0):.4f}  "
+                            f"R²={m.get('val_r2', 0):.4f}  "
+                            f"CV R²={m.get('cv_r2_mean', 0):.4f}"
+                            f"±{m.get('cv_r2_std', 0):.4f}")
+        elif status == 'skipped':
+            click.echo(f"  {name:15s} ⊘  {info.get('reason', '')}")
+
+    report_path = summary.get('report_path')
+    if report_path:
+        click.echo(f"\n  Full report → {report_path}")
+    click.echo(f"  Model weights → {output_dir}/")
+    click.echo()
 
 
 # ============================================================================

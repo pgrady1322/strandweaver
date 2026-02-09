@@ -18,7 +18,7 @@ process SCORE_EDGES_BATCH {
     
     script:
     """
-    python3 -m strandweaver.cli batch score-edges \\
+    strandweaver batch score-edges \\
         --edges ${edge_batch} \\
         --alignments ${alignments} \\
         --profiles ${error_profiles} \\

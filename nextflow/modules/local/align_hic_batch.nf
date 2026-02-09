@@ -17,7 +17,7 @@ process ALIGN_HIC_BATCH {
     
     script:
     """
-    python3 -m strandweaver.cli batch align-hic \\
+    strandweaver batch align-hic \\
         --hic-reads ${hic_batch} \\
         --graph ${graph} \\
         --output hic_contacts_${hic_batch.baseName}.txt \\

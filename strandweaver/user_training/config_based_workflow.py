@@ -24,29 +24,52 @@ from .training_config import (
     UserGenomeConfig,
     UserReadConfig,
     ReadType,
-    Ploidy
+    Ploidy,
+    GraphTrainingConfig
 )
 
-# Import from existing training infrastructure
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
+# Import from existing training infrastructure.
+# The 'training' package only exists in strandweaver-dev; in the release repo
+# these symbols are unavailable.  We guard the import so the rest of the
+# module (and the user_training package) remains importable.
+_TRAINING_BACKEND_AVAILABLE = False
+try:
+    import sys as _sys
+    _sys.path.append(str(Path(__file__).parent.parent))
 
-from training.synthetic_data_generator import (
-    GenomeConfig,
-    DiploidGenome,
-    generate_diploid_genome,
-    IlluminaConfig,
-    HiFiConfig,
-    ONTConfig,
-    ULConfig,
-    HiCConfig,
-    AncientDNAConfig,
-    simulate_illumina_reads,
-    simulate_long_reads,
-    simulate_hic_reads,
-    write_fastq,
-    write_paired_fastq
-)
+    from training.synthetic_data_generator import (  # type: ignore[import-not-found]
+        GenomeConfig,
+        DiploidGenome,
+        generate_diploid_genome,
+        IlluminaConfig,
+        HiFiConfig,
+        ONTConfig,
+        ULConfig,
+        HiCConfig,
+        AncientDNAConfig,
+        simulate_illumina_reads,
+        simulate_long_reads,
+        simulate_hic_reads,
+        write_fastq,
+        write_paired_fastq
+    )
+    _TRAINING_BACKEND_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    # Provide None stubs so the class can still be *imported* (just not used)
+    GenomeConfig = None  # type: ignore[assignment,misc]
+    DiploidGenome = None  # type: ignore[assignment,misc]
+    generate_diploid_genome = None  # type: ignore[assignment]
+    IlluminaConfig = None  # type: ignore[assignment,misc]
+    HiFiConfig = None  # type: ignore[assignment,misc]
+    ONTConfig = None  # type: ignore[assignment,misc]
+    ULConfig = None  # type: ignore[assignment,misc]
+    HiCConfig = None  # type: ignore[assignment,misc]
+    AncientDNAConfig = None  # type: ignore[assignment,misc]
+    simulate_illumina_reads = None  # type: ignore[assignment]
+    simulate_long_reads = None  # type: ignore[assignment]
+    simulate_hic_reads = None  # type: ignore[assignment]
+    write_fastq = None  # type: ignore[assignment]
+    write_paired_fastq = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +77,10 @@ logger = logging.getLogger(__name__)
 class TrainingDataGenerator:
     """
     Orchestrates user-configured training data generation.
+    
+    Requires the ``training`` package (available in strandweaver-dev).
+    If the package is not installed, instantiation will raise
+    ``RuntimeError`` with installation guidance.
     """
     
     def __init__(self, config: UserTrainingConfig):
@@ -62,7 +89,18 @@ class TrainingDataGenerator:
         
         Args:
             config: User training configuration
+        
+        Raises:
+            RuntimeError: If the training backend is not installed.
         """
+        if not _TRAINING_BACKEND_AVAILABLE:
+            raise RuntimeError(
+                "Training data generation requires the 'training' package "
+                "which is only available in strandweaver-dev.  Install it with:\n"
+                "  pip install strandweaver-dev\n"
+                "or clone the strandweaver-dev repo and install in editable mode."
+            )
+        
         self.config = config
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -125,6 +163,7 @@ class TrainingDataGenerator:
             Dictionary mapping read type to list of output files
         """
         output_files = {}
+        raw_simulated_reads: Dict[str, List] = {}  # tech -> [SimulatedRead]
         
         for read_config in self.config.read_configs:
             read_type = read_config.read_type
@@ -135,8 +174,8 @@ class TrainingDataGenerator:
                 config = IlluminaConfig(
                     coverage=read_config.coverage,
                     read_length=read_config.read_length_mean,
-                    insert_size=read_config.insert_size_mean or 500,
-                    insert_std=read_config.insert_size_std or 100,
+                    insert_size_mean=read_config.insert_size_mean or 350,
+                    insert_size_std=read_config.insert_size_std or 50,
                     error_rate=read_config.error_rate,
                     random_seed=genome_idx
                 )
@@ -145,6 +184,7 @@ class TrainingDataGenerator:
                 reads_A = simulate_illumina_reads(diploid_genome.hapA, config, 'A')
                 reads_B = simulate_illumina_reads(diploid_genome.hapB, config, 'B')
                 all_reads = reads_A + reads_B
+                raw_simulated_reads.setdefault('illumina', []).extend(all_reads)
                 
                 # Write paired FASTQ
                 r1_path = output_subdir / f'illumina_R1.fastq'
@@ -165,7 +205,8 @@ class TrainingDataGenerator:
                 reads_A = simulate_long_reads(diploid_genome.hapA, config, 'A', 'hifi')
                 reads_B = simulate_long_reads(diploid_genome.hapB, config, 'B', 'hifi')
                 all_reads = reads_A + reads_B
-                
+                raw_simulated_reads.setdefault('hifi', []).extend(all_reads)
+
                 fastq_path = output_subdir / f'hifi.fastq'
                 write_fastq(all_reads, str(fastq_path))
                 output_files[read_type.value] = [fastq_path]
@@ -183,7 +224,8 @@ class TrainingDataGenerator:
                 reads_A = simulate_long_reads(diploid_genome.hapA, config, 'A', 'ont')
                 reads_B = simulate_long_reads(diploid_genome.hapB, config, 'B', 'ont')
                 all_reads = reads_A + reads_B
-                
+                raw_simulated_reads.setdefault('ont', []).extend(all_reads)
+
                 fastq_path = output_subdir / f'ont.fastq'
                 write_fastq(all_reads, str(fastq_path))
                 output_files[read_type.value] = [fastq_path]
@@ -201,7 +243,8 @@ class TrainingDataGenerator:
                 reads_A = simulate_long_reads(diploid_genome.hapA, config, 'A', 'ul')
                 reads_B = simulate_long_reads(diploid_genome.hapB, config, 'B', 'ul')
                 all_reads = reads_A + reads_B
-                
+                raw_simulated_reads.setdefault('ultra_long', []).extend(all_reads)
+
                 fastq_path = output_subdir / f'ultralong.fastq'
                 write_fastq(all_reads, str(fastq_path))
                 output_files[read_type.value] = [fastq_path]
@@ -212,12 +255,12 @@ class TrainingDataGenerator:
                 config = HiCConfig(
                     num_pairs=num_pairs,
                     read_length=read_config.read_length_mean,
-                    error_rate=read_config.error_rate,
                     random_seed=genome_idx
                 )
                 
                 hic_pairs = simulate_hic_reads(diploid_genome.hapA, diploid_genome.hapB, config)
-                
+                raw_simulated_reads.setdefault('hic', []).extend(hic_pairs)
+
                 r1_path = output_subdir / f'hic_R1.fastq'
                 r2_path = output_subdir / f'hic_R2.fastq'
                 write_paired_fastq(hic_pairs, str(r1_path), str(r2_path))
@@ -227,10 +270,10 @@ class TrainingDataGenerator:
                 # Ancient DNA fragments
                 config = AncientDNAConfig(
                     coverage=read_config.coverage,
-                    read_length_mean=read_config.read_length_mean,
-                    read_length_std=read_config.read_length_std,
+                    fragment_length_mean=read_config.read_length_mean,
+                    fragment_length_std=read_config.read_length_std,
                     error_rate=read_config.error_rate,
-                    damage_rate=0.3,  # C->T damage rate
+                    damage_rate=0.20,  # C->T deamination at read ends
                     random_seed=genome_idx
                 )
                 
@@ -238,12 +281,13 @@ class TrainingDataGenerator:
                 reads_A = simulate_long_reads(diploid_genome.hapA, config, 'A', 'ont')
                 reads_B = simulate_long_reads(diploid_genome.hapB, config, 'B', 'ont')
                 all_reads = reads_A + reads_B
-                
+                raw_simulated_reads.setdefault('ancient_dna', []).extend(all_reads)
+
                 fastq_path = output_subdir / f'ancient_dna.fastq'
                 write_fastq(all_reads, str(fastq_path))
                 output_files[read_type.value] = [fastq_path]
         
-        return output_files
+        return output_files, raw_simulated_reads
     
     def generate_single_genome(self, genome_idx: int) -> Dict[str, Any]:
         """
@@ -267,12 +311,29 @@ class TrainingDataGenerator:
         genome_config = self._convert_to_internal_genome_config(genome_idx)
         
         if self.config.genome_config.ploidy == Ploidy.HAPLOID:
-            # Generate haploid (only hapA)
-            logger.info("Generating haploid genome...")
-            # TODO: Add haploid support to synthetic_data_generator
-            raise NotImplementedError("Haploid genome generation not yet implemented")
+            # Haploid: generate diploid genome but only use haplotype A
+            # (set snp/indel/sv rates to 0 so hapB == hapA, then ignore hapB)
+            logger.info("Generating haploid genome (using haplotype A only)...")
+            haploid_config = GenomeConfig(
+                length=genome_config.length,
+                gc_content=genome_config.gc_content,
+                repeat_density=genome_config.repeat_density,
+                tandem_repeat_fraction=genome_config.tandem_repeat_fraction,
+                num_centromeres=genome_config.num_centromeres,
+                gene_dense_fraction=genome_config.gene_dense_fraction,
+                snp_rate=0.0,
+                indel_rate=0.0,
+                sv_density=0.0,
+                sv_deletion_fraction=0.0,
+                sv_insertion_fraction=0.0,
+                sv_inversion_fraction=0.0,
+                sv_duplication_fraction=0.0,
+                sv_translocation_fraction=0.0,
+                random_seed=genome_config.random_seed
+            )
+            diploid_genome = generate_diploid_genome(haploid_config)
         else:
-            # Generate diploid
+            # Generate diploid (also used for triploid/tetraploid)
             diploid_genome = generate_diploid_genome(genome_config)
         
         # Save genome sequences
@@ -299,7 +360,24 @@ class TrainingDataGenerator:
             json.dump(sv_data, f, indent=2)
         
         # Simulate reads
-        output_files = self._simulate_reads_for_genome(diploid_genome, genome_idx, genome_dir)
+        output_files, raw_simulated_reads = self._simulate_reads_for_genome(
+            diploid_genome, genome_idx, genome_dir)
+
+        # ── Graph training data generation (if enabled) ──────────────────
+        graph_summary = None
+        if (self.config.graph_config
+                and self.config.graph_config.enabled
+                and raw_simulated_reads):
+            from .graph_training_data import generate_graph_training_data
+            logger.info("Generating graph training data...")
+            graph_summary = generate_graph_training_data(
+                all_simulated_reads=raw_simulated_reads,
+                diploid_genome=diploid_genome,
+                sv_truth_table=diploid_genome.sv_truth_table,
+                graph_config=self.config.graph_config,
+                output_dir=genome_dir,
+                genome_idx=genome_idx,
+            )
         
         # Create metadata
         metadata = {
@@ -310,7 +388,8 @@ class TrainingDataGenerator:
             'num_snps': len(diploid_genome.snp_positions),
             'num_indels': len(diploid_genome.indel_positions),
             'num_svs': len(diploid_genome.sv_truth_table),
-            'output_files': {k: [str(p) for p in v] for k, v in output_files.items()}
+            'output_files': {k: [str(p) for p in v] for k, v in output_files.items()},
+            'graph_training': graph_summary,
         }
         
         with open(genome_dir / 'metadata.json', 'w') as f:

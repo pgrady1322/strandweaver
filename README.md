@@ -411,7 +411,14 @@ strandweaver assemble \
 
 ### Post-Assembly Analysis
 15. **Misassembly Report**: Putative misassembly detection using multi-signal evidence (EdgeWarden confidence, coverage discontinuities, UL read conflicts, Hi-C violations). Outputs TSV and BED reports for genome-browser visualization.
-16. **Chromosome Classification**: Multi-tier scaffold classification (gene content, telomere detection, Hi-C self-contact patterns) to identify chromosomes vs. assembly artifacts.
+    - `--misassembly-report` / `--no-misassembly-report` — Enabled by default
+    - `--misassembly-min-confidence HIGH|MEDIUM|LOW` — Minimum confidence to flag (default: MEDIUM)
+    - `--misassembly-format tsv,bed,json` — Comma-separated output formats (default: tsv,bed)
+16. **Chromosome Classification**: Multi-tier scaffold classification to identify chromosomes vs. assembly artifacts.
+    - **Tier 1** (always): Length, coverage, GC, connectivity, telomere detection
+    - **Tier 2** (always): Gene content analysis (ORF / BLAST / Augustus / BUSCO)
+    - **Tier 3** (`--id-chromosomes-advanced`): Hi-C self-contact patterns, synteny
+    - Telomere flags: `--telomere-sequence` (default: TTAGGG), `--telomere-min-units` (default: 10), `--telomere-search-depth` (default: 5000 bp)
 
 ### Output Generation
 17. **GFA Export**: Assembly graphs in GFA format with sequences
@@ -419,6 +426,21 @@ strandweaver assemble \
 19. **Statistics**: N50, L50, coverage metrics, variation protection counts
 20. **SV Calls**: Structural variants in VCF and JSON formats
 21. **Phasing Info**: Haplotype assignments and confidence scores
+
+### Post-Assembly CLI Options Reference
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--misassembly-report` / `--no-misassembly-report` | Enabled | Generate misassembly report (TSV + BED) |
+| `--misassembly-min-confidence` | `MEDIUM` | Minimum confidence for flags: `HIGH`, `MEDIUM`, `LOW` |
+| `--misassembly-format` | `tsv,bed` | Comma-separated output formats: `tsv`, `bed`, `json` |
+| `--id-chromosomes` | Off | Enable scaffold → chromosome classification (Tiers 1-2) |
+| `--id-chromosomes-advanced` | Off | Add Hi-C pattern analysis & synteny (Tier 3) |
+| `--gene-detection-method` | `orf` | Gene detection: `orf` (no deps), `blast`, `augustus`, `busco` |
+| `--blast-db` | `nr` | BLAST database for gene detection |
+| `--telomere-sequence` | `TTAGGG` | Telomere repeat motif. Alternatives: `TTTAGGG` (plants), `TTAGG` (insects) |
+| `--telomere-min-units` | `10` | Minimum tandem repeats to call a telomere |
+| `--telomere-search-depth` | `5000` | Base-pairs to search at each scaffold end |
 
 ---
 
@@ -470,25 +492,48 @@ strandweaver assemble \
 
 ### User-Configurable Training Data Generation
 
-StrandWeaver includes a flexible system for generating custom training data. See the [user_training module documentation](strandweaver/user_training/README.md) for details.
+StrandWeaver includes a complete pipeline for generating custom training data, building labelled assembly graphs, and training the five graph-related ML models used by the assembler. See the [user_training module documentation](strandweaver/user_training/README.md) for full details.
 
-**Quick Example:**
+#### Step 1 — Generate Synthetic Genomes & Reads
+
 ```bash
-# Generate custom training data with specific parameters
-python -m strandweaver.user_training.generate_training_data \
+strandweaver train generate-data \
   --genome-size 5000000 \
-  --num-genomes 100 \
-  --read-types hifi ont ultra_long hic \
-  --coverage 30 20 10 15 \
-  --output training_data/custom
+  -n 100 \
+  --read-types hifi --read-types ont --read-types ultra_long --read-types hic \
+  --coverage 30 --coverage 20 --coverage 10 --coverage 15 \
+  --graph-training \
+  -o training_data/custom
+```
+
+The `--graph-training` flag enables graph synthesis: for every simulated genome, StrandWeaver builds an overlap graph from the reads, labels every edge and node with ground-truth haplotype/topology information, and exports feature CSVs for all five model types (EdgeAI, PathGNN, DiploidAI, UL Routing, SV Detection).
+
+#### Step 2 — Train Models
+
+```bash
+strandweaver train run \
+  --data-dir training_data/custom \
+  -o trained_models/
+```
+
+This discovers the CSV files under every `genome_*/graph_training/` subdirectory, trains XGBoost classifiers/regressors for each model type with cross-validation, and saves weights in the exact directory layout the pipeline expects.
+
+#### Step 3 — Assemble with Trained Models
+
+```bash
+strandweaver pipeline \
+  --hifi reads.fastq.gz \
+  --model-dir trained_models/ \
+  --output assembly/
 ```
 
 **Configurable Parameters:**
 - Genome characteristics: size, GC content, repeat density, ploidy
 - Variation: SNP rate, indel rate, SV density and types
 - Sequencing: read types (Illumina, HiFi, ONT, Ultra-long, Hi-C, Ancient DNA), coverage, error rates
+- Graph: overlap length/identity thresholds, noise edge fraction, GFA export
 
-See [strandweaver/user_training/README.md](strandweaver/user_training/README.md) for complete documentation on generating and using custom training data.
+See [strandweaver/user_training/README.md](strandweaver/user_training/README.md) for the complete parameter reference, graph training architecture, and advanced recipes.
 
 **Output Files**:
 ```
@@ -507,7 +552,7 @@ output/
 ├── coverage_ul.csv                # Ultra-long coverage (BandageNG)
 ├── coverage_hic.csv               # Hi-C support (BandageNG)
 ├── kmer_predictions.json          # K-mer optimization results
-├── error_profile.json             # Error profiling results
+├── error_profile_<tech>_<n>.json  # Per-technology error profiles
 └── pipeline.log                   # Complete execution log
 ```
 
@@ -693,7 +738,7 @@ pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver
 strandweaver download-models --destination ~/.strandweaver/models
 
 # Or train custom models (advanced)
-python3 -m strandweaver.user_training.generate_training_data --output training_data/
+strandweaver train generate-data --genome-size 5000000 -o training_data/
 # See strandweaver/user_training/README.md for details
 ```
 

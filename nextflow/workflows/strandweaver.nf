@@ -13,12 +13,12 @@ include { EXTRACT_KMERS_BATCH } from '../modules/local/extract_kmers_batch'
 include { BUILD_GRAPH } from '../modules/local/build_graph'
 include { SCORE_EDGES_BATCH } from '../modules/local/score_edges_batch'
 include { EDGEWARDEN_FILTER } from '../modules/local/classify_reads'
-include { PATHWEAVER_PASS_A } from '../modules/local/pathweaver_pass_a'
+include { PATHWEAVER_ITER_GENERAL } from '../modules/local/pathweaver_iter_general'
 include { MAP_UL_BATCH } from '../modules/local/map_ul_batch'
 include { THREADCOMPASS_AGGREGATE } from '../modules/local/classify_reads'
 include { ALIGN_HIC_BATCH } from '../modules/local/align_hic_batch'
 include { STRANDTETHER_PHASE } from '../modules/local/classify_reads'
-include { PATHWEAVER_PASS_B } from '../modules/local/classify_reads'
+include { PATHWEAVER_ITER_STRICT } from '../modules/local/classify_reads'
 include { DETECT_SVS_BATCH } from '../modules/local/detect_svs_batch'
 include { MERGE_SVS } from '../modules/local/classify_reads'
 include { EXPORT_ASSEMBLY } from '../modules/local/classify_reads'
@@ -135,28 +135,28 @@ workflow STRANDWEAVER {
             SCORE_EDGES_BATCH.out.collect()
         )
         
-        // ============== SEQUENTIAL: PATHWEAVER PASS A ==============
-        PATHWEAVER_PASS_A(
+        // ============== SEQUENTIAL: PATHWEAVER GENERAL ITERATION ==============
+        PATHWEAVER_ITER_GENERAL(
             EDGEWARDEN_FILTER.out.graph
         )
         
         // ============== PARALLEL: UL READ MAPPING ==============
         ul_routes = Channel.empty()
         
-        if (ont_ul_reads) {
+        if (params.ont_ul) {
             ul_batches = ont_ul_reads
                 .splitFastq(by: params.ul_batch_size, file: true)
                 .take(params.max_ul_jobs)
             
             MAP_UL_BATCH(
                 ul_batches,
-                PATHWEAVER_PASS_A.out.graph
+                PATHWEAVER_ITER_GENERAL.out.graph
             )
             
             // Aggregate UL mappings
             THREADCOMPASS_AGGREGATE(
                 MAP_UL_BATCH.out.collect(),
-                PATHWEAVER_PASS_A.out.graph
+                PATHWEAVER_ITER_GENERAL.out.graph
             )
             
             ul_routes = THREADCOMPASS_AGGREGATE.out.routes
@@ -165,7 +165,7 @@ workflow STRANDWEAVER {
         // ============== PARALLEL: HI-C PROCESSING ==============
         hic_phasing = Channel.empty()
         
-        if (hic_r1 && hic_r2) {
+        if (params.hic_r1 && params.hic_r2) {
             // Split Hi-C reads into batches for parallel alignment
             hic_batches = hic_r1.mix(hic_r2)
                 .splitFastq(by: params.hic_batch_size, file: true, pe: true)
@@ -173,21 +173,21 @@ workflow STRANDWEAVER {
             
             ALIGN_HIC_BATCH(
                 hic_batches,
-                PATHWEAVER_PASS_A.out.graph
+                PATHWEAVER_ITER_GENERAL.out.graph
             )
             
             // Build contact matrix and phase
             STRANDTETHER_PHASE(
                 ALIGN_HIC_BATCH.out.collect(),
-                PATHWEAVER_PASS_A.out.graph
+                PATHWEAVER_ITER_GENERAL.out.graph
             )
             
             hic_phasing = STRANDTETHER_PHASE.out.phasing
         }
         
-        // ============== SEQUENTIAL: PATHWEAVER PASS B ==============
-        PATHWEAVER_PASS_B(
-            PATHWEAVER_PASS_A.out.graph,
+        // ============== SEQUENTIAL: PATHWEAVER STRICT ITERATION ==============
+        PATHWEAVER_ITER_STRICT(
+            PATHWEAVER_ITER_GENERAL.out.graph,
             ul_routes.ifEmpty([]),
             hic_phasing.ifEmpty([])
         )
@@ -197,7 +197,7 @@ workflow STRANDWEAVER {
         
         if (params.detect_svs) {
             // Partition graph into regions for parallel SV detection
-            sv_batches = PATHWEAVER_PASS_B.out.graph
+            sv_batches = PATHWEAVER_ITER_STRICT.out.graph
                 .map { graph -> partitionGraph(graph, params.sv_batch_size) }
                 .flatten()
                 .take(params.max_sv_jobs)
@@ -217,7 +217,7 @@ workflow STRANDWEAVER {
         
         // ============== SEQUENTIAL: EXPORT ==============
         EXPORT_ASSEMBLY(
-            PATHWEAVER_PASS_B.out.graph,
+            PATHWEAVER_ITER_STRICT.out.graph,
             sv_vcf.ifEmpty([])
         )
     
@@ -230,18 +230,67 @@ workflow STRANDWEAVER {
 
 // Helper function to extract edges from graph into batches
 def extractEdges(graph_file, batch_size) {
-    // This would be implemented in a helper script
-    // Returns list of edge batch files
+    // Parse GFA L-lines and split into batch files
     def edges = []
-    // Parse GFA and split edges
+    def batch = []
+    def batch_num = 0
+    def count = 0
+    
+    graph_file.eachLine { line ->
+        if (line.startsWith('L\t')) {
+            batch.add(line)
+            count++
+            if (count >= batch_size) {
+                def batch_file = file("${graph_file.parent}/edge_batch_${batch_num}.tsv")
+                batch_file.text = batch.join('\n')
+                edges.add(batch_file)
+                batch = []
+                count = 0
+                batch_num++
+            }
+        }
+    }
+    // Flush remaining
+    if (batch.size() > 0) {
+        def batch_file = file("${graph_file.parent}/edge_batch_${batch_num}.tsv")
+        batch_file.text = batch.join('\n')
+        edges.add(batch_file)
+    }
     return edges
 }
 
 // Helper function to partition graph by nodes
 def partitionGraph(graph_file, nodes_per_partition) {
-    // This would be implemented in a helper script
-    // Returns list of graph partition files
+    // Parse GFA S-lines and create subgraph partitions
     def partitions = []
-    // Parse GFA and create partitions
+    def batch_s = []
+    def batch_l = []
+    def batch_num = 0
+    def node_count = 0
+    def all_l_lines = []
+    
+    // Collect S and L lines
+    graph_file.eachLine { line ->
+        if (line.startsWith('S\t')) {
+            batch_s.add(line)
+            node_count++
+            if (node_count >= nodes_per_partition) {
+                def batch_file = file("${graph_file.parent}/partition_${batch_num}.gfa")
+                batch_file.text = "H\tVN:Z:1.0\n" + batch_s.join('\n') + '\n'
+                partitions.add(batch_file)
+                batch_s = []
+                node_count = 0
+                batch_num++
+            }
+        } else if (line.startsWith('L\t')) {
+            all_l_lines.add(line)
+        }
+    }
+    // Flush remaining
+    if (batch_s.size() > 0) {
+        def batch_file = file("${graph_file.parent}/partition_${batch_num}.gfa")
+        batch_file.text = "H\tVN:Z:1.0\n" + batch_s.join('\n') + '\n'
+        partitions.add(batch_file)
+    }
     return partitions
 }

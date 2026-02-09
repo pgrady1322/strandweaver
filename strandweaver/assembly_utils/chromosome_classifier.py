@@ -5,9 +5,9 @@
 Chromosome Classifier - Identify microchromosomes and small chromosomal segments.
 
 Three-tier classification system:
-1. Fast pre-filtering (length, coverage, GC, connectivity)
+1. Fast pre-filtering (length, coverage, GC, connectivity, telomere detection)
 2. Gene content analysis (BLAST homology search)
-3. Advanced features (telomeres, Hi-C patterns, synteny) - optional
+3. Advanced features (Hi-C patterns, synteny) - optional
 
 Author: StrandWeaver Development Team
 Date: December 26, 2025
@@ -64,6 +64,9 @@ class ChromosomePrefilter:
     
     Uses simple metrics (length, coverage, GC, connectivity) to
     quickly eliminate obvious junk scaffolds.
+    
+    Includes telomere detection — a basic, fast check that strongly
+    indicates real chromosomal sequence.
     """
     
     def __init__(self, config: Dict[str, Any]):
@@ -77,6 +80,12 @@ class ChromosomePrefilter:
         self.max_length = config.get('max_length', 20_000_000)
         self.min_coverage_ratio = config.get('min_coverage_ratio', 0.3)
         self.max_coverage_ratio = config.get('max_coverage_ratio', 1.5)
+        
+        # Telomere detection parameters (configurable via CLI)
+        self.telomere_min_units = config.get('telomere_min_units', 10)
+        self.telomere_search_depth = config.get('telomere_search_depth', 5000)
+        self.telomere_sequence = config.get('telomere_sequence', 'TTAGGG')
+        
         self.logger = logging.getLogger(f"{__name__}.ChromosomePrefilter")
     
     def filter_candidates(
@@ -133,6 +142,17 @@ class ChromosomePrefilter:
             elif connections == 0:
                 score += 1.0  # Totally isolated is OK for microchromosomes
             
+            # 5. Telomere detection (strong chromosome indicator)
+            has_telomeres = self._detect_telomeres(scaffold.sequence)
+            if has_telomeres:
+                score += 4.0  # Strong boost — telomeres are definitive
+                self.logger.info(f"  {getattr(scaffold, 'id', '?')}: "
+                                 f"Telomeric repeats detected (Tier 1)")
+            
+            # Store telomere result in scaffold metadata for downstream use
+            if hasattr(scaffold, 'metadata') and isinstance(scaffold.metadata, dict):
+                scaffold.metadata['has_telomeres'] = has_telomeres
+            
             # Only keep candidates with reasonable scores
             if score >= 4.0:
                 candidates.append((scaffold, score))
@@ -175,6 +195,38 @@ class ChromosomePrefilter:
                         connections += 1
         
         return connections
+
+    def _detect_telomeres(self, sequence: str) -> bool:
+        """
+        Detect telomeric repeats at scaffold ends.
+
+        Searches for the user-configured telomere motif (and its reverse
+        complement) in the first and last *search_depth* bases of the
+        scaffold.  Returns True if at least *min_units* tandem copies are
+        found at either end.
+
+        Parameters are set via CLI flags:
+          --telomere-sequence   (default TTAGGG)
+          --telomere-search-depth (default 5000 bp)
+          --telomere-min-units  (default 10)
+        """
+        depth = min(self.telomere_search_depth, len(sequence))
+        start_region = sequence[:depth].upper()
+        end_region = sequence[-depth:].upper() if len(sequence) > depth else start_region
+
+        motif = self.telomere_sequence.upper()
+
+        # Also check the reverse complement (e.g. CCCTAA for TTAGGG)
+        complement = str.maketrans('ACGT', 'TGCA')
+        rc_motif = motif.translate(complement)[::-1]
+
+        for m in (motif, rc_motif):
+            if start_region.count(m) >= self.telomere_min_units:
+                return True
+            if end_region.count(m) >= self.telomere_min_units:
+                return True
+
+        return False
 
 
 # ============================================================================
@@ -462,14 +514,16 @@ class AdvancedChromosomeFeatures:
     """
     Advanced chromosome analysis (optional, slower).
     
-    - Telomere detection
     - Hi-C contact pattern analysis
     - Synteny with reference genome
+    
+    Note: Telomere detection was moved to Tier 1 (ChromosomePrefilter)
+    because it is a fast, basic check that strongly indicates real
+    chromosomal sequence.
     """
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize advanced features."""
-        self.check_telomeres = config.get('check_telomeres', True)
         self.check_hic_patterns = config.get('check_hic_patterns', True)
         self.check_synteny = config.get('check_synteny', False)
         self.reference_genome = config.get('reference_genome', None)
@@ -494,12 +548,11 @@ class AdvancedChromosomeFeatures:
         """
         results = {}
         
-        # Telomere detection
-        if self.check_telomeres:
-            has_telomeres = self._detect_telomeres(scaffold.sequence)
-            results['has_telomeres'] = has_telomeres
-            if has_telomeres:
-                self.logger.info(f"  {scaffold_id}: Telomeres detected!")
+        # Telomere results are already available from Tier 1 (ChromosomePrefilter)
+        # Propagate from scaffold metadata so the classification dataclass is populated
+        if hasattr(scaffold, 'metadata') and isinstance(scaffold.metadata, dict):
+            if 'has_telomeres' in scaffold.metadata:
+                results['has_telomeres'] = scaffold.metadata['has_telomeres']
         
         # Hi-C pattern analysis
         if self.check_hic_patterns and contact_map:
@@ -516,33 +569,6 @@ class AdvancedChromosomeFeatures:
                 self.logger.info(f"  {scaffold_id}: Aligns to {synteny['reference_chr']}")
         
         return results
-    
-    def _detect_telomeres(self, sequence: str) -> bool:
-        """
-        Detect telomeric repeats at sequence ends.
-        
-        Searches for common telomere motifs in first/last 5kb.
-        """
-        telomere_motifs = {
-            'vertebrate': 'TTAGGG',
-            'plant': 'TTTAGGG',
-            'insect': 'TTAGG',
-            'yeast': 'TGTGGGTGTGGTG'
-        }
-        
-        # Check both ends
-        start_region = sequence[:5000].upper()
-        end_region = sequence[-5000:].upper()
-        
-        for taxon, motif in telomere_motifs.items():
-            start_count = start_region.count(motif)
-            end_count = end_region.count(motif)
-            
-            # At least 10 repeats at either end
-            if start_count >= 10 or end_count >= 10:
-                return True
-        
-        return False
     
     def _analyze_hic_pattern(self, scaffold: Any, contact_map: Any) -> float:
         """
@@ -664,6 +690,11 @@ class ChromosomeClassifier:
                     scaffold, scaffold_id, contact_map
                 )
             
+            # Telomere info is always available from Tier 1 (stored in scaffold metadata)
+            has_telomeres = advanced_results.get('has_telomeres')
+            if has_telomeres is None and hasattr(scaffold, 'metadata') and isinstance(scaffold.metadata, dict):
+                has_telomeres = scaffold.metadata.get('has_telomeres')
+            
             # Combine results
             classification = ChromosomeClassification(
                 scaffold_id=scaffold_id,
@@ -672,7 +703,7 @@ class ChromosomeClassifier:
                 probability=gene_results['probability'],
                 scores=gene_results['scores'],
                 reasons=gene_results['reasons'],
-                has_telomeres=advanced_results.get('has_telomeres'),
+                has_telomeres=has_telomeres,
                 hic_pattern_score=advanced_results.get('hic_pattern_score'),
                 synteny_chromosome=advanced_results.get('synteny_chromosome')
             )

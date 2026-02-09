@@ -17,7 +17,7 @@ process EXTRACT_KMERS_BATCH {
     
     script:
     """
-    python3 -m strandweaver.cli batch extract-kmers \\
+    strandweaver batch extract-kmers \\
         --reads ${reads_batch} \\
         --kmer-predictions ${kmer_predictions} \\
         --output kmers_${reads_batch.baseName}.pkl \\

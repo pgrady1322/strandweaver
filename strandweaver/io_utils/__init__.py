@@ -60,6 +60,8 @@ from .assembly_export import (
     export_coverage_csv,
     export_for_bandageng,
     validate_gfa_file,
+    # Graph import
+    load_graph_from_gfa,
     # Assembly export (NEW)
     write_contigs_fasta,
     write_scaffolds_fasta,

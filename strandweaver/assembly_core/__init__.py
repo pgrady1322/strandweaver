@@ -21,13 +21,15 @@ from .dbg_engine_module import (
     DBGNode,
     KmerGraph,
     KmerNode,
-    KmerEdge
+    KmerEdge,
+    Anchor
 )
 
 from .string_graph_engine_module import (
     build_string_graph_from_dbg_and_ul,
     StringGraph,
-    ULAnchor
+    ULAnchor,
+    LongReadOverlay
 )
 
 from .edgewarden_module import EdgeWarden
@@ -73,64 +75,65 @@ __all__ = [
     "KmerGraph",
     "KmerNode",
     "KmerEdge",
-    "ULReadMapper",
+    "LongReadOverlay",
     "Anchor",
 ]
 
 
-def assemble(reads_file, output_file, **kwargs):
+def assemble(reads_file, output_file, technology='auto', **kwargs):
     """
-    Perform graph-based assembly.
+    Convenience function for graph-based assembly.
+    
+    Thin wrapper around the DBG engine: builds a De Bruijn graph from
+    the input reads and writes assembled contigs to *output_file*.
+    For the full pipeline (error profiling, correction, scaffolding,
+    finishing) use ``strandweaver pipeline`` or
+    :class:`~strandweaver.utils.pipeline.PipelineOrchestrator`.
     
     Args:
-        reads_file: Path to input reads/contigs file
-        output_file: Path to output assembly file
-        **kwargs: Assembly parameters
+        reads_file: Path to input reads (FASTA/FASTQ, optionally gzipped)
+        output_file: Path to output FASTA file
+        technology: Sequencing technology hint ('auto', 'illumina', 'ont',
+                    'pacbio').  Affects default k-mer size.
+        **kwargs: Forwarded to ``build_dbg_from_long_reads``
+                  (e.g. ``base_k``, ``min_coverage``)
     
     Returns:
-        Assembly statistics
+        dict with basic assembly statistics
     """
-    # TODO: Implement assembly
-    raise NotImplementedError("Assembly not yet implemented")
-
-
-class AssemblyGraph:
-    """Assembly graph data structure."""
+    from pathlib import Path
+    from ..io_utils import read_fastq, read_fasta, write_fasta
     
-    def __init__(self, graph_type='string'):
-        """
-        Initialize assembly graph.
-        
-        Args:
-            graph_type: Type of graph ('string', 'debruijn', or 'hybrid')
-        """
-        self.graph_type = graph_type
-        # TODO: Initialize graph structure
+    reads_path = Path(reads_file)
+    suffix = reads_path.name.replace('.gz', '').rsplit('.', 1)[-1].lower()
+    if suffix in ('fq', 'fastq'):
+        reads = list(read_fastq(reads_path))
+    else:
+        reads = list(read_fasta(reads_path))
     
-    def add_node(self, node_id, sequence):
-        """Add node to graph."""
-        raise NotImplementedError("Graph operations not yet implemented")
+    base_k = kwargs.pop('base_k', 31)
+    min_coverage = kwargs.pop('min_coverage', 2)
     
-    def add_edge(self, source, target, weight=1.0):
-        """Add edge to graph."""
-        raise NotImplementedError("Graph operations not yet implemented")
+    graph = build_dbg_from_long_reads(reads, base_k=base_k,
+                                       min_coverage=min_coverage, **kwargs)
     
-    def save_gfa(self, output_file):
-        """Save graph in GFA format."""
-        raise NotImplementedError("GFA export not yet implemented")
-
-
-def assemble(reads_file, output_file, **kwargs):
-    """
-    Perform graph-based assembly.
+    # Extract contigs from graph
+    contigs = []
+    for node_id, node in graph.nodes.items():
+        if len(node.sequence) >= kwargs.get('min_contig_length', 500):
+            from ..io_utils import SeqRead
+            contigs.append(SeqRead(
+                id=f"contig_{node_id}",
+                sequence=node.sequence,
+                quality=None
+            ))
     
-    Args:
-        reads_file: Path to input reads/contigs file
-        output_file: Path to output assembly file
-        **kwargs: Assembly parameters
+    write_fasta(contigs, Path(output_file))
     
-    Returns:
-        Assembly statistics
-    """
-    # TODO: Implement assembly
-    raise NotImplementedError("Assembly not yet implemented")
+    total_bp = sum(len(c.sequence) for c in contigs)
+    return {
+        'num_contigs': len(contigs),
+        'total_bases': total_bp,
+        'graph_nodes': len(graph.nodes),
+        'graph_edges': len(graph.edges),
+    }

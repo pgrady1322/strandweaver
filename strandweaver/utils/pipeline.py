@@ -329,8 +329,13 @@ class PipelineOrchestrator:
         use_ai = self.config['ai']['enabled'] and \
                  self.config['ai']['correction'].get('adaptive_kmer', {}).get('enabled', False)
         
-        # Initialize K-Weaver
-        predictor = KWeaverPredictor(use_ml=use_ai)
+        # Initialize K-Weaver with model_dir if configured
+        kweaver_model_dir = self._resolve_sub_model_path(
+            explicit_path=self.config['ai']['correction']['adaptive_kmer'].get('model_path'),
+            model_dir=self._resolve_model_dir(),
+            sub_folder='kweaver',
+        )
+        predictor = KWeaverPredictor(model_dir=kweaver_model_dir, use_ml=use_ai)
         
         # Extract features from first input file (representative sample)
         first_file = Path(self.state['read_files'][0])
@@ -365,50 +370,25 @@ class PipelineOrchestrator:
         self.logger.info(f"  Saved to: {kmer_path}")
     
     def _step_profile(self):
-        """Error profiling step."""
-        self.logger.info("Profiling sequencing errors...")
-        
+        """
+        Error profiling step — profiles EACH technology separately.
+
+        Each sequencing technology has fundamentally different error profiles
+        (substitution-dominated for Illumina, indel-dominated for ONT,
+        low-error for HiFi). The pipeline generates a per-technology error
+        profile and passes each to the corresponding corrector.
+        """
+        self.logger.info("Profiling sequencing errors (per-technology)...")
+
         # Get k-mer prediction from K-Weaver (if available)
         kmer_prediction = self.state.get('kmer_prediction')
         profile_k = kmer_prediction.dbg_k if kmer_prediction else 21  # Default fallback
-        
+
         self.logger.info(f"  Using k={profile_k} for error profiling (from K-Weaver)")
-        
-        # Sample reads from files (streaming) - don't load all into memory
+
         sample_size = self.config['profiling']['sample_size']
-        sampled_reads = []
-        total_reads = 0
-        
-        for reads_file in self.state['read_files']:
-            reads_path = Path(reads_file)
-            read_count = 0
-            
-            # Stream reads from file
-            for read in self._read_file_streaming(reads_path):
-                if len(sampled_reads) < sample_size:
-                    sampled_reads.append(read)
-                read_count += 1
-                
-                # Stop if we have enough samples
-                if len(sampled_reads) >= sample_size:
-                    break
-            
-            total_reads += read_count
-            self.logger.info(f"  Sampled from {reads_file}: {read_count:,} reads")
-            
-            if len(sampled_reads) >= sample_size:
-                break
-        
-        self.logger.info(f"Profiling {len(sampled_reads)} reads (sampled from {total_reads:,} total)")
-        
-        # Run profiler with K-Weaver k-mer size
-        profiler = ErrorProfiler(k=profile_k, sample_size=sample_size)
-        
-        # Use first reads file for profiling
-        primary_reads_file = Path(self.state['read_files'][0])
-        primary_technology_str = self.state['technologies'][0]
-        
-        # Convert string to ReadTechnology enum
+
+        # Convert string → ReadTechnology enum
         from strandweaver.preprocessing.read_classification_utility import ReadTechnology
         tech_map = {
             'illumina': ReadTechnology.ILLUMINA,
@@ -417,28 +397,73 @@ class PipelineOrchestrator:
             'ont_ultralong': ReadTechnology.ONT_ULTRALONG,
             'pacbio': ReadTechnology.PACBIO_HIFI,
             'hic': ReadTechnology.HI_C,
-            'auto': ReadTechnology.UNKNOWN
+            'auto': ReadTechnology.UNKNOWN,
         }
-        primary_technology = tech_map.get(primary_technology_str, ReadTechnology.UNKNOWN)
-        
-        profile_path = self.output_dir / "error_profile.json"
-        
-        # Call profile() with file path and technology
-        profile = profiler.profile(
-            reads_file=primary_reads_file,
-            technology=primary_technology,
-            output_file=profile_path
-        )
-        
-        self.logger.info(f"✓ Error profile saved: {profile_path}")
-        self.logger.info(f"  Technology detected: {profile.get('technology', 'unknown')}")
-        self.logger.info(f"  Mean quality: {profile.get('mean_quality', 0):.2f}")
-        
-        # Don't store reads - only metadata
-        self.state['error_profile'] = profile
+
+        # ----------------------------------------------------------------
+        # Profile each (read_file, technology) pair independently
+        # ----------------------------------------------------------------
+        error_profiles: Dict[str, Any] = {}          # keyed by technology string
+        read_files = self.state['read_files']
+        technologies = self.state['technologies']
+
+        for i, (reads_file, tech_str) in enumerate(zip(read_files, technologies)):
+            # Skip Hi-C reads — they are proximity ligation, not error-corrected
+            if tech_str == 'hic':
+                self.logger.info(f"  Skipping Hi-C file {Path(reads_file).name} (not error-profiled)")
+                continue
+
+            reads_path = Path(reads_file)
+            technology = tech_map.get(tech_str, ReadTechnology.UNKNOWN)
+
+            self.logger.info(f"\n  Profiling file {i+1}/{len(read_files)}: "
+                             f"{reads_path.name} ({tech_str})")
+
+            # Sample reads from this file
+            sampled_reads = []
+            read_count = 0
+            for read in self._read_file_streaming(reads_path):
+                if len(sampled_reads) < sample_size:
+                    sampled_reads.append(read)
+                read_count += 1
+                if len(sampled_reads) >= sample_size:
+                    break
+
+            self.logger.info(f"    Sampled {len(sampled_reads):,} / {read_count:,} reads")
+
+            # Run profiler
+            profiler = ErrorProfiler(k=profile_k, sample_size=sample_size)
+            profile_path = self.output_dir / f"error_profile_{tech_str}_{i}.json"
+
+            profile = profiler.profile(
+                reads_file=reads_path,
+                technology=technology,
+                output_file=profile_path,
+            )
+
+            self.logger.info(f"    ✓ Profile saved: {profile_path.name}")
+            self.logger.info(f"      Technology: {profile.get('technology', 'unknown')}")
+            self.logger.info(f"      Mean quality: {profile.get('mean_quality', 0):.2f}")
+
+            # Store profile keyed by tech string.
+            # If multiple files share a technology, keep the last profile
+            # (they should have similar error characteristics).
+            error_profiles[tech_str] = profile
+
+        # Store all per-technology profiles
+        self.state['error_profiles'] = error_profiles
+
+        # Backward compatibility: keep single 'error_profile' as the first profile
+        if error_profiles:
+            self.state['error_profile'] = next(iter(error_profiles.values()))
+        else:
+            self.state['error_profile'] = {}
+
+        self.logger.info(f"\n✓ Error profiling complete — "
+                         f"{len(error_profiles)} technology profile(s) generated")
     
     def _step_correct(self):
-        """Error correction step."""
+        """Error correction step — uses per-technology error profiles."""
         self.logger.info("Correcting sequencing errors...")
         
         # Load AI models if enabled
@@ -448,13 +473,34 @@ class PipelineOrchestrator:
         # Get K-Weaver k-mer predictions
         kmer_prediction = self.state.get('kmer_prediction')
         
+        # Per-technology error profiles from _step_profile()
+        error_profiles = self.state.get('error_profiles', {})
+        
         # Process each input file independently by technology
         # This minimizes read combining/separating operations
         technologies = self.state['technologies']
         read_files = self.state['read_files']
         
+        # Track Illumina paired-end relationship through correction
+        paired_idx = self.config.get('runtime', {}).get('illumina_paired_indices')
+        
         for i, (reads_file, tech) in enumerate(zip(read_files, technologies)):
-            self.logger.info(f"\n  Processing file {i+1}/{len(read_files)}: {Path(reads_file).name} ({tech})")
+            # Determine R1/R2 label for Illumina paired-end files
+            pe_label = ''
+            if tech == 'illumina' and paired_idx is not None:
+                if i == paired_idx[0]:
+                    pe_label = '_R1'
+                elif i == paired_idx[1]:
+                    pe_label = '_R2'
+            self.logger.info(f"\n  Processing file {i+1}/{len(read_files)}: {Path(reads_file).name} ({tech}{pe_label})")
+            
+            # Look up per-technology error profile (from _step_profile)
+            tech_profile = error_profiles.get(tech, {})
+            if tech_profile:
+                self.logger.info(f"    Using {tech} error profile "
+                                 f"(mean_quality={tech_profile.get('mean_quality', 0):.2f})")
+            else:
+                self.logger.info(f"    No error profile for {tech} — using defaults")
             
             # Select technology-specific corrector with K-Weaver k-mer
             if tech == 'illumina':
@@ -489,7 +535,7 @@ class PipelineOrchestrator:
             
             # Correct reads in streaming fashion
             input_path = Path(reads_file)
-            output_path = self.output_dir / f"corrected_{tech}_{i}.fastq"
+            output_path = self.output_dir / f"corrected_{tech}{pe_label}_{i}.fastq"
             
             corrected_count = 0
             with open(output_path, 'w') as out_f:
@@ -507,6 +553,16 @@ class PipelineOrchestrator:
             if tech not in self.state['corrected_files']:
                 self.state['corrected_files'][tech] = []
             self.state['corrected_files'][tech].append(str(output_path))
+        
+        # Preserve Illumina paired-end info for downstream consumers
+        if paired_idx is not None:
+            self.state['illumina_paired_corrected'] = {
+                'r1': str(self.output_dir / f"corrected_illumina_R1_{paired_idx[0]}.fastq"),
+                'r2': str(self.output_dir / f"corrected_illumina_R2_{paired_idx[1]}.fastq"),
+            }
+            self.logger.info(f"  Illumina paired-end files preserved: "
+                             f"R1={Path(self.state['illumina_paired_corrected']['r1']).name}, "
+                             f"R2={Path(self.state['illumina_paired_corrected']['r2']).name}")
     
     def _step_assemble(self):
         """Assembly step."""
@@ -526,18 +582,39 @@ class PipelineOrchestrator:
         # Prepare corrected read files by category
         corrected_files = self.state['corrected_files']
         
+        # ----------------------------------------------------------------
+        # Fallback: if correction was skipped (--skip-correction), use the
+        # original raw input reads so the assembly step has data to work with.
+        # ----------------------------------------------------------------
+        if not corrected_files:
+            self.logger.warning(
+                "No corrected files found (correction may have been skipped). "
+                "Falling back to raw input reads for assembly."
+            )
+            raw_reads = self.state['read_files']
+            raw_techs = self.state['technologies']
+            corrected_files = {}
+            for path, tech in zip(raw_reads, raw_techs):
+                tech_key = tech.lower()
+                if tech_key not in corrected_files:
+                    corrected_files[tech_key] = []
+                corrected_files[tech_key].append(str(path))
+        
         # Separate by read type for assembly (without loading into memory)
         long_read_files = []
         ul_read_files = []
         illumina_read_files = []
         
         for tech, files in corrected_files.items():
-            if tech == 'ont' or tech == 'pacbio':
+            if tech in ('ont', 'pacbio', 'hifi', 'ont_r10'):
                 long_read_files.extend(files)
             elif tech == 'ont_ultralong':
                 ul_read_files.extend(files)
             elif tech == 'illumina':
                 illumina_read_files.extend(files)
+            else:
+                # Unknown tech — treat as long reads by default
+                long_read_files.extend(files)
         
         # Prepare Hi-C data if enabled
         hic_data = None
@@ -577,22 +654,10 @@ class PipelineOrchestrator:
         self.logger.info(f"  Total bases: {sum(len(c.sequence) for c in assembly_result.contigs):,}")
         self.logger.info(f"  Output: {contigs_path}")
         
-        # Save contigs
-        contigs_path = self.output_dir / "contigs.fasta"
-        self._save_reads(assembly_result.contigs, contigs_path)
-        
-        # Save assembly graph
-        if assembly_result.dbg:
-            graph_path = self.output_dir / "assembly_graph.gfa"
-            self._save_graph(assembly_result.dbg, graph_path)
-        
-        self.logger.info(f"✓ Assembly complete")
-        self.logger.info(f"  Contigs: {len(assembly_result.contigs)}")
-        self.logger.info(f"  Total bases: {sum(len(c.sequence) for c in assembly_result.contigs):,}")
-        self.logger.info(f"  Output: {contigs_path}")
-        
         self.state['assembly_result'] = assembly_result
         self.state['final_contigs'] = assembly_result.contigs
+        # Store the assembly graph for downstream steps (classify_chromosomes)
+        self.state['graph'] = assembly_result.string_graph or assembly_result.dbg
     
     # ========================================================================
     # Assembly Orchestrator Methods (integrated from pipeline_orchestrator.py)
@@ -734,7 +799,9 @@ class PipelineOrchestrator:
         
         # Step 3: EdgeWarden - Filter low-quality edges
         self.logger.info("Step 3: Applying EdgeWarden to filter edges")
-        edge_warden = EdgeWarden(technology='illumina')
+        ew_model_dir = (self._ai_models.get('edge_ai') or 'models/edgewarden')
+        edge_warden = EdgeWarden(technology='illumina', model_dir=ew_model_dir)
+        edge_warden.load_models()
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
@@ -920,7 +987,7 @@ class PipelineOrchestrator:
         # Extract coverage directly from graph nodes (already computed during assembly)
         long_coverage = {node_id: node.coverage for node_id, node in graph_for_export.nodes.items()}
         ul_coverage = None  # UL coverage would need separate tracking if needed
-        hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
+        hic_coverage = self._calculate_hic_support_per_node(graph_for_export) if hic_data else None
         edge_scores = self._extract_edge_scores(graph_for_export)
         
         export_for_bandageng(
@@ -1004,7 +1071,9 @@ class PipelineOrchestrator:
         
         # Step 2: EdgeWarden - Filter low-quality edges
         self.logger.info("Step 2: Applying EdgeWarden to filter edges")
-        edge_warden = EdgeWarden(technology='pacbio_hifi')
+        ew_model_dir = (self._ai_models.get('edge_ai') or 'models/edgewarden')
+        edge_warden = EdgeWarden(technology='pacbio_hifi', model_dir=ew_model_dir)
+        edge_warden.load_models()
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
@@ -1172,7 +1241,7 @@ class PipelineOrchestrator:
         # Extract coverage directly from graph nodes (already computed during assembly)
         long_coverage = {node_id: node.coverage for node_id, node in graph_for_export.nodes.items()}
         ul_coverage = None  # UL coverage would need separate tracking if needed
-        hic_coverage = self._calculate_hic_coverage(graph_for_export) if hic_data else None
+        hic_coverage = self._calculate_hic_support_per_node(graph_for_export) if hic_data else None
         edge_scores = self._extract_edge_scores(graph_for_export)
         
         export_for_bandageng(
@@ -1256,7 +1325,9 @@ class PipelineOrchestrator:
         
         # Step 2: EdgeWarden - Filter low-quality edges (critical for noisy ONT)
         self.logger.info("Step 2: Applying EdgeWarden to filter edges")
-        edge_warden = EdgeWarden(technology='nanopore_r10')
+        ew_model_dir = (self._ai_models.get('edge_ai') or 'models/edgewarden')
+        edge_warden = EdgeWarden(technology='nanopore_r10', model_dir=ew_model_dir)
+        edge_warden.load_models()
         result.dbg = edge_warden.filter_graph(result.dbg)
         result.stats['edges_after_warden'] = len(result.dbg.edges)
         
@@ -1390,7 +1461,6 @@ class PipelineOrchestrator:
         self,
         corrected_reads: List[SeqRead],
         ul_reads: Optional[List[SeqRead]],
-        ul_anchors: Optional[List[ULAnchor]],
         hic_data: Optional[Any],
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
@@ -1407,7 +1477,7 @@ class PipelineOrchestrator:
         
         # Ancient DNA uses similar flow to HiFi (same module ordering)
         return self._run_hifi_pipeline(
-            corrected_reads, ul_reads, ul_anchors, hic_data, ml_k_model
+            corrected_reads, ul_reads, hic_data, ml_k_model
         )
     
     def _run_mixed_pipeline(
@@ -1415,7 +1485,6 @@ class PipelineOrchestrator:
         corrected_reads: List[SeqRead],
         long_reads: Optional[List[SeqRead]],
         ul_reads: Optional[List[SeqRead]],
-        ul_anchors: Optional[List[ULAnchor]],
         hic_data: Optional[Any],
         ml_k_model: Optional[Any]
     ) -> AssemblyResult:
@@ -1431,7 +1500,7 @@ class PipelineOrchestrator:
         reads_for_dbg = long_reads if long_reads else corrected_reads
         
         return self._run_hifi_pipeline(
-            reads_for_dbg, ul_reads, ul_anchors, hic_data, ml_k_model
+            reads_for_dbg, ul_reads, hic_data, ml_k_model
         )
     
     def _run_olc(self, corrected_reads: List[SeqRead]) -> List[SeqRead]:
@@ -1750,6 +1819,9 @@ class PipelineOrchestrator:
             tether = StrandTether(min_contact_threshold=min_contact_threshold)
             contact_map = tether.build_contact_map(hic_pairs)
             
+            # Persist contact map for downstream steps (chromosome classification)
+            self.state['hic_contact_map'] = contact_map
+            
             total_contacts = len(contact_map.contacts)
             self.logger.info(f"  Contact map built: {total_contacts} unique contacts")
             
@@ -1873,10 +1945,9 @@ class PipelineOrchestrator:
         Returns:
             Number of edges with type='hic'
         """
-        # Placeholder implementation
         count = 0
         if isinstance(graph, DBGGraph):
-            for edge in graph.edges:
+            for _edge_id, edge in graph.edges.items():
                 if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
                     count += 1
         elif isinstance(graph, StringGraph) and hasattr(graph, 'dbg'):
@@ -1894,18 +1965,17 @@ class PipelineOrchestrator:
         Returns:
             Percentage (0-100) of nodes connected by Hi-C edges
         """
-        # Placeholder implementation
         if isinstance(graph, DBGGraph):
             if not graph.nodes:
                 return 0.0
             
             nodes_with_hic = set()
-            for edge in graph.edges:
+            for _edge_id, edge in graph.edges.items():
                 if hasattr(edge, 'edge_type') and edge.edge_type == 'hic':
-                    if hasattr(edge, 'source'):
-                        nodes_with_hic.add(edge.source)
-                    if hasattr(edge, 'target'):
-                        nodes_with_hic.add(edge.target)
+                    source_id = edge.source if hasattr(edge, 'source') else edge.from_id
+                    target_id = edge.target if hasattr(edge, 'target') else edge.to_id
+                    nodes_with_hic.add(source_id)
+                    nodes_with_hic.add(target_id)
             
             return (len(nodes_with_hic) / len(graph.nodes)) * 100.0
         
@@ -2450,12 +2520,6 @@ class PipelineOrchestrator:
             # TODO: Implement gap filling
             self.logger.info("  ⚠ Gap filling not yet implemented")
         
-        # Claude AI finishing (if enabled)
-        if self.config['ai']['claude']['use_for_finishing']:
-            self.logger.info("  Running Claude AI finishing...")
-            # TODO: Implement Claude finishing
-            self.logger.info("  ⚠ Claude finishing not yet implemented")
-        
         # Apply minimum contig length filter
         min_len = self.config.get('runtime', {}).get('min_contig_length', 0)
         if min_len > 0:
@@ -2583,9 +2647,9 @@ class PipelineOrchestrator:
         Classify unconnected scaffolds to identify potential microchromosomes.
         
         Uses multi-tier classification:
-        - Tier 1: Fast pre-filtering (length, coverage, GC, connectivity)
+        - Tier 1: Fast pre-filtering (length, coverage, GC, connectivity, telomere detection)
         - Tier 2: Gene content analysis (BLAST homology search)
-        - Tier 3: Advanced features (telomeres, Hi-C patterns) - optional
+        - Tier 3: Advanced features (Hi-C patterns, synteny) - optional
         """
         # Check if enabled
         if not self.config.get('chromosome_classification', {}).get('enabled', False):
@@ -2720,11 +2784,18 @@ class PipelineOrchestrator:
         checkpoint_data = {
             'step': step,
             'timestamp': datetime.now().isoformat(),
-            'completed_steps': self.state['completed_steps'],
+            'completed_steps': list(self.state['completed_steps']),
             'state_files': {
                 'reads': str(self.output_dir / "corrected_reads.fastq") if step in ['correct', 'assemble', 'finish'] else None,
                 'contigs': str(self.output_dir / "contigs.fasta") if step in ['assemble', 'finish'] else None,
-            }
+            },
+            # Persist serializable state so resume can restore it
+            'pipeline_state': {
+                'read_files': self.state.get('read_files'),
+                'technologies': self.state.get('technologies'),
+                'kmer_prediction': self.state.get('kmer_prediction'),
+                'corrected_files': self.state.get('corrected_files', {}),
+            },
         }
         
         with open(checkpoint_path, 'w') as f:
@@ -2733,7 +2804,7 @@ class PipelineOrchestrator:
         self.logger.debug(f"Checkpoint created: {checkpoint_path}")
     
     def _find_last_checkpoint(self) -> str:
-        """Find the last completed checkpoint."""
+        """Find the last completed checkpoint and restore pipeline state."""
         checkpoints = sorted(self.checkpoint_dir.glob("*.checkpoint"))
         
         if not checkpoints:
@@ -2748,6 +2819,16 @@ class PipelineOrchestrator:
         
         completed_step = checkpoint_data['step']
         
+        # Restore pipeline state from checkpoint
+        if 'pipeline_state' in checkpoint_data:
+            saved = checkpoint_data['pipeline_state']
+            self.state['completed_steps'] = checkpoint_data.get('completed_steps', [])
+            self.state['read_files'] = saved.get('read_files', self.state['read_files'])
+            self.state['technologies'] = saved.get('technologies', self.state['technologies'])
+            self.state['kmer_prediction'] = saved.get('kmer_prediction')
+            self.state['corrected_files'] = saved.get('corrected_files', {})
+            self.logger.info(f"Restored pipeline state from checkpoint ({len(self.state['completed_steps'])} steps completed)")
+        
         # Resume from next step after completed
         if completed_step in self.steps:
             step_index = self.steps.index(completed_step)
@@ -2759,15 +2840,21 @@ class PipelineOrchestrator:
     
     def _read_file_streaming(self, reads_path: Path):
         """Stream reads from file without loading all into memory."""
-        if reads_path.suffix in ['.fq', '.fastq']:
+        # Strip .gz/.gzip suffix to inspect the real format extension
+        # (read_fastq and read_fasta handle gzip decompression natively)
+        effective_path = reads_path
+        if reads_path.suffix.lower() in ['.gz', '.gzip']:
+            effective_path = Path(reads_path.stem)  # e.g. reads.fastq.gz → reads.fastq
+
+        if effective_path.suffix in ['.fq', '.fastq']:
             yield from read_fastq(reads_path)
-        elif reads_path.suffix in ['.fa', '.fasta']:
+        elif effective_path.suffix in ['.fa', '.fasta']:
             yield from read_fasta(reads_path)
         else:
             # Try FASTQ first, fall back to FASTA
             try:
                 yield from read_fastq(reads_path)
-            except:
+            except Exception:
                 yield from read_fasta(reads_path)
     
     def _write_read_to_file(self, read: SeqRead, file_handle):
@@ -2844,11 +2931,15 @@ class PipelineOrchestrator:
         
         return dict(coverage)
     
-    def _calculate_hic_coverage(self, graph: Union[DBGGraph, StringGraph]) -> Dict[int, float]:
+    def _calculate_hic_support_per_node(self, graph: Union[DBGGraph, StringGraph]) -> Dict[int, float]:
         """
         Calculate per-node Hi-C support from Hi-C edges.
         
-        Counts Hi-C contact edges connected to each node.
+        Counts Hi-C contact edges connected to each node.  Used by
+        ``export_for_bandageng`` which expects ``dict[int, float]``.
+        
+        See also ``_calculate_hic_coverage`` which returns a single float
+        percentage.
         
         Args:
             graph: DBGGraph or StringGraph object with Hi-C edges
@@ -2939,52 +3030,322 @@ class PipelineOrchestrator:
     
     def _save_graph(self, graph, output_path: Path):
         """Save assembly graph to GFA format."""
-        # TODO: Implement GFA export
-        self.logger.debug(f"Graph export to {output_path} not yet implemented")
+        try:
+            export_graph_to_gfa(graph, output_path)
+            self.logger.info(f"Assembly graph saved to {output_path}")
+        except Exception as e:
+            self.logger.warning(f"Graph export failed: {e}")
     
     def _load_ai_models(self) -> Dict[str, Any]:
-        """Load AI models (lazy loading)."""
+        """
+        Load AI models from disk (lazy, one-shot).
+
+        Resolution order for each model:
+          1. Explicit ``model_path`` in the per-model config block
+          2. ``<model_dir>/<sub_folder>`` (central model directory)
+          3. Package defaults inside the source tree
+
+        If a model file is not found the slot is set to ``None`` and the
+        pipeline falls back to classical heuristics for that component.
+        """
         if self._ai_models:
             return self._ai_models
-        
-        self.logger.info("Loading AI models...")
-        
-        # Load correction models
+
+        model_dir = self._resolve_model_dir()
+        self.logger.info(f"Loading AI models (model_dir={model_dir or 'auto'})...")
+        loaded, skipped = 0, 0
+
+        # ------------------------------------------------------------------
+        # 1. Correction: adaptive_kmer (KWeaverPredictor pickle files)
+        # ------------------------------------------------------------------
         if self.config['ai']['correction']['adaptive_kmer']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['adaptive_kmer'] = None
-            self.logger.info("  ✓ AdaptiveKmerAI (not yet trained)")
-        
+            model = self._try_load_pickle_model(
+                explicit_path=self.config['ai']['correction']['adaptive_kmer'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='kweaver',
+                model_name='adaptive_kmer',
+            )
+            self._ai_models['adaptive_kmer'] = model
+            if model is not None:
+                loaded += 1
+                self.logger.info("  ✓ AdaptiveKmerAI loaded")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ AdaptiveKmerAI not found — using classical k-mer selection")
+
+        # ------------------------------------------------------------------
+        # 2. Correction: base_error_classifier (pickle)
+        # ------------------------------------------------------------------
         if self.config['ai']['correction']['base_error_classifier']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['base_error_classifier'] = None
-            self.logger.info("  ✓ BaseErrorClassifierAI (not yet trained)")
-        
-        # Load assembly models
+            model = self._try_load_pickle_model(
+                explicit_path=self.config['ai']['correction']['base_error_classifier'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='error_classifier',
+                model_name='base_error_classifier',
+            )
+            self._ai_models['base_error_classifier'] = model
+            if model is not None:
+                loaded += 1
+                self.logger.info("  ✓ BaseErrorClassifierAI loaded")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ BaseErrorClassifierAI not found — using classical correction")
+
+        # ------------------------------------------------------------------
+        # 3. Assembly: edge_ai (EdgeWarden per-technology pkl files)
+        #    Stored as model_dir path — EdgeWarden loads its own files.
+        # ------------------------------------------------------------------
         if self.config['ai']['assembly']['edge_ai']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['edge_ai'] = None
-            self.logger.info("  ✓ EdgeAI (not yet trained)")
-        
+            ew_dir = self._resolve_sub_model_path(
+                explicit_path=self.config['ai']['assembly']['edge_ai'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='edgewarden',
+            )
+            self._ai_models['edge_ai'] = str(ew_dir) if ew_dir and ew_dir.is_dir() else None
+            if self._ai_models['edge_ai']:
+                loaded += 1
+                self.logger.info(f"  ✓ EdgeWardenAI models directory: {ew_dir}")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ EdgeWardenAI models not found — using rule-based filtering")
+
+        # ------------------------------------------------------------------
+        # 4. Assembly: path_gnn (PyTorch checkpoint)
+        # ------------------------------------------------------------------
         if self.config['ai']['assembly']['path_gnn']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['path_gnn'] = None
-            self.logger.info("  ✓ PathGNN (not yet trained)")
-        
+            gnn_path = self._resolve_sub_model_path(
+                explicit_path=self.config['ai']['assembly']['path_gnn'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='pathgnn',
+                file_name='pathgnn_model.pt',
+            )
+            self._ai_models['path_gnn'] = str(gnn_path) if gnn_path and gnn_path.exists() else None
+            if self._ai_models['path_gnn']:
+                loaded += 1
+                self.logger.info(f"  ✓ PathGNN checkpoint: {gnn_path}")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ PathGNN model not found — using heuristic path scoring")
+
+        # ------------------------------------------------------------------
+        # 5. Assembly: diploid_ai (pickle or torch)
+        # ------------------------------------------------------------------
         if self.config['ai']['assembly']['diploid_ai']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['diploid_ai'] = None
-            self.logger.info("  ✓ DiploidAI (not yet trained)")
-        
+            dip_path = self._resolve_sub_model_path(
+                explicit_path=self.config['ai']['assembly']['diploid_ai'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='diploid',
+                file_name='diploid_model.pkl',
+            )
+            self._ai_models['diploid_ai'] = self._try_load_pickle_file(dip_path) if dip_path else None
+            if self._ai_models['diploid_ai']:
+                loaded += 1
+                self.logger.info("  ✓ DiploidAI loaded")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ DiploidAI not found — using heuristic phasing")
+
+        # ------------------------------------------------------------------
+        # 6. Assembly: ul_routing_ai (pickle or torch)
+        # ------------------------------------------------------------------
         if self.config['ai']['assembly']['ul_routing_ai']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['ul_routing_ai'] = None
-            self.logger.info("  ✓ ULRoutingAI (not yet trained)")
-        
+            ul_path = self._resolve_sub_model_path(
+                explicit_path=self.config['ai']['assembly']['ul_routing_ai'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='ul_routing',
+                file_name='ul_routing_model.pkl',
+            )
+            self._ai_models['ul_routing_ai'] = self._try_load_pickle_file(ul_path) if ul_path else None
+            if self._ai_models['ul_routing_ai']:
+                loaded += 1
+                self.logger.info("  ✓ ULRoutingAI loaded")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ ULRoutingAI not found — using heuristic UL routing")
+
+        # ------------------------------------------------------------------
+        # 7. Assembly: sv_ai (pickle or torch)
+        # ------------------------------------------------------------------
         if self.config['ai']['assembly']['sv_ai']['enabled']:
-            # TODO: Load actual model
-            self._ai_models['sv_ai'] = None
-            self.logger.info("  ✓ SVAI (not yet trained)")
-        
+            sv_path = self._resolve_sub_model_path(
+                explicit_path=self.config['ai']['assembly']['sv_ai'].get('model_path'),
+                model_dir=model_dir,
+                sub_folder='sv_detector',
+                file_name='sv_detector_model.pkl',
+            )
+            self._ai_models['sv_ai'] = self._try_load_pickle_file(sv_path) if sv_path else None
+            if self._ai_models['sv_ai']:
+                loaded += 1
+                self.logger.info("  ✓ SVDetectorAI loaded")
+            else:
+                skipped += 1
+                self.logger.warning("  ⚠ SVDetectorAI not found — using heuristic SV detection")
+
+        # ------------------------------------------------------------------
+        # Summary
+        # ------------------------------------------------------------------
+        total = loaded + skipped
+        self.logger.info(f"AI model loading complete: {loaded}/{total} loaded, "
+                         f"{skipped}/{total} using classical fallback")
+        if skipped > 0 and loaded == 0:
+            self.logger.warning(
+                "No trained AI models found. The pipeline will run in fully "
+                "classical mode. Train models with `strandweaver train` and "
+                "set --model-dir to the output directory."
+            )
+
         return self._ai_models
 
+    # ------------------------------------------------------------------
+    # Model loading helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_model_dir(self) -> Optional[Path]:
+        """Return the central model directory from config, or None."""
+        raw = self.config['ai'].get('model_dir')
+        if raw:
+            p = Path(raw)
+            if p.is_dir():
+                return p
+            self.logger.warning(f"Configured model_dir does not exist: {p}")
+        return None
+
+    def _resolve_sub_model_path(
+        self,
+        explicit_path: Optional[str],
+        model_dir: Optional[Path],
+        sub_folder: str,
+        file_name: Optional[str] = None,
+    ) -> Optional[Path]:
+        """
+        Resolve a model file / directory path.
+
+        Priority: explicit_path > model_dir/sub_folder[/file_name]
+        """
+        if explicit_path:
+            p = Path(explicit_path)
+            if p.exists():
+                return p
+        if model_dir:
+            base = model_dir / sub_folder
+            if file_name:
+                candidate = base / file_name
+                if candidate.exists():
+                    return candidate
+            elif base.is_dir():
+                return base
+        return None
+
+    def _try_load_pickle_model(
+        self,
+        explicit_path: Optional[str],
+        model_dir: Optional[Path],
+        sub_folder: str,
+        model_name: str,
+    ) -> Optional[Any]:
+        """
+        Try to load a pickle-serialised model.
+
+        Looks for ``<model_name>.pkl`` inside the resolved directory.
+        """
+        resolved = self._resolve_sub_model_path(
+            explicit_path=explicit_path,
+            model_dir=model_dir,
+            sub_folder=sub_folder,
+        )
+        if resolved is None:
+            return None
+
+        # If resolved is a file, load it directly
+        if resolved.is_file():
+            return self._try_load_pickle_file(resolved)
+
+        # If resolved is a directory, look for the canonical file
+        candidate = resolved / f"{model_name}.pkl"
+        if candidate.exists():
+            return self._try_load_pickle_file(candidate)
+
+        # Also check for any .pkl in the directory (single-model folders)
+        pkl_files = list(resolved.glob("*.pkl"))
+        if len(pkl_files) == 1:
+            return self._try_load_pickle_file(pkl_files[0])
+
+        return None
+
+    @staticmethod
+    def _try_load_pickle_file(path: Optional[Path]) -> Optional[Any]:
+        """Safely load a single pickle file, returning None on any error."""
+        if path is None or not Path(path).exists():
+            return None
+        try:
+            with open(path, 'rb') as f:
+                return pickle.load(f)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to load model from {path}: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    # Model saving helpers (for use after training)
+    # ------------------------------------------------------------------
+
+    def save_all_models(self, output_dir: Union[str, Path]) -> Dict[str, str]:
+        """
+        Save all currently loaded AI models to *output_dir*.
+
+        Produces the canonical layout expected by ``_load_ai_models()``:
+
+            output_dir/
+              kweaver/adaptive_kmer.pkl
+              error_classifier/base_error_classifier.pkl
+              edgewarden/edgewarden_<tech>.pkl  (+ scaler_<tech>.pkl)
+              pathgnn/pathgnn_model.pt
+              diploid/diploid_model.pkl
+              ul_routing/ul_routing_model.pkl
+              sv_detector/sv_detector_model.pkl
+
+        Returns:
+            Dict mapping model name → saved path (or skip reason).
+        """
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        report: Dict[str, str] = {}
+
+        for name, sub, ext in [
+            ('adaptive_kmer',        'kweaver',          'pkl'),
+            ('base_error_classifier','error_classifier',  'pkl'),
+            ('diploid_ai',           'diploid',           'pkl'),
+            ('ul_routing_ai',        'ul_routing',        'pkl'),
+            ('sv_ai',                'sv_detector',       'pkl'),
+        ]:
+            model = self._ai_models.get(name)
+            if model is None:
+                report[name] = 'skipped (not loaded)'
+                continue
+            dest = out / sub
+            dest.mkdir(parents=True, exist_ok=True)
+            fpath = dest / f"{name}.{ext}"
+            try:
+                with open(fpath, 'wb') as f:
+                    pickle.dump(model, f, protocol=pickle.HIGHEST_PROTOCOL)
+                report[name] = str(fpath)
+                self.logger.info(f"  Saved {name} → {fpath}")
+            except Exception as e:
+                report[name] = f'FAILED: {e}'
+                self.logger.error(f"  Failed to save {name}: {e}")
+
+        # EdgeWarden — delegate to its own save_models()
+        ew_dir_str = self._ai_models.get('edge_ai')
+        if ew_dir_str:
+            report['edge_ai'] = f'models dir: {ew_dir_str} (save via EdgeWarden.save_models())'
+        else:
+            report['edge_ai'] = 'skipped (not loaded)'
+
+        # PathGNN — torch checkpoint
+        gnn_path = self._ai_models.get('path_gnn')
+        if gnn_path:
+            report['path_gnn'] = f'checkpoint: {gnn_path} (save via torch.save())'
+        else:
+            report['path_gnn'] = 'skipped (not loaded)'
+
+        self.logger.info(f"Model save report: {json.dumps(report, indent=2)}")
+        return report

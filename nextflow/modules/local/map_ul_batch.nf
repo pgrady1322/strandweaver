@@ -17,7 +17,7 @@ process MAP_UL_BATCH {
     
     script:
     """
-    python3 -m strandweaver.cli batch map-ul \\
+    strandweaver batch map-ul \\
         --ul-reads ${ul_batch} \\
         --graph ${graph} \\
         --output ul_mappings_${ul_batch.baseName}.json \\

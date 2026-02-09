@@ -21,7 +21,7 @@ process PROFILE_ERRORS {
     def hifi_arg = hifi_reads.name != 'NO_FILE1' ? "--hifi ${hifi_reads}" : ""
     def ont_arg = ont_reads.name != 'NO_FILE2' ? "--ont ${ont_reads}" : ""
     """
-    python3 -m strandweaver.cli batch profile-errors \\
+    strandweaver batch profile-errors \\
         ${hifi_arg} \\
         ${ont_arg} \\
         --output error_profiles.json \\

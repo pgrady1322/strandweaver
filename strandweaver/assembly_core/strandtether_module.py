@@ -14,8 +14,8 @@ Unified Hi-C integration module combining:
 5. New join detection from high-contact region pairs
 6. Orientation and distance validation
 
-Designed to work downstream of ThreadCompass and upstream of PathWeaver Pass B,
-providing long-range chromatin contact evidence for iterative refinement.
+Designed to work downstream of ThreadCompass and upstream of PathWeaver strict
+iteration, providing long-range chromatin contact evidence for iterative refinement.
 
 Author: StrandWeaver Development Team
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md

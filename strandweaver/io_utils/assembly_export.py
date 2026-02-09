@@ -395,6 +395,104 @@ def export_for_bandageng(
 
 
 # ============================================================================
+#                           GFA READER (Graph Import)
+# ============================================================================
+
+def load_graph_from_gfa(gfa_path: str | Path) -> Any:
+    """
+    Load an assembly graph from a GFA v1 file.
+
+    Reconstructs a KmerGraph (DBGGraph) with nodes and edges from S-lines
+    and L-lines.  The graph object satisfies the GraphLike protocol and can
+    be passed to any StrandWeaver module that accepts a graph.
+
+    Args:
+        gfa_path: Path to a GFA v1 file (as produced by export_graph_to_gfa)
+
+    Returns:
+        A KmerGraph instance populated with nodes and edges.
+
+    Raises:
+        FileNotFoundError: If gfa_path does not exist.
+        ValueError: On malformed GFA lines.
+    """
+    from ..assembly_core.dbg_engine_module import KmerGraph, KmerNode, KmerEdge
+
+    gfa_path = Path(gfa_path)
+    if not gfa_path.exists():
+        raise FileNotFoundError(f"GFA file not found: {gfa_path}")
+
+    graph = KmerGraph()
+    edge_counter = 0
+
+    logger.info(f"Loading graph from GFA: {gfa_path}")
+
+    with open(gfa_path, 'r') as f:
+        for line_no, raw_line in enumerate(f, 1):
+            line = raw_line.rstrip('\n')
+            if not line or line.startswith('#'):
+                continue
+
+            parts = line.split('\t')
+            record_type = parts[0]
+
+            if record_type == 'H':
+                # Header line — skip
+                continue
+
+            elif record_type == 'S':
+                # Segment: S <name> <sequence> [LN:i:<length>] ...
+                if len(parts) < 3:
+                    logger.warning(f"GFA line {line_no}: malformed S-line, skipping")
+                    continue
+                name = parts[1]
+                sequence = parts[2] if parts[2] != '*' else ''
+                # Extract LN tag if present
+                length = len(sequence)
+                for tag in parts[3:]:
+                    if tag.startswith('LN:i:'):
+                        length = int(tag.split(':')[2])
+                        break
+
+                node_id = parse_unitig_name(name) if name.startswith('unitig-') else line_no
+                node = KmerNode(
+                    id=node_id,
+                    seq=sequence,
+                    coverage=1.0,
+                    length=length,
+                )
+                graph.add_node(node)
+
+            elif record_type == 'L':
+                # Link: L <from> <from_orient> <to> <to_orient> <overlap>
+                if len(parts) < 6:
+                    logger.warning(f"GFA line {line_no}: malformed L-line, skipping")
+                    continue
+                from_name = parts[1]
+                to_name = parts[3]
+
+                from_id = parse_unitig_name(from_name) if from_name.startswith('unitig-') else int(from_name)
+                to_id = parse_unitig_name(to_name) if to_name.startswith('unitig-') else int(to_name)
+
+                edge = KmerEdge(
+                    id=edge_counter,
+                    from_id=from_id,
+                    to_id=to_id,
+                    coverage=1.0,
+                    overlap_len=0,
+                )
+                graph.add_edge(edge)
+                edge_counter += 1
+
+            # P, W, C lines ignored for now
+
+    logger.info(
+        f"Loaded graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges"
+    )
+    return graph
+
+
+# ============================================================================
 #                           UTILITY FUNCTIONS
 # ============================================================================
 

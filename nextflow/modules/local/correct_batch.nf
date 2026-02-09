@@ -16,7 +16,7 @@ process CORRECT_BATCH {
     
     script:
     """
-    python3 -m strandweaver.cli batch correct \\
+    strandweaver batch correct \\
         --input ${batch_file} \\
         --profiles ${error_profiles} \\
         --technology ${tech_type} \\
