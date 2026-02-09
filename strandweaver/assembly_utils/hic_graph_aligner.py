@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-Hi-C Graph Aligner - Parse and align Hi-C reads to assembly graph.
+StrandWeaver v0.1.0
 
-This module provides functionality to:
-1. Parse Hi-C FASTQ paired-end reads
-2. Parse aligned Hi-C BAM/SAM files
-3. Align Hi-C reads to graph nodes using k-mer matching
-4. Convert alignments to HiCPair objects for StrandTether
-
-Supports both:
-- Direct FASTQ alignment (k-mer based, fast)
-- Pre-aligned BAM/SAM parsing (from minimap2, bwa, etc.)
+Hi-C Graph Aligner — parse and align Hi-C reads to assembly graph nodes
+via k-mer matching or pre-aligned BAM/SAM.
 
 Author: StrandWeaver Development Team
-Date: December 24, 2025
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -544,3 +536,6 @@ __all__ = [
     'HiCAlignment',
     'align_hic_reads_to_graph',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

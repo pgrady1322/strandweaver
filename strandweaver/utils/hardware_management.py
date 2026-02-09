@@ -1,34 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Unified GPU Acceleration Module for StrandWeaver Assembly.
-
-Consolidates all GPU-accelerated components into a single module:
-- Backend management (CUDA/MPS/CPU)
-- Sequence alignment
-- K-mer operations
-- Hi-C contact matrices
-- Spectral clustering
-- Path finding
-- Ultralong read mapping
-- Contig building
-
-Supports both NVIDIA CUDA and Apple Silicon MPS with explicit backend selection.
-NO automatic detection to prevent hijacking HPC scheduler resources.
-
-Backend Selection (REQUIRED):
-- 'cuda': NVIDIA GPU via CuPy
-- 'mps': Apple Silicon GPU via PyTorch
-- 'cpu': CPU-only (no GPU)
-
-Environment Variables:
-- STRANDWEAVER_GPU_BACKEND: Set backend ('cuda', 'mps', 'cpu')
-- If not set, defaults to 'cpu' (safe for HPC)
+Unified GPU Acceleration — backend management (CUDA/MPS/CPU), k-mer ops,
+Hi-C contact matrices, spectral clustering, path finding, and UL mapping.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -695,7 +674,6 @@ class GPUKmerExtractor:
         """GPU-accelerated k-mer extraction (MPS or CUDA)."""
         # For now, use optimized CPU path since string operations
         # don't benefit much from GPU. The real speedup is in graph construction.
-        # This method signature is kept for compatibility.
         return self._extract_kmers_cpu(sequences)
     
     def _extract_kmers_cpu(self, sequences: List[str]) -> Dict[str, int]:
@@ -2950,3 +2928,6 @@ class DeviceManager:
     
     def __repr__(self) -> str:
         return f"DeviceManager(device='{self.device_str}', type='{self.device_type}')"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

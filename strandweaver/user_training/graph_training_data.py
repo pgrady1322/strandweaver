@@ -1,38 +1,14 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Graph Training Data Generator
-
-Builds synthetic overlap/assembly graphs from simulated reads and a known
-diploid genome, then computes feature vectors and ground-truth labels for
-every ML model in the StrandWeaver pipeline:
-
-  ┌───────────────────────────────────────────────────────────────────────┐
-  │  Model            Features   Labels                                  │
-  │  ─────────────    ────────   ──────────────────────────────────────   │
-  │  EdgeAI           17-D       TRUE/ALLELIC/REPEAT/SV_BREAK/CHIMERIC   │
-  │  DiploidAI        42-D       HAP_A/HAP_B/BOTH/REPEAT/UNKNOWN        │
-  │  PathGNN          16-D edge  binary (in correct path or not)         │
-  │  UL Routing       12-D       route quality score (0–1 regression)    │
-  │  SV Detection     14-D       del/ins/inv/dup/trans/none              │
-  └───────────────────────────────────────────────────────────────────────┘
-
-Pipeline:
-
-  simulated reads  ──►  all-vs-all overlap detection
-                              │
-                        overlap graph (nodes=reads, edges=overlaps)
-                              │
-                   ┌──────────┼───────────┐
-                   ▼          ▼           ▼
-              feature      ground-truth   GFA
-              extraction   labeling       export
-                   │          │
-                   ▼          ▼
-              training-ready CSV files
+Graph Training Data Generator — builds synthetic overlap graphs from simulated
+reads and computes feature vectors and ground-truth labels for all ML models.
 
 Author: StrandWeaver Development Team
-License: Dual License (Academic/Commercial)
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations
@@ -1250,3 +1226,6 @@ def generate_graph_training_data(
                 f"{len(sv_rows)} SV rows, {len(ul_rows)} UL rows")
 
     return summary
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,11 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Sequence utility functions for StrandWeaver.
-
-Provides common sequence manipulation and analysis functions.
+Sequence utility functions — k-mer extraction, GC content, reverse complement,
+and homopolymer counting.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -137,3 +139,6 @@ __all__ = [
     'reverse_complement',
     'count_homopolymers'
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

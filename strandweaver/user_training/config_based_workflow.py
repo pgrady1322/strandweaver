@@ -1,14 +1,14 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Config-Based Training Workflow
-
-User-configurable training data generation that allows fine-grained control
-over genome and read parameters without predefined scenarios.
+Config-Based Training Workflow — fine-grained training data generation
+from user-specified genome and read parameters.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
-
 """
 
 import logging
@@ -495,3 +495,6 @@ def generate_custom_training_data(config: UserTrainingConfig) -> Dict[str, Any]:
     """
     generator = TrainingDataGenerator(config)
     return generator.generate_all()
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

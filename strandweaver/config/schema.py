@@ -1,11 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Configuration schema for StrandWeaver.
-
-Defines all available configuration parameters with defaults and validation.
+Configuration schema — all parameters with defaults and validation.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -416,3 +417,6 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
                         errors.append(f"Model path not found: {model_path} ({model_type}.{model_name})")
     
     return errors
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,28 +1,19 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Read Error Profiling Utility for StrandWeaver.
-
-Consolidated module for analyzing sequencing errors using k-mer analysis.
-Provides detailed error profiles for technology-specific correction without
-requiring a reference genome.
-
-SECTIONS:
-1. Error Type Definitions and Pattern Classification
-2. K-mer Spectrum Analysis
-3. Main Error Profiler
+Read Error Profiling — k-mer based error analysis for technology-specific
+correction without a reference genome.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # =============================================================================
 # SECTION 1: ERROR TYPE DEFINITIONS AND PATTERN CLASSIFICATION
 # =============================================================================
-# Source: error_patterns.py
 
 import json
 import numpy as np
@@ -281,7 +272,6 @@ class ErrorPatternAnalyzer:
 # =============================================================================
 # SECTION 2: K-MER SPECTRUM ANALYSIS
 # =============================================================================
-# Source: kmer_analysis.py
 
 @dataclass
 class KmerSpectrum:
@@ -615,7 +605,6 @@ class KmerAnalyzer:
 # =============================================================================
 # SECTION 3: MAIN ERROR PROFILER
 # =============================================================================
-# Source: profiler.py
 
 @dataclass
 class ErrorProfile:
@@ -1000,3 +989,6 @@ class ErrorProfiler:
                     temp_path.unlink()
         
         return profiles
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

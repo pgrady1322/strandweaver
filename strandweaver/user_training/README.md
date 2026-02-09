@@ -31,10 +31,6 @@ strandweaver train generate-data --genome-size 5000000 -n 50 \
 strandweaver train run --data-dir training_data/with_graphs -o trained_models/
 ```
 
-> **Legacy:** The standalone `python -m strandweaver.user_training.generate_training_data` and
-> `python -m strandweaver.user_training.train_models` commands still work but are
-> no longer the recommended invocation.
-
 ### Python API
 
 ```python
@@ -307,7 +303,7 @@ pip install strandweaver[ai]
 pip install xgboost scikit-learn numpy
 ```
 
-> **Note:** PyTorch is optional — it is only used to create a small scaffold checkpoint for PathGNN pipeline compatibility. All five core models are trained with XGBoost.
+> **Note:** PyTorch is optional — it is only used to create a small scaffold checkpoint for PathGNN pipeline integration. All five core models are trained with XGBoost.
 
 ### Quick Start
 
@@ -543,8 +539,8 @@ cat trained_models/training_report.json | python -m json.tool
 
 # ── 5. Assemble with your trained models ──────────────────────────
 strandweaver pipeline \
-  -r1 sample_hifi.fastq.gz --technology1 pacbio \
-  -r2 sample_ul.fastq.gz --technology2 ont_ultralong \
+  --hifi-long-reads sample_hifi.fastq.gz \
+  --ont-ul sample_ul.fastq.gz \
   --hic-r1 sample_R1.fastq.gz --hic-r2 sample_R2.fastq.gz \
   --model-dir trained_models/ \
   -o assembly_output/ -t 32

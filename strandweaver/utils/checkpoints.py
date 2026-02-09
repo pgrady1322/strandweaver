@@ -1,11 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Checkpoint management for StrandWeaver pipelines.
-
-Handles creation, storage, and recovery of pipeline checkpoints.
+Checkpoint management for resumable pipeline execution.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -178,3 +179,6 @@ class CheckpointManager:
         checkpoint_num = existing + 1
         
         return f"{checkpoint_num:03d}_{step_name}"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

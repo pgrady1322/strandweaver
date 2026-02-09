@@ -1,22 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-ThreadCompass: Ultra-Long (UL) Read Integration and Routing Engine.
-
-This module integrates UL reads to:
-1. Map UL reads to the assembly graph using adaptive k-mer sizing
-2. Detect new joins from UL spanning evidence
-3. Score existing joins for UL support/conflict
-4. Produce 0.0-1.0 normalized UL confidence scores
-
-Designed to work downstream of PathWeaver general iteration and upstream of
-PathWeaver strict iteration, assuming no Hi-C, providing long-range evidence
-for iterative refinement.
+ThreadCompass — ultra-long read integration and routing engine.
+Maps UL reads to the assembly graph, detects and scores joins, and
+produces normalized confidence scores.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -1562,3 +1554,6 @@ __all__ = [
     'resolve_ul_routes',
     'map_reads_batch',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

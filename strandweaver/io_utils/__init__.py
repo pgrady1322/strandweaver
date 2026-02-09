@@ -1,16 +1,14 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-I/O Module for StrandWeaver.
+I/O Module — core read structures, FASTQ/FASTA I/O, graph/contig export,
+and user corrections.
 
-Reorganized module structure:
-1. io_core.py - Core read structures, FASTQ/FASTA I/O, ReadCollection
-2. assembly_export.py - Graph/contig/path export (GFA, FASTA, CSV, TSV)
-3. user_input.py - User corrections, breaks, joins, exclusions
-
-Technology classification moved to: strandweaver.preprocessing.read_classification
-
-
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 # Core data structures and file I/O
@@ -29,7 +27,7 @@ from .io_core import (
     get_fasta_stats,
 )
 
-# Technology handling - backward compatibility imports from preprocessing
+# Technology handling imports
 from ..preprocessing.read_classification_utility import (
     ReadTechnology,
     ReadRole,
@@ -174,3 +172,6 @@ __all__ = [
     "load_exclusion_list",
     "apply_manual_edits",
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

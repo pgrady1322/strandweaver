@@ -1,26 +1,13 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Command-line interface for user-configurable training data generation.
-
-Generate synthetic genomes and simulated sequencing reads that can be used to
-train (or retrain) StrandWeaver's ML models for a target organism.
-
-Example usage:
-
-  # Quick test — 10 × 1 Mb diploid genomes, HiFi 30×
-  python -m strandweaver.user_training.generate_training_data \\
-      --genome-size 1000000 --output training_data/test
-
-  # Multi-tech dataset for a repeat-rich organism
-  python -m strandweaver.user_training.generate_training_data \\
-      --genome-size 5000000 --num-genomes 50 \\
-      --gc-content 0.38 --repeat-density 0.55 \\
-      --read-types hifi ont hic --coverage 30 20 15 \\
-      --output training_data/repeat_rich
+CLI for user-configurable training data generation — synthetic genomes and
+simulated reads for training or retraining StrandWeaver ML models.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -302,3 +289,6 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

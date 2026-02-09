@@ -1,22 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Assembly Export Module - Export Graphs, Contigs, and Paths
-
-This module handles all assembly output operations including:
-- Graph exports (GFA format for visualization)
-- Assembly sequence exports (contigs, scaffolds as FASTA)
-- Coverage and statistics exports (CSV, JSON)
-- Path exports (scaffold paths, contig mappings)
-
-Sections:
-1. Graph Protocol and GFA Export (BandageNG integration)
-2. Coverage CSV Export
-3. Assembly Sequence Export (NEW - contigs/scaffolds)
-4. Assembly Statistics Export (NEW - N50, L50, metrics)
-5. Path Export (NEW - scaffold paths as TSV)
+Assembly Export — GFA graph export, coverage CSV, assembly FASTA,
+statistics JSON, and scaffold path TSV.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -826,4 +817,7 @@ def export_paths_tsv(
             f.write(f"{scaffold_id}\t{path_str}\t\n")
     
     logger.info(f"Exported {len(paths)} scaffold paths")
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.
 

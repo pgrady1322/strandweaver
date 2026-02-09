@@ -1,24 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Graph Cleanup and Phasing Integration Module for StrandWeaver.
-
-This module performs unified graph cleanup using multiple signals:
-- Hi-C phasing and edge support
-- AI-based edge quality scores
-- Regional k-mer recommendations
-- UL read support
-
-Key operations:
-1. Edge pruning based on multi-signal confidence
-2. Bubble resolution using haplotype information
-3. Phasing-aware graph partitioning into haplotypes A/B
-4. Output cleaned, phased graphs ready for scaffolding
+Graph Cleanup — multi-signal edge pruning, bubble resolution, and
+phasing-aware graph partitioning into haplotypes A/B.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -593,3 +582,6 @@ def clean_graph(
         graph, hic_phase_info, hic_edge_support,
         ai_annotations, regional_k_map, ul_support_map
     )
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

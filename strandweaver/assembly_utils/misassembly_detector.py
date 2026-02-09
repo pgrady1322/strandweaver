@@ -1,36 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-Misassembly Detection & Flagging System
+StrandWeaver v0.1.0
 
-Identifies putative misassemblies in assembly paths and flags them for
-downstream correction. Integrates with PathWeaver, EdgeWarden, and passes
-detailed information to Ultra-Long (UL) integration and other modules.
-
-Key Features:
-- Multi-signal misassembly detection (12 detection methods)
-- Confidence-scored flagging (HIGH/MEDIUM/LOW risk)
-- Precise location identification (base-level resolution)
-- Detailed breakpoint characterization
-- Downstream module integration
-- Correction strategy recommendations
-
-Detection Methods:
-1. Low EdgeWarden confidence regions
-2. Coverage discontinuities
-3. Abnormal insert size distributions
-4. Strand orientation inconsistencies
-5. Repeat boundary violations
-6. GC content anomalies
-7. K-mer spectrum disruptions
-8. Ultra-long read conflicts
-9. Hi-C link violations
-10. Heterozygous marker inconsistencies
-11. Alignment breakpoints
-12. Graph topology inconsistencies
+Misassembly Detection — 12-method multi-signal detector with confidence scoring,
+breakpoint characterization, and correction strategy recommendations.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -1972,3 +1949,6 @@ if __name__ == "__main__":
     print("TSV Report:")
     print("=" * 60)
     print(detector.generate_report("tsv"))
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

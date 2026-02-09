@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-String Graph Engine for StrandWeaver.
-
-This module implements a string graph overlay on top of a de Bruijn graph,
-using ultra-long (UL) ONT reads to bridge DBG nodes and increase contiguity.
-
-Key features:
-- Accepts preprocessed DBG with regional k-mer annotations
-- Uses UL read alignments to find paths through the DBG
-- Creates string graph edges representing UL-supported connections
-- Incorporates ML regional-k information for path scoring and filtering
-- K-mer anchoring for error-prone ultralong reads (uncorrected ONT)
-- Optional MBG/GraphAligner integration for gap filling
+String Graph Engine — UL ONT read overlay on the DBG for bridging nodes
+and increasing contiguity with k-mer anchoring and ML scoring.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -474,8 +464,6 @@ class LongReadOverlay:
     Uses a two-phase approach for uncorrected ONT reads:
     1. Exact k-mer anchoring: Fast identification of error-free regions
     2. MBG alignment: Error-tolerant alignment between anchors
-    
-    Consolidated from data_structures.py Part 2 implementation.
     """
     
     def __init__(
@@ -752,4 +740,7 @@ class LongReadOverlay:
                 current_node = anchor.node_id
         
         return path, orientations
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.
 

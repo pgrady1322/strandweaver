@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-Chromosome Classifier - Identify microchromosomes and small chromosomal segments.
+StrandWeaver v0.1.0
 
-Three-tier classification system:
-1. Fast pre-filtering (length, coverage, GC, connectivity, telomere detection)
-2. Gene content analysis (BLAST homology search)
-3. Advanced features (Hi-C patterns, synteny) - optional
+Chromosome Classifier — three-tier system for identifying microchromosomes
+and small chromosomal segments (pre-filter, gene content, advanced features).
 
 Author: StrandWeaver Development Team
-Date: December 26, 2025
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -769,3 +766,6 @@ __all__ = [
     'AdvancedChromosomeFeatures',
     'ChromosomeClassification',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

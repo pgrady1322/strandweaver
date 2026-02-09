@@ -1,15 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Utilities module for StrandWeaver.
-
-This module provides core utilities for the assembly pipeline:
-- Pipeline orchestration and coordination (unified master orchestrator)
-- Checkpoint management
-- Hardware management (CPU/GPU) - consolidated device and acceleration
-- GPU acceleration core functions
+Utilities — pipeline orchestration, checkpoints, hardware management,
+and GPU acceleration.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -89,3 +87,6 @@ __all__ = [
     "GPUGraphBuilder",
     "GPUContactMapBuilder",
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

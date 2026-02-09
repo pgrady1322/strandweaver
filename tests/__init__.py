@@ -1,11 +1,16 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-StrandWeaver Test Suite
+StrandWeaver v0.1.0
 
-Minimal test suite for v0.1 release validation.
-Tests core functionality without requiring extensive test data.
+Test Suite.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 __version__ = "0.1.0"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

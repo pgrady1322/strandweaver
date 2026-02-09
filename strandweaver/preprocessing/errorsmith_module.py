@@ -1,42 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-ErrorSmith: Unified Error Correction Module for StrandWeaver
-
-This module consolidates all error correction functionality into a single,
-comprehensive module for improved usability and clarity. ErrorSmith provides
-technology-specific error correction strategies for multiple sequencing platforms.
-
-Consolidated from 7 separate modules:
-- corrector.py: Base correction infrastructure and factory functions
-- stats.py: Correction statistics tracking
-- strategies.py: Core correction algorithms (k-mer, quality-aware, consensus)
-- tech_correctors.py: Technology-specific correctors (ONT, PacBio, Illumina, Ancient DNA)
-- adapters.py: Adapter detection and trimming
-- visualizations.py: Error correction visualization and reporting
-- __init__.py: Module exports
-
-Architecture:
-    Section 1: Base Corrector Infrastructure
-    Section 2: Correction Statistics
-    Section 3: Correction Strategies (Bloom Filter, K-mer, Quality-aware, Consensus)
-    Section 4: Technology-Specific Correctors
-    Section 5: Adapter Detection and Trimming
-    Section 6: Visualization and Reporting
-
-Usage:
-    from strandweaver.preprocessing import get_corrector, CorrectionStats
-    
-    # Create technology-specific corrector
-    corrector = get_corrector("ont", error_profile, k_size=21)
-    
-    # Correct reads
-    corrected_read = corrector.correct_read(read)
-    
-    # Batch correction with statistics
-    stats = corrector.correct_reads("input.fastq", "output.fastq")
+ErrorSmith — unified technology-specific error correction for ONT, PacBio,
+Illumina, and Ancient DNA with adapter trimming and visualization.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -2162,3 +2133,6 @@ __all__ = [
     'profile_technology',
     'correct_batch',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

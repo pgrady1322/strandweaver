@@ -1,33 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-EdgeWarden: Comprehensive Overlap Classification & Quality Assessment System
+EdgeWarden — overlap classification and quality assessment with ML models,
+confidence scoring, and PathWeaver integration.
 
-Architecture:
-  ├─ Feature Extraction (80 features)
-  │   ├─ Static features (26): base overlap + graph-aware
-  │   ├─ Temporal features (34): quality/coverage trajectories
-  │   └─ Expanded features (20): sequence complexity, boundaries, errors
-  ├─ ML Models
-  │   ├─ Tech-specific models (5): ONT-R9, ONT-R10, HiFi, Illumina, aDNA
-  │   ├─ Cascade classifier: Rules → ML
-  │   └─ Hybrid ensemble: Rules + ML voting
-  ├─ Advanced Training
-  │   ├─ Active learning: Uncertainty-based sampling
-  │   ├─ Continual learning: Multi-task adaptation with EWC
-  │   └─ Multi-task learning: Auxiliary tasks for regularization
-  ├─ Confidence & Interpretability
-  │   ├─ Confidence stratification (HIGH/MEDIUM/LOW/VERY_LOW)
-  │   └─ Three-level explanations (simple/technical/expert)
-  └─ PathWeaver Integration
-      └─ Edge/path scoring for assembly graph traversal
-
-Author: Patrick Grady
-Date: December 2025
-Version: 2.0 (Consolidated)
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -3494,3 +3474,6 @@ def score_edges_batch(
     logger.info(f"Scored {len(scored_edges)} edges (mean score: {np.mean([e['score'] for e in scored_edges]):.3f})")
     
     return scored_edges
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

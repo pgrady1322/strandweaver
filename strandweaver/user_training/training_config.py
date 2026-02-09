@@ -1,11 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-User Training Configuration
-
-Dataclasses and configuration objects for user-configurable training data generation.
+User Training Configuration — dataclasses for training data generation parameters.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -355,3 +356,6 @@ class UserTrainingConfig:
             shard_size=config_dict.get('shard_size', 10000),
             compress_output=config_dict.get('compress_output', True)
         )
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

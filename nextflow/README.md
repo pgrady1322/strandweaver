@@ -31,9 +31,10 @@ strandweaver correct \
 
 # Other parallelizable commands
 strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl --nextflow
+strandweaver nf-score-edges -e edges.json -a aligns.bam -o scored.json --nextflow
 strandweaver map-ul -u ul_reads.fq.gz -g graph.gfa -o aligns.paf --nextflow
 strandweaver align-hic --hic-r1 R1.fq --hic-r2 R2.fq -g graph.gfa -o aligns.bam --nextflow
-strandweaver detect-svs -g graph.gfa -o variants.vcf --nextflow
+strandweaver nf-detect-svs -g graph.gfa -o variants.vcf --nextflow
 ```
 
 ### Alternative: Direct Nextflow Execution

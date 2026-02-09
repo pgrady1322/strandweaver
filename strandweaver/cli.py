@@ -1,15 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Command-line interface for StrandWeaver.
-
-This module provides the main CLI entry point and all subcommands for
-the StrandWeaver genome assembly pipeline.
+Command-line interface — main CLI entry point and all subcommands.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -236,6 +233,15 @@ def config_show(config_file, format):
               help='Illumina paired-end R1 reads (forward reads)')
 @click.option('--illumina-r2', type=click.Path(exists=True),
               help='Illumina paired-end R2 reads (reverse reads)')
+# ============================================================================
+# Read Shortcuts (convenience aliases)
+# ============================================================================
+@click.option('--hifi-long-reads', type=click.Path(exists=True),
+              help='PacBio HiFi long reads (convenience alias for -r# --technology# pacbio)')
+@click.option('--ont-long-reads', type=click.Path(exists=True),
+              help='ONT long reads (convenience alias for -r# --technology# ont)')
+@click.option('--ont-ul', type=click.Path(exists=True),
+              help='ONT ultra-long reads (convenience alias for -r# --technology# ont_ultralong)')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for assembly')
 @click.option('--config', '-c', type=click.Path(exists=True),
@@ -264,6 +270,8 @@ def config_show(config_file, format):
               help='GPU device ID for multi-GPU systems (CUDA only)')
 @click.option('--threads', '-t', type=int, default=None,
               help='Number of CPU threads (default: auto-detect)')
+@click.option('--memory-limit', type=int, default=None,
+              help='Memory limit in GB (default: no limit)')
 # ============================================================================
 # Pipeline Control
 # ============================================================================
@@ -278,6 +286,8 @@ def config_show(config_file, format):
               help='Skip error profiling step')
 @click.option('--skip-correction', is_flag=True,
               help='Skip error correction step (use for pre-corrected reads)')
+@click.option('--dry-run', is_flag=True,
+              help='Show pipeline plan without executing (validate inputs and config only)')
 # ============================================================================
 # Hi-C Scaffolding Data
 # ============================================================================
@@ -326,19 +336,83 @@ def config_show(config_file, format):
               help='Minimum confidence level for misassembly flags (default: MEDIUM).')
 @click.option('--misassembly-format', type=str, default='tsv,bed',
               help='Comma-separated output formats for misassembly report (tsv,bed,json). Default: tsv,bed.')
+# ============================================================================
+# K-mer Overrides (disables KWeaver adaptive prediction for that stage)
+# ============================================================================
+@click.option('--kmer-size-assembly', type=int, default=None,
+              help='Override KWeaver for assembly k-mer size (disables adaptive prediction)')
+@click.option('--kmer-size-correction', type=int, default=None,
+              help='Override KWeaver for error correction k-mer size (disables adaptive prediction)')
+@click.option('--kmer-size-ul', type=int, default=None,
+              help='Override KWeaver for ultra-long read k-mer size (disables adaptive prediction)')
+# ============================================================================
+# Assembly Options
+# ============================================================================
+@click.option('--ploidy', type=click.Choice(['haploid', 'diploid']),
+              default=None,
+              help='Ploidy mode (default: auto-detect). Polyploid support is planned for a future release.')
+@click.option('--edge-filter-mode',
+              type=click.Choice(['strict', 'moderate', 'lenient']),
+              default=None,
+              help='EdgeWarden filter strictness: strict (all 4 stages including AI), '
+                   'moderate (coverage + quality + phasing, skip AI), '
+                   'lenient (coverage filter only). Default: strict when AI enabled, moderate otherwise.')
+@click.option('--min-sv-size', type=int, default=None,
+              help='Minimum structural variant size in bp (default: 50)')
+@click.option('--export-intermediate-graphs', is_flag=True,
+              help='Export assembly graphs after each major pipeline step (GFA format)')
+# ============================================================================
+# Error Correction
+# ============================================================================
+@click.option('--max-correction-iterations', type=int, default=None,
+              help='Maximum error correction iterations per read set (default: 3)')
+# ============================================================================
+# Coverage Sampling
+# ============================================================================
+@click.option('--sample-size-graph', type=int, default=None,
+              help='Number of reads to sample for graph-building coverage (PacBio/ONT)')
+@click.option('--sample-size-ul', type=int, default=None,
+              help='Number of reads to sample for ultra-long read coverage')
+@click.option('--sample-size-hic', type=int, default=None,
+              help='Number of read pairs to sample for Hi-C coverage')
+# ============================================================================
+# Output Options
+# ============================================================================
+@click.option('--output-format',
+              type=click.Choice(['fasta', 'gfa', 'both']),
+              default=None,
+              help='Output assembly format (default: fasta). Use both for FASTA + GFA.')
+@click.option('--log-level',
+              type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']),
+              default=None,
+              help='Logging verbosity level (default: INFO)')
+# ============================================================================
+# Finishing
+# ============================================================================
+@click.option('--decontaminate', is_flag=True,
+              help='Enable decontamination screening. '
+                   'Not yet implemented — reserved for future release.')
 @click.pass_context
 def pipeline(ctx,
              reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
+             hifi_long_reads, ont_long_reads, ont_ul,
              output, config,
              use_ai, disable_correction_ai, disable_assembly_ai, model_dir,
-             use_gpu, gpu_backend, gpu_device, threads,
+             use_gpu, gpu_backend, gpu_device, threads, memory_limit,
              resume, checkpoint_dir, start_from, skip_profiling, skip_correction,
+             dry_run,
              min_contig_length,
              illumina_r1, illumina_r2, hic_r1, hic_r2,
              id_chromosomes, id_chromosomes_advanced, blast_db, gene_detection_method,
              telomere_min_units, telomere_search_depth, telomere_sequence,
-             misassembly_report, misassembly_min_confidence, misassembly_format):
+             misassembly_report, misassembly_min_confidence, misassembly_format,
+             kmer_size_assembly, kmer_size_correction, kmer_size_ul,
+             ploidy, edge_filter_mode, min_sv_size, export_intermediate_graphs,
+             max_correction_iterations,
+             sample_size_graph, sample_size_ul, sample_size_hic,
+             output_format, log_level,
+             decontaminate):
     """
     Run the complete assembly pipeline.
     
@@ -382,6 +456,21 @@ def pipeline(ctx,
         strandweaver pipeline -r1 reads.fq -o output/ \\
             --misassembly-min-confidence HIGH \\
             --misassembly-format json,bed
+        
+        # Convenience read shortcuts (no -r#/--technology# needed)
+        strandweaver pipeline --hifi-long-reads hifi.fq.gz -o output/
+        strandweaver pipeline --ont-long-reads ont.fq.gz --ont-ul ul.fq.gz -o output/
+        
+        # Override k-mer sizes (disables KWeaver prediction)
+        strandweaver pipeline --hifi-long-reads hifi.fq.gz \\
+            --kmer-size-assembly 51 --kmer-size-correction 31 -o output/
+        
+        # Diploid assembly with strict edge filtering
+        strandweaver pipeline --hifi-long-reads hifi.fq.gz \\
+            --ploidy diploid --edge-filter-mode strict -o output/
+        
+        # Dry run — show pipeline plan without executing
+        strandweaver pipeline --hifi-long-reads hifi.fq.gz -o output/ --dry-run
     """
     verbose = ctx.obj.get('VERBOSE', False)
     
@@ -420,6 +509,19 @@ def pipeline(ctx,
         all_reads.extend([illumina_r1, illumina_r2])
         all_technologies.extend(['illumina', 'illumina'])
     
+    # Add convenience read shortcuts
+    if hifi_long_reads:
+        all_reads.append(hifi_long_reads)
+        all_technologies.append('pacbio')
+    
+    if ont_long_reads:
+        all_reads.append(ont_long_reads)
+        all_technologies.append('ont')
+    
+    if ont_ul:
+        all_reads.append(ont_ul)
+        all_technologies.append('ont_ultralong')
+    
     # Numbered syntax
     for num in sorted(numbered_reads.keys()):
         all_reads.append(numbered_reads[num])
@@ -442,7 +544,10 @@ def pipeline(ctx,
     if not all_reads:
         click.echo(f"❌ Error: No input reads specified.", err=True)
         click.echo(f"\nUse one of:", err=True)
-        click.echo(f"  --illumina-r1 R1.fq --illumina-r2 R2.fq (for Illumina paired-end)", err=True)
+        click.echo(f"  --hifi-long-reads hifi.fq.gz (PacBio HiFi)", err=True)
+        click.echo(f"  --ont-long-reads ont.fq.gz   (ONT long reads)", err=True)
+        click.echo(f"  --ont-ul ul.fq.gz            (ONT ultra-long reads)", err=True)
+        click.echo(f"  --illumina-r1 R1.fq --illumina-r2 R2.fq (Illumina paired-end)", err=True)
         click.echo(f"  -r1 file.fq --technology1 <tech> (numbered syntax)", err=True)
         ctx.exit(1)
     
@@ -504,6 +609,87 @@ def pipeline(ctx,
     pipeline_config['pipeline']['resume'] = resume
     if checkpoint_dir:
         pipeline_config['pipeline']['checkpoint_dir'] = checkpoint_dir
+    
+    # K-mer overrides (disable KWeaver adaptive prediction for that stage)
+    if kmer_size_assembly is not None:
+        pipeline_config['assembly']['graph']['kmer_size'] = kmer_size_assembly
+        pipeline_config['assembly']['dbg']['adaptive_k'] = False
+        if verbose:
+            click.echo(f"ℹ️  Assembly k-mer size overridden to {kmer_size_assembly} (KWeaver disabled for assembly)")
+    
+    if kmer_size_correction is not None:
+        pipeline_config['correction']['kmer_size_override'] = kmer_size_correction
+        if verbose:
+            click.echo(f"ℹ️  Correction k-mer size overridden to {kmer_size_correction} (KWeaver disabled for correction)")
+    
+    if kmer_size_ul is not None:
+        pipeline_config['assembly']['string_graph']['kmer_size_override'] = kmer_size_ul
+        if verbose:
+            click.echo(f"ℹ️  Ultra-long k-mer size overridden to {kmer_size_ul} (KWeaver disabled for UL)")
+    
+    # Assembly options
+    if ploidy:
+        pipeline_config['assembly']['diploid']['mode'] = ploidy
+        if verbose:
+            click.echo(f"ℹ️  Ploidy mode set to {ploidy}")
+    
+    if edge_filter_mode:
+        pipeline_config['assembly']['graph']['edge_filter_mode'] = edge_filter_mode
+        if verbose:
+            click.echo(f"ℹ️  Edge filter mode: {edge_filter_mode}")
+    
+    if min_sv_size is not None:
+        pipeline_config['assembly']['sv_detection']['min_sv_size'] = min_sv_size
+        if verbose:
+            click.echo(f"ℹ️  Minimum SV size: {min_sv_size} bp")
+    
+    if export_intermediate_graphs:
+        pipeline_config['output']['export_intermediate_graphs'] = True
+        if verbose:
+            click.echo(f"ℹ️  Intermediate graph export enabled")
+    
+    # Error correction
+    if max_correction_iterations is not None:
+        pipeline_config['correction']['max_iterations'] = max_correction_iterations
+        if verbose:
+            click.echo(f"ℹ️  Max correction iterations: {max_correction_iterations}")
+    
+    # Coverage sampling
+    if sample_size_graph is not None:
+        pipeline_config['profiling']['sample_size_graph'] = sample_size_graph
+        if verbose:
+            click.echo(f"ℹ️  Graph coverage sample size: {sample_size_graph:,} reads")
+    if sample_size_ul is not None:
+        pipeline_config['profiling']['sample_size_ul'] = sample_size_ul
+        if verbose:
+            click.echo(f"ℹ️  Ultra-long coverage sample size: {sample_size_ul:,} reads")
+    if sample_size_hic is not None:
+        pipeline_config['profiling']['sample_size_hic'] = sample_size_hic
+        if verbose:
+            click.echo(f"ℹ️  Hi-C coverage sample size: {sample_size_hic:,} read pairs")
+    
+    # Memory limit
+    if memory_limit is not None:
+        pipeline_config['hardware']['memory_limit_gb'] = memory_limit
+        if verbose:
+            click.echo(f"ℹ️  Memory limit: {memory_limit} GB")
+    
+    # Output options
+    if output_format:
+        pipeline_config['output']['format'] = output_format
+        if verbose:
+            click.echo(f"ℹ️  Output format: {output_format}")
+    
+    if log_level:
+        pipeline_config['output']['logging']['level'] = log_level
+        if verbose:
+            click.echo(f"ℹ️  Log level: {log_level}")
+    
+    # Decontamination
+    if decontaminate:
+        pipeline_config['finishing']['decontamination']['enabled'] = True
+        if verbose:
+            click.echo(f"ℹ️  Decontamination: enabled (note: not yet implemented)")
     
     # Validate final configuration
     config_errors = validate_config(pipeline_config)
@@ -720,6 +906,14 @@ def pipeline(ctx,
     if verbose and misassembly_report:
         click.echo(f"ℹ️  Misassembly report: min_confidence={misassembly_min_confidence}, "
                    f"formats={misassembly_format}")
+    
+    # ========================================================================
+    # Dry Run
+    # ========================================================================
+    if dry_run:
+        click.echo("\n🔎 DRY RUN — pipeline plan shown above. No processing performed.")
+        click.echo("   Remove --dry-run to execute the pipeline.")
+        return
     
     # ========================================================================
     # Run Pipeline
@@ -1039,11 +1233,17 @@ def build_contigs(input, output, min_overlap, threads):
               default='string', help='Assembly graph type')
 @click.option('--min-coverage', type=int, default=5,
               help='Minimum coverage threshold')
+@click.option('--kmer-size', '-k', type=int, default=None,
+              help='Override k-mer size for assembly (disables adaptive KWeaver prediction)')
+@click.option('--ploidy', type=click.Choice(['haploid', 'diploid']),
+              default=None,
+              help='Ploidy mode (default: auto-detect). Polyploid support is planned.')
 @click.option('--threads', '-t', type=int, default=1,
               help='Number of threads to use')
 def assemble(reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
-             illumina_r1, illumina_r2, output, graph, graph_type, min_coverage, threads):
+             illumina_r1, illumina_r2, output, graph, graph_type,
+             min_coverage, kmer_size, ploidy, threads):
     """
     Perform graph-based genome assembly.
     
@@ -1123,6 +1323,12 @@ def assemble(reads1, reads2, reads3, reads4, reads5,
     
     click.echo(f"Graph type: {graph_type}")
     click.echo(f"Min coverage: {min_coverage}x")
+    if kmer_size:
+        click.echo(f"K-mer size: {kmer_size} (KWeaver disabled)")
+    else:
+        click.echo(f"K-mer size: auto (KWeaver)")
+    if ploidy:
+        click.echo(f"Ploidy: {ploidy}")
     click.echo(f"Output assembly: {output}")
     
     if graph:
@@ -1140,17 +1346,39 @@ def assemble(reads1, reads2, reads3, reads4, reads5,
               help='Reference genome for comparison (optional)')
 @click.option('--output', '-o', type=click.Path(),
               help='Output validation report (JSON/HTML)')
-def validate(assembly, reference, output):
+@click.option('--busco-lineage', type=str, default=None,
+              help='BUSCO lineage dataset for completeness assessment '
+                   '(e.g., mammalia_odb10, aves_odb10). '
+                   'Not yet wired — planned for a future release.')
+@click.option('--threads', '-t', type=int, default=1,
+              help='Number of threads to use')
+def validate(assembly, reference, output, busco_lineage, threads):
     """
     Validate assembly quality.
     
     Computes assembly statistics (N50, L50, etc.) and optionally
     compares against a reference genome.
+    
+    Examples:
+        # Basic validation
+        strandweaver validate -a assembly.fa -o report.json
+        
+        # Compare against reference
+        strandweaver validate -a assembly.fa -r reference.fa -o report.json
+        
+        # BUSCO completeness (planned)
+        strandweaver validate -a assembly.fa --busco-lineage mammalia_odb10 -o report.json
     """
     click.echo(f"Validating assembly: {assembly}")
     
     if reference:
         click.echo(f"Reference genome: {reference}")
+    
+    if busco_lineage:
+        click.echo(f"BUSCO lineage: {busco_lineage}")
+        click.echo("  ⚠️ BUSCO integration is not yet wired — planned for a future release.")
+    
+    click.echo(f"Threads: {threads}")
     
     if output:
         click.echo(f"Output report: {output}")
@@ -1814,10 +2042,16 @@ def batch():
               help='HiFi reads for error correction')
 @click.option('--ont', type=click.Path(exists=True),
               help='ONT reads for error correction')
+@click.option('--illumina', type=click.Path(exists=True),
+              help='Illumina reads for error correction')
+@click.option('--ancient', type=click.Path(exists=True),
+              help='Ancient DNA reads for error correction (damage-aware)')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for corrected reads')
 @click.option('--threads', '-t', type=int, default=8,
               help='Number of threads (direct mode only)')
+@click.option('--max-iterations', type=int, default=3,
+              help='Maximum correction iterations per read set (default: 3)')
 # Nextflow mode options
 @click.option('--nextflow', is_flag=True,
               help='Run via Nextflow for automatic parallelization')
@@ -1829,7 +2063,8 @@ def batch():
               help='Reads per correction batch (Nextflow mode)')
 @click.option('--max-correction-jobs', type=int, default=20,
               help='Max parallel correction jobs (Nextflow mode)')
-def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
+def correct_reads(hifi, ont, illumina, ancient, output, threads, max_iterations,
+                  nextflow, nf_profile, nf_resume,
                   correction_batch_size, max_correction_jobs):
     """
     Correct sequencing errors in reads.
@@ -1837,9 +2072,22 @@ def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
     Direct mode (default): Processes entire dataset on local machine.
     Nextflow mode (--nextflow): Splits reads into batches for parallel processing.
     
+    Supports HiFi, ONT, Illumina, and ancient DNA reads. Ancient DNA
+    correction uses damage-aware algorithms that preserve authentic
+    deamination patterns (C→T at 5' ends, G→A at 3' ends).
+    
     Examples:
         # Direct mode - process locally
         strandweaver correct --hifi reads.fq.gz -o corrected/
+        
+        # Multiple technologies
+        strandweaver correct --hifi hifi.fq.gz --ont ont.fq.gz -o corrected/
+        
+        # Ancient DNA with damage-aware correction
+        strandweaver correct --ancient adna.fq.gz -o corrected/
+        
+        # Illumina reads
+        strandweaver correct --illumina illumina.fq.gz -o corrected/
         
         # Nextflow mode - parallel processing on cluster
         strandweaver correct --hifi reads.fq.gz -o corrected/ \\
@@ -1864,6 +2112,7 @@ def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
         from .preprocessing.errorsmith_module import profile_technology, correct_batch
         
         click.echo("Running error correction (direct mode)...")
+        click.echo(f"  Max iterations: {max_iterations}")
         
         # Profile errors first
         click.echo("Step 1/2: Profiling errors...")
@@ -1874,6 +2123,12 @@ def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
         if ont:
             click.echo(f"  • ONT: {ont}")
             profiles['ont'] = profile_technology(ont, technology='ont', threads=threads)
+        if illumina:
+            click.echo(f"  • Illumina: {illumina}")
+            profiles['illumina'] = profile_technology(illumina, technology='illumina', threads=threads)
+        if ancient:
+            click.echo(f"  • Ancient DNA: {ancient}")
+            profiles['ancient'] = profile_technology(ancient, technology='ancient', threads=threads)
         
         # Correct reads
         click.echo("Step 2/2: Correcting reads...")
@@ -1889,6 +2144,16 @@ def correct_reads(hifi, ont, output, threads, nextflow, nf_profile, nf_resume,
             output_file = output_dir / 'corrected_ont.fastq.gz'
             correct_batch(ont, 'ont', profiles['ont'], str(output_file), threads)
             click.echo(f"  ✓ ONT corrected: {output_file}")
+        
+        if illumina:
+            output_file = output_dir / 'corrected_illumina.fastq.gz'
+            correct_batch(illumina, 'illumina', profiles['illumina'], str(output_file), threads)
+            click.echo(f"  ✓ Illumina corrected: {output_file}")
+        
+        if ancient:
+            output_file = output_dir / 'corrected_ancient.fastq.gz'
+            correct_batch(ancient, 'ancient', profiles['ancient'], str(output_file), threads)
+            click.echo(f"  ✓ Ancient DNA corrected (damage-aware): {output_file}")
         
         click.echo(f"✓ Error correction complete: {output}")
 
@@ -2964,3 +3229,6 @@ def version():
 
 if __name__ == '__main__':
     sys.exit(main())
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

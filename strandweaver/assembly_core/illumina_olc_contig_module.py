@@ -1,20 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Contig builder for converting short reads into artificial long reads.
-
-This module implements an overlap-layout-consensus (OLC) approach to assemble
-Illumina short reads into longer contigs (artificial long reads). These contigs
-can then serve as input for graph-based assembly.
-
-Key Features:
-- K-mer based overlap detection (efficient, reuses existing k-mer infrastructure)
-- Variation-preserving consensus (heterozygous sites maintained)
-- Quality-aware contig extension
-- Graph-based layout
+Illumina OLC Contig Builder — overlap-layout-consensus assembly of short reads
+into artificial long reads for downstream graph-based assembly.
 
 Author: StrandWeaver Development Team
-Date: 2025-12-01
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -1286,3 +1279,6 @@ def build_contigs_from_reads(
         print(f"Wrote {len(contigs)} contigs to {output_file}")
     
     return builder.stats
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

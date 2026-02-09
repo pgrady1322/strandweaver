@@ -1,34 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-User Input Module - Import User Corrections and Manual Edits
-
-This module handles all user-provided modifications to assemblies:
-1. Path corrections from BandageNG (TSV format)
-2. Manual contig breaks (misassembly corrections)
-3. Forced contig joins (manual scaffolding)
-4. Exclusion lists (problematic nodes/contigs)
-
-Sections:
-1. Data Structures (UserPathCorrection, ReconstructedScaffold)
-2. TSV Import (BandageNG path corrections)
-3. Scaffold Reconstruction
-4. Graph Integration
-5. Manual Edits (NEW - breaks, joins, exclusions)
-
-TSV Format (BandageNG compatibility):
------------
-Column 1: Chromosome/scaffold name (e.g., 'chr1', 'scaffold_2')
-Column 2: Path string - comma-separated unitig IDs with orientations
-          Example: 'unitig-1+,unitig-2+,unitig-3-,unitig-5+'
-Column 3: Optional user notes (free text)
-
-Example TSV:
-chr1    unitig-1+,unitig-2+,unitig-3-,unitig-5+    removed unitig-4; mis-placed
-chr2    unitig-6+,unitig-7-,unitig-8+              looks correct
-chrX    unitig-9+,unitig-10+                        sex chromosome
+User Input — import BandageNG path corrections, manual breaks/joins,
+and exclusion lists.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -998,4 +977,7 @@ def apply_manual_edits(
     
     logger.info("Manual edits applied successfully")
     return result
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.
 

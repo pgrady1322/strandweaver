@@ -1,14 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-StrandWeaver Master Pipeline Orchestrator.
-
-This is the unified coordinator that manages the complete assembly pipeline:
-- Preprocessing: Error profiling, k-mer prediction (K-Weaver), read correction (ErrorSmith)
-- Assembly: Technology-specific routing (OLC, DBG, String Graph, Hi-C scaffolding)
-- Finishing: Polishing, gap filling, final output
+Master Pipeline Orchestrator — coordinates the complete assembly pipeline
+from preprocessing through assembly to finishing.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -453,7 +452,7 @@ class PipelineOrchestrator:
         # Store all per-technology profiles
         self.state['error_profiles'] = error_profiles
 
-        # Backward compatibility: keep single 'error_profile' as the first profile
+        # Keep single 'error_profile' as the first profile
         if error_profiles:
             self.state['error_profile'] = next(iter(error_profiles.values()))
         else:
@@ -1921,7 +1920,7 @@ class PipelineOrchestrator:
                 self.proximity_score = proximity_score
                 self.contact_count = contact_count
                 self.quality_score = proximity_score  # Alias for consistency
-                self.confidence = proximity_score     # Alias for compatibility
+                self.confidence = proximity_score
                 
                 # Additional metadata
                 self.metadata = {
@@ -3349,3 +3348,6 @@ class PipelineOrchestrator:
 
         self.logger.info(f"Model save report: {json.dumps(report, indent=2)}")
         return report
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

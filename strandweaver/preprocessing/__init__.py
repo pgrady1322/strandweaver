@@ -1,32 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Preprocessing Module for StrandWeaver.
-
-Comprehensive preprocessing pipeline including error correction, profiling, 
-read classification, and adaptive k-mer selection.
-
-Consolidated modules:
-- errorsmith_module.py: Technology-aware error correction
-- read_error_profiling_utility.py: Error profiling and k-mer analysis
-- kweaver_module.py: K-Weaver AI-powered adaptive k-mer selector
-- read_classification.py: Read technology classification (moved from io_utils)
-
-Main Components:
-    - BaseCorrector: Abstract base class for all correctors
-    - CorrectionStats: Statistics tracking for corrections
-    - Correction Strategies: K-mer, quality-aware, consensus algorithms
-    - Technology-specific correctors: ONT, Illumina, PacBio, Ancient DNA
-    - Error profiling and pattern analysis
-    - AI-powered k-mer selection (K-Weaver)
-    - Read technology classification and metadata detection
-    - Adapter detection and trimming
-    - Visualization and reporting tools
+Preprocessing Module — error correction, profiling, read classification,
+and adaptive k-mer selection.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -82,7 +63,6 @@ from .kweaver_module import (
     # K-mer prediction
     KWeaverPredictor,
     KmerPrediction,
-    # Backward compatibility
     AdaptiveKmerPredictor,
 )
 
@@ -157,7 +137,7 @@ __all__ = [
     'FeatureExtractor',
     'ReadFeatures',
     'extract_features_from_file',
-    'AdaptiveKmerPredictor',  # Backward compatibility
+    'AdaptiveKmerPredictor',
     
     # Read technology classification (moved from io_utils)
     'ReadTechnology',
@@ -181,3 +161,6 @@ __all__ = [
     'detect_nanopore_metadata_with_longbow',
     'detect_from_fastq_headers',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

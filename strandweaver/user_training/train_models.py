@@ -1,35 +1,14 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Training runner for StrandWeaver ML models.
+StrandWeaver v0.1.0
 
-Reads CSV training data produced by ``graph_training_data.py``, trains five
-graph-related model types via XGBoost, evaluates with k-fold cross-validation,
-and saves trained model weights in the directory layout expected by the
-StrandWeaver pipeline (``--model-dir``).
+Training Runner — trains five graph-related XGBoost models from CSV data,
+evaluates with k-fold cross-validation, and saves weights.
 
-Canonical output layout::
-
-    <output_dir>/
-    ├── edgewarden/
-    │   ├── edgewarden_hifi.pkl      # EdgeAI classifier (one per technology)
-    │   ├── scaler_hifi.pkl
-    │   ├── edgewarden_ont_r9.pkl
-    │   ├── scaler_ont_r9.pkl
-    │   └── ...
-    ├── pathgnn/
-    │   └── pathgnn_scorer.pkl       # Path edge scorer (binary classifier)
-    ├── diploid/
-    │   └── diploid_model.pkl        # Haplotype assigner (multiclass)
-    ├── ul_routing/
-    │   └── ul_routing_model.pkl     # Ultra-long route scorer (regression)
-    ├── sv_detector/
-    │   └── sv_detector_model.pkl    # SV type detector (multiclass)
-    └── training_report.json         # Full metrics & configuration
-
-Usage::
-
-    python -m strandweaver.user_training.train_models \\
-        --data-dir output/training_data/ --output-dir trained_models/
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations
@@ -593,7 +572,7 @@ def _save_pathgnn(
             'metrics': metrics,
             'note': ('Primary model is pathgnn_scorer.pkl (XGBoost).  '
                      'pathgnn_model.pt is an untrained scaffold for '
-                     'pipeline compatibility.'),
+                     'pipeline integration.'),
         }, fh, indent=2)
     saved.append(str(meta_path))
 
@@ -1016,3 +995,6 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

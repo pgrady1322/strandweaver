@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Unit tests for read classification and technology detection.
+StrandWeaver v0.1.0
+
+Read classification unit tests.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -83,3 +88,6 @@ class TestSequenceQuality:
         
         assert not has_low_quality_bases(high_quality, threshold=20)
         assert has_low_quality_bases(low_quality, threshold=20)
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

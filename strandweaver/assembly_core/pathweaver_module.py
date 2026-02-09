@@ -1,29 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-PathWeaver: GNN-First Path Finding Engine for StrandWeaver.
-
-This module implements GNN-based path prediction with classical algorithm fallback
-for assembly graph traversal. It works downstream of EdgeWarden and uses its
-outputs without recalculation.
-
-ARCHITECTURE NOTES
-──────────────────
-The design prioritizes GNN-based path prediction with classical algorithms as
-fallback. Alternative mode available via use_gnn_primary=False parameter.
-
-Key Features:
-- GNN-based path prediction (primary method)
-- Classical algorithm fallback (Dijkstra, BFS, DFS)
-- EdgeWarden confidence integration (no recalculation)
-- Long-range data integration (Hi-C, UL reads)
-- Comprehensive validation framework
-- Misassembly detection
+PathWeaver — GNN-first path finding engine with classical algorithm fallback
+for assembly graph traversal. Integrates EdgeWarden, Hi-C, UL reads, and
+misassembly detection.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -3330,7 +3315,6 @@ class PathWeaver:
            - Hi-C and UL support refine path selection
         
         This is the CORRECT design: ML-first with classical fallback.
-        Old design (algorithm-first with GNN refinement) was backwards.
         
         Pipeline Steps:
         ──────────────
@@ -3351,8 +3335,8 @@ class PathWeaver:
             gnn_scorer: GNN model for path prediction (PRIMARY METHOD)
             use_gnn_primary: Use GNN as primary method (default: True)
                 - True: GNN first, fallback to algorithm
-                - False: Use legacy iterative mode (deprecated)
-            num_iterations: For legacy mode only (deprecated)
+                - False: Use iterative mode
+            num_iterations: For iterative mode only
             edgewarden_scores: EdgeWarden confidence (ACCEPTS from upstream)
             gnn_path_scores: GNN path-level scores (optional optimization)
             ul_path_scores: Ultra-long read support
@@ -3379,9 +3363,9 @@ class PathWeaver:
                 gnn_scorer=gnn_scorer,
             )
         elif num_iterations > 1 and gnn_scorer:
-            # Legacy mode: iterative algorithm→GNN (deprecated)
+            # Iterative algorithm→GNN mode
             self.logger.warning(
-                "  Using LEGACY iterative mode (deprecated). "
+                "  Using iterative mode. "
                 "Set use_gnn_primary=True for new GNN-first architecture"
             )
             finding_result = self.finder.find_paths_iterative_gnn(
@@ -3563,7 +3547,7 @@ class PathWeaver:
             algorithm: Fallback algorithm (default: Dijkstra)
             gnn_scorer: GNN model for path prediction (PRIMARY METHOD)
             use_gnn_primary: Use GNN as primary (default: True)
-            num_iterations: For legacy mode only (deprecated)
+            num_iterations: For iterative mode only
             edgewarden_scores: EdgeWarden confidence (ACCEPTS from upstream)
             gnn_path_scores: GNN path-level scores
             ul_path_scores: Ultra-long read support
@@ -3873,3 +3857,6 @@ __all__ = [
     'PathValidationRule',
     'create_path_from_node_ids',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
-Gene Annotation Utilities - Support for chromosome classification.
+StrandWeaver v0.1.0
 
-Provides wrappers for gene detection tools:
-- BLAST (NCBI blastn/blastx) - Fast homology search
-- Augustus - Ab initio gene prediction
-- BUSCO - Conserved gene completeness
+Gene Annotation Utilities — BLAST, Augustus, and BUSCO wrappers for
+chromosome classification support.
 
 Author: StrandWeaver Development Team
-Date: December 26, 2025
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -633,3 +630,6 @@ __all__ = [
     'find_orfs',
     'reverse_complement',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

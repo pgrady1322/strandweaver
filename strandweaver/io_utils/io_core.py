@@ -1,21 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Core I/O module for StrandWeaver.
-
-Consolidated module containing:
-- Core read data structures (SeqRead, ReadPair)
-- FASTQ file I/O operations
-- FASTA file I/O operations
-- ReadCollection for organizing reads by technology and role
-
-This module handles reading and writing sequencing reads with support
-for multiple technologies and automatic read type classification.
+Core I/O — read data structures, FASTQ/FASTA operations, and ReadCollection.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -37,7 +28,6 @@ from Bio.SeqRecord import SeqRecord
 # =============================================================================
 # SECTION 2: CORE READ DATA STRUCTURES
 # =============================================================================
-# Source: read.py
 
 @dataclass
 class SeqRead:
@@ -293,7 +283,6 @@ def open_file(filepath: Union[str, Path], mode: str = 'r') -> TextIO:
 # =============================================================================
 # SECTION 4: FASTQ FILE I/O
 # =============================================================================
-# Source: fastq.py
 
 def read_fastq(
     filepath: Union[str, Path],
@@ -536,7 +525,6 @@ def get_fastq_stats(filepath: Union[str, Path], sample_size: int = 10000) -> dic
 # =============================================================================
 # SECTION 5: FASTA FILE I/O
 # =============================================================================
-# Source: fasta.py
 
 def read_fasta(
     filepath: Union[str, Path],
@@ -711,7 +699,6 @@ def get_fasta_stats(filepath: Union[str, Path]) -> dict:
 # =============================================================================
 # SECTION 6: READ COLLECTION MANAGEMENT
 # =============================================================================
-# Source: collection.py
 
 class ReadCollection:
     """
@@ -1019,3 +1006,6 @@ class ReadCollection:
             tech_value = tech.value if hasattr(tech, 'value') else str(tech)
             tech_counts[tech_value] = len(reads)
         return f"ReadCollection(total={self._total_reads}, by_tech={tech_counts})"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-CLI smoke tests - verify commands run without crashing.
+StrandWeaver v0.1.0
+
+CLI smoke tests.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -77,3 +82,7 @@ class TestAssembleCLI:
         
         # Should fail but not crash
         assert result.exit_code != 0
+
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

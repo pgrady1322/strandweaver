@@ -1,18 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-User-Configurable Training Infrastructure
-
-This module provides a flexible, parameter-driven training data generation system
-for StrandWeaver ML models. Unlike the scenario-based training system, this allows
-users to specify exact parameters for:
-
-- Genome characteristics (size, GC content, repeat density)
-- Population diversity (number of genomes, ploidy)
-- Sequencing technologies and coverage
-- Structural variant density and types
+User-Configurable Training Infrastructure — parameter-driven training data
+generation for StrandWeaver ML models.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -89,3 +84,6 @@ __all__ = [
     'ModelTrainingConfig',
     'load_trained_model',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,9 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Assembly Core module for StrandWeaver.
+Assembly Core module — graph construction, path finding, and scaffolding.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -137,3 +140,6 @@ def assemble(reads_file, output_file, technology='auto', **kwargs):
         'graph_nodes': len(graph.nodes),
         'graph_edges': len(graph.edges),
     }
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

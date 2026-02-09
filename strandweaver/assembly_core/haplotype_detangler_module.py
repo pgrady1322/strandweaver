@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Diploid Disentanglement Module for StrandWeaver.
-
-This module separates diploid assembly graphs into haplotype A and B paths
-using multiple orthogonal signals:
-- Hi-C phasing
-- GNN path predictions
-- AI overlap classifications
-- Regional k-mer recommendations
-- UL path coherence
-
-The goal is to resolve allelic variation and produce haplotype-separated
-assemblies while correctly handling repeats and ambiguous regions.
+Diploid Disentanglement — separates assembly graphs into haplotype paths
+using Hi-C, GNN, AI overlap, regional k-mer, and UL coherence signals.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -995,3 +985,6 @@ def disentangle_diploid_graph(
         graph, gnn_paths, hic_phase_info, ai_annotations,
         hic_edge_support, regional_k_map, ul_support_map
     )
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

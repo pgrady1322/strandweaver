@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Generate 1 Mb Test Dataset for StrandWeaver
+StrandWeaver v0.1.0
 
-Creates a synthetic 1 Mb genome with realistic HiFi reads for testing
+Generate 1 Mb test dataset — synthetic genome with HiFi reads for testing
 graph assembly and compaction.
 
-Usage:
-    python generate_1mb_test_data.py
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from pathlib import Path
@@ -217,3 +219,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-StrandTether: Hi-C Contact Matrix Integration Engine.
-
-Unified Hi-C integration module combining:
-1. Contact map construction from Hi-C fragment pairs
-2. Node-level haplotype phasing via spectral clustering
-3. Edge-level support computation (cis/trans contacts)
-4. Path scoring with Hi-C evidence
-5. New join detection from high-contact region pairs
-6. Orientation and distance validation
-
-Designed to work downstream of ThreadCompass and upstream of PathWeaver strict
-iteration, providing long-range chromatin contact evidence for iterative refinement.
+StrandTether — Hi-C contact matrix integration engine for haplotype phasing,
+edge support, path scoring, join detection, and orientation validation.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -355,7 +345,7 @@ class StrandTether:
         Returns:
             Number of contact pairs registered
         """
-        # Convert to internal HiCContactMap format for compatibility
+        # Convert to internal HiCContactMap format
         self.contact_map = HiCContactMap()
         for (n1, n2), count in contact_matrix.items():
             self.contact_map.add_contact(n1, n2, count)
@@ -939,8 +929,6 @@ class HiCIntegrator:
     """
     Integrates Hi-C contact data into the assembly graph.
     
-    Consolidated from data_structures.py Part 3 implementation.
-    
     Uses Hi-C pairs to:
     - Assign haplotype scores to nodes via spectral clustering
     - Validate edges (cis vs trans contacts)
@@ -952,8 +940,7 @@ class HiCIntegrator:
     - Contact matrix construction (20-40× speedup)
     - Spectral clustering (15-35× speedup)
     
-    Note: This class provides a simpler interface than StrandTether for
-    backwards compatibility with code that used data_structures.py.
+    Note: This class provides a simpler interface than StrandTether.
     """
     
     def __init__(self, use_gpu: bool = True):
@@ -1397,3 +1384,6 @@ __all__ = [
     'HiCIntegrator',
     'align_reads_batch',
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

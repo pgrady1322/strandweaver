@@ -1,24 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Technology Handling Core Module for StrandWeaver.
-
-Consolidated module containing:
-- Read type definitions and classification
-- Technology parsing and validation utilities
-- Nanopore-specific metadata structures
-- LongBow integration for automatic ONT metadata detection
-
-This module handles all technology-specific logic including:
-- ReadTechnology and ReadRole enums
-- Technology detection from file characteristics
-- ONT flow cell and basecaller metadata
-- Automatic basecaller detection via LongBow
+Read Classification — technology detection, read type enums, metadata structures,
+and Nanopore-specific LongBow integration.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -40,7 +29,6 @@ from collections import Counter
 # =============================================================================
 # SECTION 2: READ TYPE DEFINITIONS
 # =============================================================================
-# Source: read_types.py
 
 class ReadTechnology(Enum):
     """Sequencing technology types."""
@@ -249,7 +237,6 @@ def infer_technology_from_length(length: int, quality_scores: Optional[str] = No
 # =============================================================================
 # SECTION 3: TECHNOLOGY VALIDATION AND PARSING
 # =============================================================================
-# Source: technology_utils.py
 
 # Technology name mappings (handles common variations)
 TECHNOLOGY_ALIASES = {
@@ -491,7 +478,6 @@ def format_technology_summary(
 # =============================================================================
 # SECTION 4: NANOPORE METADATA STRUCTURES
 # =============================================================================
-# Source: nanopore_metadata.py
 
 class FlowCellType(Enum):
     """Known Nanopore flow cell types."""
@@ -762,7 +748,6 @@ def parse_nanopore_metadata(
 # =============================================================================
 # SECTION 5: LONGBOW INTEGRATION
 # =============================================================================
-# Source: longbow_integration.py
 
 def is_longbow_available() -> bool:
     """
@@ -1135,3 +1120,6 @@ def has_low_quality_bases(quality_scores, threshold: int = 20, max_low_quality_f
     low_quality_fraction = low_quality_count / len(quality_scores)
     
     return low_quality_fraction > max_low_quality_fraction
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

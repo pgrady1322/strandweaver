@@ -1,49 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-K-Weaver: AI-Powered Adaptive K-mer Selector for Genome Assembly.
-
-K-Weaver dynamically selects optimal k-mer sizes for different assembly stages
-based on read characteristics. Traditional fixed k-mer approaches fail in 
-variable-quality regions - smaller k-mers work better in low-coverage or 
-high-error regions, while larger k-mers are optimal for high-quality data.
-
-The module combines:
-1. Feature extraction from sequencing reads (read length, quality, coverage, GC, etc.)
-2. ML-based prediction of optimal k-mer sizes for each assembly stage
-3. Technology-aware defaults when ML models are unavailable
-
-Assembly Stages with Stage-Specific k-mers:
-- DBG construction: Balance connectivity vs specificity
-- UL overlaps: High specificity for long-range spanning  
-- Extension: Gap bridging and path resolution
-- Polishing: Error correction precision
-
-Model Architecture:
-- Type: Random Forest or Gradient Boosting (XGBoost)
-- Features: Error rate, coverage depth, GC content, homopolymer length, 
-  read length, technology type
-- Training: Trained on diverse assembly datasets with different technologies
-
-Example Usage:
-    from strandweaver.preprocessing import KWeaverPredictor
-    
-    # Quick prediction from file
-    predictor = KWeaverPredictor()
-    prediction = predictor.predict_from_file('reads.fastq')
-    
-    print(prediction)
-    # K-mer predictions:
-    #   DBG construction: k=31 (confidence: 0.92)
-    #   UL overlaps: k=1001 (confidence: 0.87)
-    #   Extension: k=55 (confidence: 0.89)
-    #   Polish: k=77 (confidence: 0.85)
-    
-    # Use in assembly
-    dbg_k = prediction.dbg_k
-    ul_k = prediction.ul_overlap_k
+K-Weaver — AI-powered adaptive k-mer selector. Dynamically selects optimal
+k-mer sizes for each assembly stage based on read characteristics.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -78,7 +42,7 @@ class KmerPrediction:
     
     @property
     def ul_overlap_confidence(self) -> float:
-        """Alias for ul_confidence (backward compatibility)."""
+        """Alias for ul_confidence."""
         return self.ul_confidence
     
     def get_primary_k(self) -> int:
@@ -900,5 +864,7 @@ def extract_kmers_batch(
     logger.info(f"Extracted {len(kmer_counts)} unique {k}-mers from {read_count} reads")
 
 
-# Backward compatibility aliases
-AdaptiveKmerPredictor = KWeaverPredictor  # Old name
+AdaptiveKmerPredictor = KWeaverPredictor
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-ML-Driven Structural Variant (SV) Detection During Assembly.
-
-This module identifies structural variants during graph traversal, not after.
-
-Supported SV types:
-- Large deletions (missing edges/nodes compared to expected path)
-- Insertions (branching paths with unusual features)
-- Inversions (UL/Hi-C signals contradict graph direction)
-- Duplications (repeat overexpansion detected via coverage/k-mer)
-- Translocations (Hi-C long-range contacts inconsistent with graph)
+SVScribe — ML-driven structural variant detection during graph traversal.
+Supports deletions, insertions, inversions, duplications, and translocations.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -1782,3 +1774,6 @@ def export_vcf(svs: List[Dict[str, Any]], output_path: Path, reference_name: str
             vcf.write(f"{chrom}\\t{pos}\\t{sv_id}\\tN\\t{alt}\\t{qual}\\t{filter_val}\\t{info}\\n")
     
     logger.info(f"VCF export complete")
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

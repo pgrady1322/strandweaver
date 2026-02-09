@@ -1,10 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Integration test - small end-to-end assembly test.
+StrandWeaver v0.1.0
 
-This test creates minimal synthetic data and runs a complete (tiny) assembly
-to verify the pipeline doesn't crash.
+Integration tests — small end-to-end assembly verification.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -103,3 +105,6 @@ class TestEndToEnd:
         # Should be <99.5% identical due to SNP at position 9
         assert identity < 0.995, "Failed to detect haplotype difference"
         assert identity > 0.90, "Haplotypes should still be mostly identical"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

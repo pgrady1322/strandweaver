@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-De Bruijn Graph (DBG) Engine for StrandWeaver.
-- Accepts both OLC-derived artificial long reads and true long reads (HiFi, ONT)
-- Consumes dynamic k-mer values from the ML regional-k module
-- Builds a compacted de Bruijn graph (unitig representation)
-- Annotates nodes with ML-recommended k values for regional genome complexity
-- GPU-accelerated k-mer extraction and graph building (Apple Silicon MPS, CUDA)
-- Linear path merging
+De Bruijn Graph (DBG) Engine — compacted DBG construction from long reads
+with ML-recommended regional k-mer values and GPU acceleration.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -150,7 +145,7 @@ class KmerGraph:
         return len(self.in_edges.get(node_id, []))
 
 
-# Compatibility aliases
+# Aliases
 DBGNode = KmerNode
 DBGEdge = KmerEdge
 DBGGraph = KmerGraph
@@ -1398,3 +1393,6 @@ def build_dbg_from_long_reads(
         ul_support_map=ul_support_map,
         ai_annotations=ai_annotations
     )
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

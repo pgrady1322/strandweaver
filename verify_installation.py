@@ -1,8 +1,13 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Quick installation verification script.
+StrandWeaver v0.1.0
 
-Run this after installing StrandWeaver to verify everything works.
+Installation verification script — checks that all core modules import correctly.
+
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import sys
@@ -147,3 +152,6 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

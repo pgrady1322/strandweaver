@@ -1,25 +1,26 @@
 # StrandWeaver
 
-**AI-Powered Multi-Technology Genome Assembler with GPU Acceleration**
+**AI & ML-Powered Multi-Technology Genome Assembler with GPU Acceleration**
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Status](https://img.shields.io/badge/status-v0.1_Beta-yellow.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
 [![License](https://img.shields.io/badge/license-Dual%20License%20(Academic/Commercial)-blue.svg)](LICENSE_ACADEMIC.md)
 
-**StrandWeaver** is a next-generation genome assembly pipeline combining machine-learning optimized technology-aware error correction, graph-based assembly with haplotype-aware path resolution, and comprehensive structural variant detection for ancient DNA, Illumina, ONT, ultra-long ONT, and PacBio sequencing data. Its goal is to relieve manual curation bottlenecks in traditional high-contiguity genome assembly by applying AI/ML to genome graph paths and other complex regions. It uses these technologies to improve accuracy and contiguity, but also to provide functional annotations, such as structural variants, during the assembly process.
+**StrandWeaver** is a next-generation genome assembly pipeline combining machine-learning optimized technology-aware error correction, graph-based assembly with haplotype-aware graph neural network path resolution, and expanded features including comprehensive structural variant detection for ancient DNA, Illumina, ONT, ultra-long ONT, and PacBio sequencing data. Its goal is to relieve manual curation bottlenecks in traditional high-contiguity genome assembly by applying AI/ML to genome graph paths and other complex regions. It uses these technologies to improve accuracy and contiguity, but also to provide functional annotations, such as structural variants, during the assembly process.
 
-StrandWeaver is inspired by MaSuRCA, Verkko, and Hifiasm, but includes novel elements such as:
-- **Neural network-based haplotype assembly**: Graph topology simplification with strict protection of biological variation (SNPs, indels, CNVs) across diploid genomes
-- **Multi-technology integration**: Seamless combination of ONT, PacBio HiFi, ultra-long reads, and Hi-C data in a unified assembly graph
-- **Dynamic K-mer size selection**: StrandWeaver chooses different k-mer sizes for different parts of the assembly process based on rule-trained models
-- **Comprehensive Path Scoring**: A path score for each graph path is provided based on a comprehensive set of rules, including coverage, error profiles, and sequence repetitive complexity
+StrandWeaver is optimized for NVIDIA GPU acceleration, but can also take advantage of MacOS Silicon MPS hardware for GPU acceleration.
+
+StrandWeaver is inspired by the brilliant work of the authors of MaSuRCA *(1)*, Verkko *(2)*, and Hifiasm *(3)*, but includes novel elements such as:
+- **Neural network-based haplotype assembly**: Graph topology simplification with strict protection of biological variation (SNPs, indels, CNVs) across haploid and diploid genomes (polyploid in a future release)
+- **Multi-technology integration**: Seamless combination of ONT, PacBio HiFi, ultra-long reads, and Hi-C data in a unified assembly graph, and expanded methods for short read & ancient DNA (PacBio SBB and Illumina)
+- **Dynamic K-mer size selection**: StrandWeaver optimizes different k-mer sizes for all parts of the assembly process based on heuristics and trained models (v0.2)
+- **Comprehensive Path Scoring**: A score for each graph path is provided based on a comprehensive set of heuristics, including coverage, error profiles, and sequence repetitive complexity, as well as trained models (v0.2)
 - **Ancient DNA optimization**: Machine learning models trained to profile and repair deamination damage (C→T/G→A patterns) with configurable confidence thresholds
+- **Easy User Model Training**: CLI commands provided to generate a set of training data matching your genome / clade of choice
 
 The pipeline can be custom trained using provided scripts for any data type (new sequencing technology) or organism-specific scenario (genomes with extreme repeat content, high heterozygosity, or complex structural variation). **Generic models will be provided with the v0.2 release.**
 
 > **🚀 v0.1.0 Release (February 2026):** Beta release with complete end-to-end assembly pipeline. All AI modules functional using optimized heuristics. Core pipeline does not currently include trained models. GPU acceleration fully operational. See [v0.1 Release Notes](#v01-release-notes) below.
->
-> **v0.1.1:** Expanded user documentation and additional scripts for model training. Expected March 2026.
 >
 > **v0.2+:** Trained ML models released (after extensive testing on heuristic versions and model training). Architecture for rebuilding genome after custom graph modifications released.
 
@@ -28,7 +29,7 @@ The pipeline can be custom trained using provided scripts for any data type (new
 ## ✨ Key Features
 
 ### Core Assembly
-- 🧬 **Multi-Technology Support**: Ancient DNA, Illumina, ONT R9/R10, PacBio HiFi/CLR, Ultra-long reads
+- 🧬 **Multi-Technology Support**: Ancient DNA, Illumina, ONT R9/R10, PacBio HiFi/CLR, Ultra-long reads, with upcoming support for specific biases in ONT / PacBio chemistries & flow cells
 - 🔀 **Hybrid Assembly**: Intelligently combine data from multiple sequencing platforms
 - 📊 **Multi-Stage Assembly Pipeline**:
   - **Hybrid De Bruijn Graph (DBG) or Overlap-Layout-Consensus (OLC) based on input**: K-mer-based graph construction for long reads or short reads
@@ -45,7 +46,6 @@ The pipeline can be custom trained using provided scripts for any data type (new
   - Iterative refinement with phasing context (configurable 2-3 cycles) that backfeeds information to ML models for following iterations
   - Graph-guided and Hi-C-guided haplotype separation
 - 🏛️ **Ancient DNA Mode**: Enhanced mapDamage2-inspired correction with C→T/G→A deamination modeling
-- 📊 **Structural Variant Detection**: Assembly-time SV calling with graph topology analysis
 
 ### Advanced Features
 - 🎯 **80-Feature Edge Scoring**: Edges are scores with comprehensive feature extraction:
@@ -67,8 +67,9 @@ The pipeline can be custom trained using provided scripts for any data type (new
   - SV calls (VCF/JSON)
   - Phasing information
   - IGV / UCSC overage tracks for all read types
+  - Chromosome identification using node features, repeat detection, and synteny to allow easier downstream processing
 - 🧪 **Training Infrastructure**: Generic models provided for v0.2+, and custom training can be done for organism-specific optimization
-- 🔌 **Modular Architecture**: All AI features can be disabled for classical heuristics
+- 🔌 **Modular Architecture**: All AI features can be selectively disabled for classical heuristics
 
 ### AI/ML Features (v0.1 - Heuristic-Based)
 - **Complete AI Subsystem Suite** (using optimized heuristics - trained models in v0.2+):
@@ -79,8 +80,7 @@ The pipeline can be custom trained using provided scripts for any data type (new
   5. ✅ **ThreadCompass**: Ultra-long read routing optimization
   6. ✅ **HaplotypeDetangler**: Hi-C-augmented phasing with spectral clustering
   7. ✅ **SVScribe**: Assembly-time structural variant detection
-- **Training Infrastructure**: Complete synthetic data generation pipeline for custom model training
-- **Classical Fallbacks**: All AI modules functional with heuristic defaults
+
 - **Planned**: Trained ML models (XGBoost, PyTorch) for v0.2 release
 
 ---
@@ -91,13 +91,6 @@ The pipeline can be custom trained using provided scripts for any data type (new
 - [Quick Start](#quick-start)
 - [AI/ML Training](#aiml-training)
 - [Documentation](#documentation)
-
-**📚 Full Documentation:**
-- [Features Guide](docs/FEATURES.md) - Complete feature documentation
-
-**Coming soon (v0.1.1)**:
-- Complete tutorials and usage examples
-- Benchmarks and performance comparisons
 
 ---
 
@@ -153,11 +146,14 @@ StrandWeaver has several dependencies, especially if you plan on installing the 
 # Basic installation
 pip install git+https://github.com/pgrady1322/strandweaver.git
 
+# Recommended: Complete installation with all dependencies
+pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
+
 # With AI/training dependencies (PyTorch, XGBoost)
 pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[ai]"
 
-# Complete installation with all dependencies
-pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
+# With developmental testing features
+pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[dev]"
 ```
 
 ---
@@ -175,34 +171,34 @@ StrandWeaver offers two execution modes:
 
 **Basic Long Read Assembly Example (PacBio)**
 ```bash
-strandweaver assemble \
-  --hifi hifi_reads.fastq \
-  --output contigs.fasta \
-  --threads 8
+strandweaver pipeline \
+  --hifi-long-reads hifi_reads.fastq \
+  -o assembly_output/ \
+  -t 8
 ```
 
 **Hybrid Assembly with Multiple Ultra-Long Read Types**
 
-*Note:* The --ont-ul flag is used for path-finding reads. Any platform of long reads can be provided, but shorter long reads will degrade the assembly. The ont-ul name is retained for clarity / comparison with other assemblers.
+*Note:* The `--ont-ul` flag is used for path-finding reads. Any platform of long reads can be provided, but shorter long reads will degrade the assembly. The `--ont-ul` name is retained for clarity / comparison with other assemblers.
 ```bash
-strandweaver assemble \
-  --hifi hifi_reads.fastq \
-  --ont ont_reads.fastq.gz \
-  --ont-ul ultralong_reads.fastq \ 
-  --output assembly.fasta \
-  --threads 16
+strandweaver pipeline \
+  --hifi-long-reads hifi_reads.fastq \
+  --ont-long-reads ont_reads.fastq.gz \
+  --ont-ul ultralong_reads.fastq \
+  -o assembly_output/ \
+  -t 16
 ```
 
 **Mixed Technology Assembly with Hi-C**
 
 *Note:* ANY platform of proximity ligation tech can be provided. StrandWeaver will optimize for Hi-C and Omni-C just as well as Pore-C and CiFi.
 ```bash
-strandweaver assemble \
-  --hifi hifi_reads.fastq \
+strandweaver pipeline \
+  --hifi-long-reads hifi_reads.fastq \
   --ont-ul ultralong_reads.fastq \
-  --hic hic_R1.fastq hic_R2.fastq \
-  --output assembly.fasta \
-  --threads 16
+  --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq \
+  -o assembly_output/ \
+  -t 16
 ```
 
 ### Nextflow Mode (HPC/Cloud)
@@ -256,7 +252,7 @@ Combine profiles with commas: `-profile slurm,singularity`
 
 ### Individual Processing Commands
 
-StrandWeaver provides standalone commands for each processing stage. Each command supports both direct and Nextflow execution.
+StrandWeaver provides standalone commands for each processing stage for instances in which you may want just corrected reads or read error profiles. StrandWeaver also supports mapping of reads to GFA graphs, and calling SVs on GFA graphs. Each command supports both direct and Nextflow execution.
 
 #### Error Correction
 ```bash
@@ -281,10 +277,10 @@ strandweaver extract-kmers --hifi reads.fq.gz -k 31 -o kmers.pkl \
 #### Edge Scoring
 ```bash
 # Direct mode
-strandweaver score-edges -e edges.json -a aligns.bam -o scored.json -t 8
+strandweaver nf-score-edges -e edges.json -a aligns.bam -o scored.json -t 8
 
 # Nextflow mode (large graphs)
-strandweaver score-edges -e edges.json -a aligns.bam -o scored.json \
+strandweaver nf-score-edges -e edges.json -a aligns.bam -o scored.json \
   --nextflow --nf-profile slurm --edge-batch-size 10000
 ```
 
@@ -313,10 +309,10 @@ strandweaver align-hic --hic-r1 R1.fq.gz --hic-r2 R2.fq.gz \
 #### Structural Variant Detection
 ```bash
 # Direct mode
-strandweaver detect-svs -g graph.gfa -o variants.vcf -t 8
+strandweaver nf-detect-svs -g graph.gfa -o variants.vcf -t 8
 
 # Nextflow mode (large graphs)
-strandweaver detect-svs -g graph.gfa -o variants.vcf \
+strandweaver nf-detect-svs -g graph.gfa -o variants.vcf \
   --nextflow --nf-profile slurm --sv-batch-size 1000
 ```
 
@@ -330,10 +326,10 @@ strandweaver detect-svs -g graph.gfa -o variants.vcf \
 |---------|----------------|---------------------|--------|
 | `correct` | 20 hours | 2 hours | 10× |
 | `extract-kmers` | 8 hours | 1.5 hours | 5× |
-| `score-edges` | 8 hours | 1.5 hours | 5× |
+| `nf-score-edges` | 8 hours | 1.5 hours | 5× |
 | `map-ul` | 6 hours | 1 hour | 6× |
 | `align-hic` | 10 hours | 1.5 hours | 7× |
-| `detect-svs` | 4 hours | 1 hour | 4× |
+| `nf-detect-svs` | 4 hours | 1 hour | 4× |
 
 ---
 
@@ -342,49 +338,46 @@ strandweaver detect-svs -g graph.gfa -o variants.vcf \
 ### Machine-Learning-Tuned Genome Assembly with SV Calls
 Combine ONT, HiFi, ultra-long reads, and Hi-C for chromosome-scale phased assemblies:
 ```bash
-strandweaver assemble \
---ont ont.fastq \
---hifi hifi.fastq \
---ont-ul ultralong.fastq \
---hic hic_R1.fastq hic_R2.fastq \
---output genome.fasta \
---ai-enabled \
---detect-svs \
---threads 32
+strandweaver pipeline \
+  --ont-long-reads ont.fastq \
+  --hifi-long-reads hifi.fastq \
+  --ont-ul ultralong.fastq \
+  --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq \
+  --use-ai \
+  -o genome_assembly/ \
+  -t 32
 ```
 
 ### Ancient DNA Assembly
 Optimize for deamination damage with specialized error correction:
 ```bash
-strandweaver assemble \
---ancient-dna ancient_reads.fastq \
---output ancient_genome.fasta \
---damage-aware \
---threads 16
+strandweaver pipeline \
+  -r1 ancient_reads.fastq --technology1 ancient \
+  -o ancient_assembly/ \
+  -t 16
 ```
 Note that the assembly can also be run WITHOUT damage awareness features for comparison.
 ### SV-Rich Genome Analysis
 Detect structural variants during assembly for cancer or population genomics:
 ```bash
-strandweaver assemble \
---hifi tumor.fastq \
---hic hic_R1.fastq hic_R2.fastq \
---output tumor_assembly.fasta \
---detect-svs \
---sv-mode sensitive \
---threads 24
+strandweaver pipeline \
+  --hifi-long-reads tumor.fastq \
+  --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq \
+  --min-sv-size 30 \
+  -o tumor_assembly/ \
+  -t 24
 ```
 
 ### Highly Heterozygous Diploid Assembly
 Maintain haplotype separation for F1 hybrids or outcrossing species:
 ```bash
-strandweaver assemble \
---hifi hifi.fastq \
---hic hic_R1.fastq hic_R2.fastq \
---output diploid.fasta \
---preserve-heterozygosity \
---min-identity 0.995 \
---threads 32
+strandweaver pipeline \
+  --hifi-long-reads hifi.fastq \
+  --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq \
+  --ploidy diploid \
+  --edge-filter-mode strict \
+  -o diploid_assembly/ \
+  -t 32
 ```
 
 ---
@@ -522,9 +515,9 @@ This discovers the CSV files under every `genome_*/graph_training/` subdirectory
 
 ```bash
 strandweaver pipeline \
-  --hifi reads.fastq.gz \
+  --hifi-long-reads reads.fastq.gz \
   --model-dir trained_models/ \
-  --output assembly/
+  -o assembly/
 ```
 
 **Configurable Parameters:**
@@ -592,92 +585,90 @@ python3 -c "import torch; print(f'GPU available: {torch.cuda.is_available()}')"
 ### Assembly Quality Issues
 
 **Problem: Low N50 or fragmented assembly**
-- **Check coverage**: Aim for 30×+ HiFi or 50×+ ONT
+- **Check error rate & coverage**: Aim for 30×+ HiFi or 50×+ ONT
   ```bash
-  strandweaver profile --input reads.fastq --output profile.json
+  strandweaver profile -i reads.fastq -o profile.json
   ```
-- **Add ultra-long reads**: Dramatically improves contiguity
+- **Add ultra-long reads, or a subset of your LONGEST READS**: Dramatically improves contiguity
   ```bash
-  strandweaver assemble --hifi hifi.fastq --ont-ul ultralong.fastq --output improved.fasta
+  strandweaver pipeline --hifi-long-reads hifi.fastq --ont-ul ultralong.fastq -o improved/
   ```
 - **Enable Hi-C scaffolding**: For chromosome-scale assemblies
   ```bash
-  strandweaver assemble --hifi hifi.fastq --hic hic_R1.fastq hic_R2.fastq --output scaffolded.fasta
+  strandweaver pipeline --hifi-long-reads hifi.fastq --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq -o scaffolded/
   ```
 
 **Problem: Collapsed heterozygous regions**
 ```bash
-# Increase identity threshold to preserve variation
-strandweaver assemble \
-  --input reads.fastq \
-  --preserve-heterozygosity \
-  --min-identity 0.995 \
-  --output diploid.fasta
+# Use diploid mode with strict edge filtering to preserve variation
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  --ploidy diploid \
+  --edge-filter-mode strict \
+  -o diploid_assembly/
 ```
 
 **Problem: Assembly produces too many contigs (over-fragmented)**
 - **Reduce edge filtering stringency**:
   ```bash
-  strandweaver assemble --input reads.fastq --edge-filter-mode permissive --output assembly.fasta
+  strandweaver pipeline --hifi-long-reads reads.fastq --edge-filter-mode lenient -o assembly/
   ```
 - **Increase k-mer size**: For high-coverage, low-error data
   ```bash
-  strandweaver assemble --input reads.fastq --kmer-size 51 --output assembly.fasta
+  strandweaver pipeline --hifi-long-reads reads.fastq --kmer-size-assembly 51 -o assembly/
   ```
 
 **Problem: Assembly is chimeric or has misassemblies**
 - **Enable stricter filtering**:
   ```bash
-  strandweaver assemble --input reads.fastq --edge-filter-mode strict --output assembly.fasta
+  strandweaver pipeline --hifi-long-reads reads.fastq --edge-filter-mode strict -o assembly/
   ```
 - **Add Hi-C validation**: Long-range contact validation prevents chimeras
   ```bash
-  strandweaver assemble --hifi hifi.fastq --hic hic_R1.fastq hic_R2.fastq --output validated.fasta
+  strandweaver pipeline --hifi-long-reads hifi.fastq --hic-r1 hic_R1.fastq --hic-r2 hic_R2.fastq -o validated/
   ```
 
 ### Performance & Resource Issues
 
 **Problem: Out of memory (OOM) errors**
 ```bash
-# Reduce memory usage with streaming mode
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --streaming \
-  --max-memory 16G
+# Limit memory usage
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --memory-limit 16
 
-# Or process in batches
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --batch-size 100000
+# Or reduce graph coverage via sampling
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --sample-size-graph 500000
 ```
 
 **Problem: Assembly is too slow**
 ```bash
 # Increase threads (use all available cores)
-strandweaver assemble --input reads.fastq --threads $(nproc) --output assembly.fasta
+strandweaver pipeline --hifi-long-reads reads.fastq -t $(nproc) -o assembly/
 
 # Disable AI features for faster heuristic-only assembly
-strandweaver assemble --input reads.fastq --no-ai --output fast_assembly.fasta
+strandweaver pipeline --hifi-long-reads reads.fastq --classical -o fast_assembly/
 
-# Use rapid mode (skips iterative refinement)
-strandweaver assemble --input reads.fastq --rapid --output quick_assembly.fasta
+# Skip profiling step if reads are already well-characterized
+strandweaver pipeline --hifi-long-reads reads.fastq --skip-profiling -o quick_assembly/
 ```
 
 **Problem: Disk space issues**
 ```bash
-# Enable cleanup of intermediate files
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --cleanup-intermediate
+# Export only FASTA (skip GFA graphs to save space)
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --output-format fasta
 
-# Specify temporary directory on larger drive
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --temp-dir /mnt/large_drive/tmp
+# Use a separate output directory on a larger drive
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o /mnt/large_drive/assembly/
 ```
 
 ### Input Data Issues
@@ -698,24 +689,22 @@ gunzip -c reads.fastq.gz > reads.fastq
 **Problem: Technology auto-detection fails**
 ```bash
 # Manually specify read technology
-strandweaver assemble \
-  --input reads.fastq \
-  --technology ont \
-  --output assembly.fasta
+strandweaver pipeline \
+  -r1 reads.fastq --technology1 ont \
+  -o assembly/
 
-# Supported: illumina, ont, hifi, ultralong, ancient
+# Supported: illumina, ancient, ont, ont_ultralong, pacbio
 ```
 
 **Problem: Ancient DNA damage not detected**
 ```bash
-# Explicitly enable ancient DNA mode
-strandweaver assemble \
-  --ancient-dna ancient_reads.fastq \
-  --damage-aware \
-  --output ancient_assembly.fasta
+# Explicitly specify ancient DNA technology
+strandweaver pipeline \
+  -r1 ancient_reads.fastq --technology1 ancient \
+  -o ancient_assembly/
 
 # Check damage profile first
-strandweaver profile --ancient-dna ancient_reads.fastq --output damage_profile.json
+strandweaver profile -i ancient_reads.fastq --technology ancient -o damage_profile.json
 ```
 
 ### AI/ML Issues
@@ -734,21 +723,27 @@ pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver
 # v0.1 uses optimized heuristics (no models needed)
 # This is expected behavior - assembly will complete successfully
 
-# For v0.2+: Download pre-trained models
-strandweaver download-models --destination ~/.strandweaver/models
+# For v0.2+: Pre-trained models will be available for download
 
 # Or train custom models (advanced)
-strandweaver train generate-data --genome-size 5000000 -o training_data/
+strandweaver train generate-data --genome-size 5000000 --graph-training -o training_data/
+strandweaver train run --data-dir training_data/ -o trained_models/
 # See strandweaver/user_training/README.md for details
 ```
 
 **Problem: GPU not being used**
 ```bash
-# Force GPU usage
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --device cuda
+# Force GPU usage with explicit backend
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --gpu-backend cuda
+
+# On Apple Silicon
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --gpu-backend mps
 
 # Check GPU memory usage during assembly
 watch -n 1 nvidia-smi
@@ -758,19 +753,13 @@ watch -n 1 nvidia-smi
 
 **Problem: No structural variants detected**
 ```bash
-# Ensure SV detection is enabled
-strandweaver assemble \
-  --input reads.fastq \
-  --detect-svs \
-  --sv-mode sensitive \
-  --output assembly.fasta
-
+# Ensure SV detection is happening (enabled by default in the pipeline)
 # SVs require ultra-long or Hi-C data for validation
-strandweaver assemble \
-  --hifi hifi.fastq \
+strandweaver pipeline \
+  --hifi-long-reads hifi.fastq \
   --ont-ul ultralong.fastq \
-  --detect-svs \
-  --output assembly.fasta
+  --min-sv-size 30 \
+  -o assembly/
 ```
 
 **Problem: Missing output files**
@@ -778,14 +767,12 @@ strandweaver assemble \
 # Check pipeline.log for errors
 tail -100 output/pipeline.log
 
-# Enable all output formats
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --export-gfa \
-  --export-bandage \
-  --export-stats \
-  --detect-svs
+# Export all output formats (FASTA + GFA) with intermediate graphs
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --output-format both \
+  --export-intermediate-graphs
 ```
 
 **Problem: GFA file won't load in BandageNG**
@@ -793,24 +780,23 @@ strandweaver assemble \
 # Validate GFA format
 grep "^S" assembly_graph.gfa | head -5
 
-# Regenerate with sequence export
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --export-gfa \
-  --gfa-include-sequences
+# Regenerate with both FASTA + GFA export
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
+  --output-format both
 ```
 
 ### Common Error Messages
 
 **`ValueError: Coverage too low for reliable assembly`**
-- Solution: Increase sequencing coverage (aim for 30×+ minimum) or use `--min-coverage 10` to override
+- Solution: Increase sequencing coverage (aim for 30×+ minimum)
 
 **`RuntimeError: Graph construction failed - no valid k-mer overlaps`**
-- Solution: Try different k-mer size with `--kmer-size 31` or `--kmer-size 51`
+- Solution: Try different k-mer size with `--kmer-size-assembly 31` or `--kmer-size-assembly 51`
 
 **`MemoryError: Unable to allocate array`**
-- Solution: Enable streaming mode with `--streaming` or reduce batch size with `--batch-size 50000`
+- Solution: Use `--memory-limit 16` to cap memory or reduce coverage with `--sample-size-graph 500000`
 
 **`ImportError: cannot import name 'ThreadCompass'`**
 - Solution: Reinstall package with `pip install --force-reinstall strandweaver`
@@ -828,16 +814,10 @@ strandweaver --help
 
 **Enable verbose logging**:
 ```bash
-strandweaver assemble \
-  --input reads.fastq \
-  --output assembly.fasta \
-  --verbose \
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq \
+  -o assembly/ \
   --log-level DEBUG
-```
-
-**Generate diagnostic report**:
-```bash
-strandweaver diagnose --output diagnostic_report.txt
 ```
 
 **Report issues**: [GitHub Issues](https://github.com/pgrady1322/strandweaver/issues)
@@ -846,16 +826,31 @@ strandweaver diagnose --output diagnostic_report.txt
 
 ---
 
-## �📚 Documentation
+## 🗺️ Roadmap & Future Enhancements
+
+Planned features and known integration gaps for upcoming releases.
+
+### v0.2 — Planned
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | **Trained ML Models** | In Progress | XGBoost / PyTorch weights for all 7 AI modules |
+| 2 | **PacBio Flowcell / Chemistry Metadata** | Almost Complete | `--pacbio-platform`, `--pacbio-chemistry` flags for the `profile` command (analogous to existing ONT metadata flags) |
+| 3 | **Native ONT Metadata Detection** | Almost Complete | `--ont-detect` flag is wired but calls a placeholder. Replace with POD5 / FAST5 / Dorado header parsing |
+| 4 | **Standalone `assemble` / `nf-build-contigs`** | Stub only | Wire to the same assembly engine used by the `pipeline` command |
+| 5 | **Multi-Technology Read Merging (`nf-merge`)** | Stub only | Standalone merge utility for users working with external assemblers |
+| 6 | **QV Score Optimization & Gap Filling** | Planned | `_step_finish()` has stubs; partial T2T-Polish integration exists |
+| 7 | **Validate — Reference Comparison** | Planned | `--reference` flag accepted but comparison logic not implemented |
+| 8 | **BUSCO Integration** | Planned | `--busco-lineage` present on `validate` but not wired to BUSCO |
+| 9 | **Decontamination Screening** | Planned | `--decontaminate` present on `pipeline` but no screening step implemented. Config supports `reference_databases` |
+| 10 | **Polyploid Assembly** | Planned | `--ploidy` currently limited to `haploid` / `diploid`; polyploid mode is a future target |
+
+---
+
+## 📚 Documentation
 
 **Available Documentation:**
-- [Features Guide](docs/FEATURES.md) - Complete feature documentation
 - [User Training Guide](strandweaver/user_training/README.md) - Generate custom training data
-
-**Coming in v0.1.1:**
-- Complete user tutorials and examples
-- Training guide for custom models
-- Performance benchmarks and comparisons to other assemblers
 
 ---
 
@@ -959,7 +954,7 @@ This model balances openness with responsible and sustainable use.
 
 ---
 
-## 📈 Citation
+## 📈 Citation and References
 
 ```bibtex
 @software{strandweaver2026,
@@ -970,6 +965,9 @@ This model balances openness with responsible and sustainable use.
 }
 ```
 
+1) Zimin AV, Puiu D, Luo MC, Zhu T, Koren S, Yorke JA, Dvorak J, Salzberg S. Hybrid assembly of the large and highly repetitive genome of Aegilops tauschii, a progenitor of bread wheat, with the mega-reads algorithm. Genome Research. 2017 Jan 1:066100.
+2) Rautiainen, M., Nurk, S., Walenz, B.P. et al. Telomere-to-telomere assembly of diploid chromosomes with Verkko. Nat Biotechnol 41, 1474–1482 (2023). https://doi.org/10.1038/s41587-023-01662-6
+3) Cheng, H., Concepcion, G.T., Feng, X. et al. Haplotype-resolved de novo assembly using phased assembly graphs with hifiasm. Nat Methods 18, 170–175 (2021). https://doi.org/10.1038/s41592-020-01056-5
 ---
 
 **StrandWeaver** 🧬⚡🤖

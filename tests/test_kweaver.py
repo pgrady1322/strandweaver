@@ -1,7 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Unit tests for K-Weaver module (k-mer size prediction).
+StrandWeaver v0.1.0
+
+K-Weaver unit tests.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -65,3 +70,6 @@ class TestKWeaverBasics:
         assert prediction.dbg_k > 0
         assert prediction.dbg_k < 200  # Reasonable upper bound
         assert prediction.ul_overlap_k > prediction.dbg_k  # UL k-mers should be larger
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

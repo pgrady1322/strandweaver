@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Generate Simplified Example Data for StrandWeaver
+StrandWeaver v0.1.0
 
-Creates synthetic datasets for testing:
-- 5 Mb bacterial genome
-- HiFi-like reads (30× coverage)
-- ONT-like reads (50× coverage)
-- Illumina-like paired reads (100× coverage)
-- Hi-C-like paired reads (20× coverage)
+Generate simplified example data — synthetic 5 Mb genome with multi-technology reads
+(HiFi, ONT, Illumina, Hi-C) for testing.
 
-Usage:
-    python generate_example_data.py
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from pathlib import Path
@@ -403,3 +401,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

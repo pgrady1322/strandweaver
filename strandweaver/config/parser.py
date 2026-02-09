@@ -1,12 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 StrandWeaver v0.1.0
 
-Configuration parser for StrandWeaver.
+Configuration parser — YAML config loading, merging, and validation.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -262,3 +262,6 @@ class ConfigParser:
     def __repr__(self) -> str:
         """String representation."""
         return f"ConfigParser(config_file={self.config_file})"
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.

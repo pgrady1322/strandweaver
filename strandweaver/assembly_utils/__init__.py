@@ -1,16 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 StrandWeaver v0.1.0
 
-Assembly Utilities module for StrandWeaver.
-
-This module provides utility functions for assembly tasks:
-- Graph cleanup and phasing-aware validation
-- Misassembly detection and flagging
-- Chromosome classification (microchromosome identification)
-- Gene annotation (BLAST, Augustus, BUSCO, ORF)
-- Hi-C read alignment to assembly graphs
+Assembly Utilities — graph cleanup, misassembly detection, chromosome
+classification, gene annotation, and Hi-C graph alignment.
 
 Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
 License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
@@ -63,3 +60,6 @@ __all__ = [
     "HiCAlignment",
     "align_hic_reads_to_graph",
 ]
+
+# StrandWeaver v0.1.0
+# Any usage is subject to this software's license.
