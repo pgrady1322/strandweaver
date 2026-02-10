@@ -28,16 +28,20 @@ from .training_config import (
     GraphTrainingConfig
 )
 
-# Import from existing training infrastructure.
-# The 'training' package only exists in strandweaver-dev; in the release repo
-# these symbols are unavailable.  We guard the import so the rest of the
-# module (and the user_training package) remains importable.
+# Import from the training backend (strandweaver.training).
+# We try the absolute package path first, then fall back to a relative
+# import for editable / in-tree installs.  If neither works the rest of
+# the module (and the user_training package) remains importable.
 _TRAINING_BACKEND_AVAILABLE = False
+_TRAINING_IMPORT_NAMES = (
+    'GenomeConfig', 'DiploidGenome', 'generate_diploid_genome',
+    'IlluminaConfig', 'HiFiConfig', 'ONTConfig', 'ULConfig',
+    'HiCConfig', 'AncientDNAConfig',
+    'simulate_illumina_reads', 'simulate_long_reads',
+    'simulate_hic_reads', 'write_fastq', 'write_paired_fastq',
+)
 try:
-    import sys as _sys
-    _sys.path.append(str(Path(__file__).parent.parent))
-
-    from training.synthetic_data_generator import (  # type: ignore[import-not-found]
+    from strandweaver.training.synthetic_data_generator import (
         GenomeConfig,
         DiploidGenome,
         generate_diploid_genome,
@@ -51,7 +55,7 @@ try:
         simulate_long_reads,
         simulate_hic_reads,
         write_fastq,
-        write_paired_fastq
+        write_paired_fastq,
     )
     _TRAINING_BACKEND_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):
@@ -78,9 +82,9 @@ class TrainingDataGenerator:
     """
     Orchestrates user-configured training data generation.
     
-    Requires the ``training`` package (available in strandweaver-dev).
-    If the package is not installed, instantiation will raise
-    ``RuntimeError`` with installation guidance.
+    Requires the ``strandweaver.training`` backend (synthetic data
+    generator).  If the backend cannot be imported, instantiation will
+    raise ``RuntimeError`` with installation guidance.
     """
     
     def __init__(self, config: UserTrainingConfig):
@@ -95,10 +99,13 @@ class TrainingDataGenerator:
         """
         if not _TRAINING_BACKEND_AVAILABLE:
             raise RuntimeError(
-                "Training data generation requires the 'training' package "
-                "which is only available in strandweaver-dev.  Install it with:\n"
-                "  pip install strandweaver-dev\n"
-                "or clone the strandweaver-dev repo and install in editable mode."
+                "Training data generation requires the strandweaver.training "
+                "backend.  Make sure you installed StrandWeaver with:\n"
+                "  pip install 'strandweaver[all]'\n"
+                "or in editable mode from the repo root:\n"
+                "  pip install -e '.[all]'\n"
+                "If running on Colab, ensure 'pip install -e .' ran in the "
+                "cloned strandweaver/ directory."
             )
         
         self.config = config
