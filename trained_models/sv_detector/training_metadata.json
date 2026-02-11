@@ -1,0 +1,48 @@
+{
+  "feature_columns": [
+    "coverage_mean",
+    "coverage_std",
+    "coverage_median",
+    "gc_content",
+    "repeat_fraction",
+    "kmer_diversity",
+    "branching_complexity",
+    "hic_disruption_score",
+    "ul_support",
+    "mapping_quality",
+    "region_length",
+    "breakpoint_precision",
+    "allele_balance",
+    "phase_switch_rate"
+  ],
+  "metrics": {
+    "val_accuracy": 0.6897,
+    "val_f1_weighted": 0.688,
+    "train_size": 328,
+    "val_size": 58,
+    "best_iteration": 51,
+    "cv_accuracy_mean": 0.671,
+    "cv_accuracy_std": 0.0362,
+    "cv_fold_scores": [
+      0.6667,
+      0.6104,
+      0.7013,
+      0.7143,
+      0.6623
+    ],
+    "label_distribution": {
+      "deletion": 45,
+      "insertion": 52,
+      "inversion": 51,
+      "duplication": 45,
+      "none": 193
+    }
+  },
+  "label_classes": [
+    "deletion",
+    "duplication",
+    "insertion",
+    "inversion",
+    "none"
+  ]
+}

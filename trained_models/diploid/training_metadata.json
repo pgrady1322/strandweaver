@@ -1,0 +1,35 @@
+{
+  "feature_columns": [
+    "coverage",
+    "gc_content",
+    "repeat_fraction",
+    "kmer_diversity",
+    "branching_factor",
+    "hic_contact_density",
+    "allele_frequency",
+    "heterozygosity",
+    "phase_consistency",
+    "mappability"
+  ],
+  "metrics": {
+    "val_accuracy": 0.5293,
+    "val_f1_weighted": 0.5164,
+    "train_size": 1802576,
+    "val_size": 318102,
+    "best_iteration": 199,
+    "cv_accuracy_mean": 0.5273,
+    "cv_accuracy_std": 0.0005,
+    "cv_fold_scores": [
+      0.5267,
+      0.5278
+    ],
+    "label_distribution": {
+      "A": 1060208,
+      "B": 1060470
+    }
+  },
+  "label_classes": [
+    "A",
+    "B"
+  ]
+}

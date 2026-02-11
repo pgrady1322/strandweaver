@@ -1,0 +1,55 @@
+{
+  "feature_columns": [
+    "overlap_length",
+    "overlap_identity",
+    "read1_length",
+    "read2_length",
+    "coverage_r1",
+    "coverage_r2",
+    "gc_content_r1",
+    "gc_content_r2",
+    "repeat_fraction_r1",
+    "repeat_fraction_r2",
+    "kmer_diversity_r1",
+    "kmer_diversity_r2",
+    "branching_factor_r1",
+    "branching_factor_r2",
+    "hic_support",
+    "mapping_quality_r1",
+    "mapping_quality_r2"
+  ],
+  "label_classes": [
+    "ALLELIC",
+    "CHIMERIC",
+    "SV_BREAK",
+    "TRUE"
+  ],
+  "technologies": [
+    "hifi",
+    "ont_r9",
+    "ont_r10",
+    "illumina",
+    "adna"
+  ],
+  "metrics": {
+    "val_accuracy": 0.7962,
+    "val_f1_weighted": 0.7194,
+    "train_size": 110093,
+    "val_size": 19429,
+    "best_iteration": 99,
+    "cv_accuracy_mean": 0.7956,
+    "cv_accuracy_std": 0.0007,
+    "cv_fold_scores": [
+      0.7965,
+      0.7953,
+      0.7961,
+      0.7946
+    ],
+    "label_distribution": {
+      "SV_BREAK": 26979,
+      "ALLELIC": 368,
+      "CHIMERIC": 97221,
+      "TRUE": 4954
+    }
+  }
+}

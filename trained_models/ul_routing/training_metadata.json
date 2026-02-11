@@ -1,0 +1,35 @@
+{
+  "feature_columns": [
+    "path_length",
+    "num_branches",
+    "coverage_mean",
+    "coverage_std",
+    "sequence_identity",
+    "mapping_quality",
+    "num_gaps",
+    "gap_size_mean",
+    "kmer_consistency",
+    "orientation_consistency",
+    "ul_span",
+    "route_complexity"
+  ],
+  "metrics": {
+    "val_rmse": 0.0,
+    "val_r2": 1.0,
+    "train_size": 855,
+    "val_size": 151,
+    "best_iteration": 0,
+    "cv_r2_mean": 1.0,
+    "cv_r2_std": 0.0,
+    "cv_fold_scores": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "label_distribution": {
+      "1.0": 1006
+    }
+  }
+}
