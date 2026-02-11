@@ -305,7 +305,11 @@ def inject_noise_edges(
         existing_pairs.add((b.read_id, a.read_id))
 
         # Fabricate a plausible-looking overlap
-        fake_ovl_len = rng.randint(200, min(a.length, b.length, 5000))
+        max_ovl = min(a.length, b.length, 5000)
+        min_ovl = min(200, max_ovl)
+        if max_ovl < 20:
+            continue
+        fake_ovl_len = rng.randint(min_ovl, max_ovl)
         noise.append(Overlap(
             read_a_id=a.read_id,
             read_b_id=b.read_id,

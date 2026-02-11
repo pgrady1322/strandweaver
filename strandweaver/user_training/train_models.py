@@ -759,7 +759,8 @@ def train_all_models(config: ModelTrainingConfig) -> Dict[str, Any]:
 
         # ── 4. Train ───────────────────────────────────────────────
         xgb_params = _resolve_xgb_params(spec, config)
-        is_binary = (spec['task'] == 'binary')
+        n_classes = len(set(y.tolist()))
+        is_binary = (spec['task'] == 'binary') or (n_classes == 2)
 
         if spec['task'] == 'regression':
             model, metrics = _train_regressor(X, y, xgb_params, config)
