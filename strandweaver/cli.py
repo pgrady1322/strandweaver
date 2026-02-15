@@ -2936,12 +2936,16 @@ def train():
               help='Skip GFA file export')
 @click.option('--graph-max-coverage', type=float, default=None,
               help='Subsample reads to this coverage before graph construction (saves RAM)')
+@click.option('--graph-only', is_flag=True, default=False,
+              help='\u26a1 Fast mode: simulate reads in-memory for realistic coverage/overlap '
+                   'features but skip writing FASTQ/FASTA files to disk.  Only outputs '
+                   'graph training CSVs.  ~10\u00d7 faster, ~95%% less disk.')
 def train_generate_data(genome_size, output, gc_content, repeat_density,
                         read_types, coverage, num_genomes, seed,
                         ploidy, snp_rate, indel_rate, sv_density, centromeres,
                         graph_training, min_overlap_bp, min_overlap_identity,
                         noise_edge_fraction, no_noise_edges, no_gfa,
-                        graph_max_coverage):
+                        graph_max_coverage, graph_only):
     """
     Generate synthetic training data for StrandWeaver ML models.
 
@@ -2963,6 +2967,11 @@ def train_generate_data(genome_size, output, gc_content, repeat_density,
       strandweaver train generate-data --genome-size 2000000 -n 20 \\
           --repeat-density 0.60 --gc-content 0.35 --graph-training \\
           -o data/repeat_rich
+
+      # \u26a1 Fast graph-only mode (no FASTQ written, ~10\u00d7 faster)
+      strandweaver train generate-data --genome-size 1000000 -n 200 \\
+          --read-types hifi --read-types ont --read-types hic \\
+          --graph-training --graph-only -o data/fast_graphs
     """
     from strandweaver.user_training import (
         UserGenomeConfig, UserReadConfig, UserTrainingConfig,
@@ -3009,6 +3018,10 @@ def train_generate_data(genome_size, output, gc_content, repeat_density,
         for rt, cov in zip(read_types_list, coverages)
     ]
 
+    # If --graph-only is set, auto-enable graph training
+    if graph_only and not graph_training:
+        graph_training = True
+
     graph_config = None
     if graph_training:
         graph_config = GraphTrainingConfig(
@@ -3017,7 +3030,7 @@ def train_generate_data(genome_size, output, gc_content, repeat_density,
             min_overlap_identity=min_overlap_identity,
             add_noise_edges=not no_noise_edges,
             noise_edge_fraction=noise_edge_fraction,
-            export_gfa=not no_gfa,
+            export_gfa=not no_gfa and not graph_only,  # skip GFA in fast mode
             max_coverage_for_graph=graph_max_coverage,
         )
 
@@ -3026,6 +3039,7 @@ def train_generate_data(genome_size, output, gc_content, repeat_density,
         read_configs=read_configs,
         output_dir=Path(output),
         graph_config=graph_config,
+        graph_only=graph_only,
     )
 
     # ── Display summary ────────────────────────────────────────────
@@ -3049,6 +3063,8 @@ def train_generate_data(genome_size, output, gc_content, repeat_density,
     click.echo(f"║  Read types       :  {techs_str}")
     if graph_training:
         click.echo(f"║  Graph training   :  ENABLED")
+    if graph_only:
+        click.echo(f"║  ⚡ Graph-only    :  YES (no FASTQ/FASTA written)")
     click.echo(f"║  Output           :  {output}")
     click.echo("╚══════════════════════════════════════════════════════════════╝")
     click.echo()
