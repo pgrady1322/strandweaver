@@ -1712,44 +1712,6 @@ class PipelineOrchestrator:
         
         return []
     
-    def _run_hic_scaffolding(
-        self,
-        contigs: List[SeqRead],
-        hic_data: Optional[Any],
-        phasing_info: Optional[Any] = None
-    ) -> List[SeqRead]:
-        """
-        Run Hi-C scaffolding on contigs.
-        
-        TODO: This is a placeholder implementation.
-        
-        Args:
-            contigs: List of assembled contigs (SeqRead objects)
-            hic_data: Hi-C read data for proximity ligation
-            phasing_info: Optional phasing information from Haplotype Detangler
-        
-        Returns:
-            List of scaffolded contigs (SeqRead objects)
-        
-        Real implementation would:
-        1. Build contig contact matrix from Hi-C alignments
-        2. Cluster contigs by contact frequency
-        3. Order and orient contigs within scaffolds
-        4. Use phasing_info to separate haplotypes if available
-        5. Join contigs with N-gaps
-        6. Return scaffolded sequences
-        """
-        self.logger.warning(
-            f"Hi-C scaffolding is not yet implemented. "
-            f"Returning {len(contigs)} unscaffolded contigs."
-        )
-        
-        if phasing_info:
-            self.logger.info(f"Phasing information available: {phasing_info.num_haplotypes} haplotypes detected")
-        
-        # Placeholder: return contigs unchanged
-        return contigs
-    
     def _add_hic_edges_to_graph(
         self,
         graph: Union[DBGGraph, StringGraph],
