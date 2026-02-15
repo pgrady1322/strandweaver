@@ -681,9 +681,13 @@ class StrandTether:
         # Orientation consistency
         orient_score = self._score_orientation(orientation)
         
-        # Combine scores
+        # Combine scores (weights must sum to 1.0)
+        #   contact_freq:  0.50
+        #   orientation:   orientation_weight (default 0.30)
+        #   distance:      distance_weight   (default 0.20)
+        contact_weight = 1.0 - self.orientation_weight - self.distance_weight
         hic_confidence = (
-            0.60 * contact_freq +
+            contact_weight * contact_freq +
             self.orientation_weight * orient_score +
             self.distance_weight * 0.5  # Neutral distance penalty without genomic distances
         )
@@ -880,15 +884,25 @@ class StrandTether:
     
     def _score_orientation(self, orientation: str) -> float:
         """
-        Score orientation consistency.
-        
-        ++ or -- (same strand): 1.0
-        +- or -+ (opposite strand): 0.0
-        ?: 0.5 (unknown)
+        Score orientation consistency for Hi-C read pairs.
+
+        Valid Hi-C ligation products are convergent: one read maps to the
+        forward strand and the other to the reverse strand at the ligation
+        junction.  This means +- and -+ orientations indicate a genuine
+        proximity-ligation event, while ++ and -- (same-strand) pairs
+        typically arise from unligated fragments or PCR artefacts.
+
+        References:
+            Lieberman-Aiden et al., Science 2009
+            Ghurye et al., 2019 (SALSA2)
+
+        +- or -+ (convergent / valid ligation): 1.0
+        ++ or -- (same strand / artefact):      0.0
+        ? (unknown):                             0.5
         """
-        if orientation in ("++", "--"):
+        if orientation in ("+-", "-+"):
             return 1.0
-        elif orientation in ("+-", "-+"):
+        elif orientation in ("++", "--"):
             return 0.0
         else:
             return 0.5

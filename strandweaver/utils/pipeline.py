@@ -12,7 +12,7 @@ License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENS
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Tuple
+from typing import Optional, Dict, Any, List, Union, Tuple, Set
 import logging
 import json
 import pickle
@@ -336,9 +336,28 @@ class PipelineOrchestrator:
         )
         predictor = KWeaverPredictor(model_dir=kweaver_model_dir, use_ml=use_ai)
         
-        # Extract features from first input file (representative sample)
-        first_file = Path(self.state['read_files'][0])
-        self.logger.info(f"  Extracting features from: {first_file.name}")
+        # Select a representative primary-assembly file for feature
+        # extraction.  Hi-C and UL reads have very different length and
+        # error-rate distributions that would produce wrong k-mer
+        # predictions if sampled.  Prefer HiFi > ONT > Illumina > ancient
+        # > anything else.
+        read_files = self.state['read_files']
+        techs = self.state['technologies']
+        _PRIORITY = {'pacbio': 0, 'hifi': 0, 'ont': 1, 'illumina': 2,
+                     'ancient': 3}
+        best_idx = 0
+        best_rank = 999
+        for idx, tech in enumerate(techs):
+            t = tech.lower()
+            if t in ('hic', 'ont_ultralong'):
+                continue  # never sample these
+            rank = _PRIORITY.get(t, 4)
+            if rank < best_rank:
+                best_rank = rank
+                best_idx = idx
+        first_file = Path(read_files[best_idx])
+        self.logger.info(f"  Extracting features from: {first_file.name} "
+                         f"(technology: {techs[best_idx]})")
         
         # Initialize extractor with subsampling
         subsample_size = min(100000, self.config['profiling']['sample_size'])
@@ -571,9 +590,19 @@ class PipelineOrchestrator:
         use_ai = self.config['ai']['enabled']
         ai_models = self._load_ai_models() if use_ai else None
         
-        # Determine primary technology for assembly strategy
+        # Determine primary technology for assembly strategy.
+        # Exclude Hi-C from the vote — it is proximity-ligation data, not
+        # an assembly read type, and will win the vote when ≥2 Hi-C files
+        # are provided alongside fewer primary read files.
         technologies = self.state['technologies']
-        primary_tech = max(set(technologies), key=technologies.count)
+        assembly_techs = [t for t in technologies if t.lower() != 'hic']
+        if not assembly_techs:
+            raise ValueError(
+                "No assembly read files found (only Hi-C data provided). "
+                "StrandWeaver requires at least one primary read file "
+                "(HiFi, ONT, Illumina, or ancient DNA)."
+            )
+        primary_tech = max(set(assembly_techs), key=assembly_techs.count)
         
         self.logger.info(f"  Primary technology: {primary_tech}")
         self.logger.info(f"  AI-powered assembly: {use_ai}")
@@ -1706,11 +1735,187 @@ class PipelineOrchestrator:
             return contigs
         
         elif isinstance(graph, StringGraph):
-            # Traverse string graph to find paths
-            # Placeholder: just return DBG contigs
-            return self._extract_contigs_from_graph(graph.dbg)
+            # Traverse string graph: walk linear paths through the
+            # combined edge set (DBG edges + UL overlay edges).  UL
+            # overlay edges bridge distant DBG nodes, producing longer
+            # scaffolded contigs than the DBG alone.
+            return self._extract_contigs_from_string_graph(graph, min_len)
         
         return []
+    
+    def _extract_contigs_from_string_graph(
+        self,
+        graph: 'StringGraph',
+        min_len: int = 0
+    ) -> List[SeqRead]:
+        """
+        Extract contigs by traversing linear paths through the combined
+        DBG + UL-overlay edge set.
+
+        UL overlay edges (StringGraphEdge) bridge distant DBG nodes that
+        share ultra-long read support.  By walking the combined edge set
+        we produce contigs that incorporate UL bridging — the core value
+        of the string graph approach.
+
+        Algorithm:
+        1. Build a unified adjacency from DBG edges + string graph
+           overlay edges, preferring overlay edges when both exist
+           (they carry UL support).
+        2. Walk linear paths (in-degree 1, out-degree 1).
+        3. Concatenate node sequences using the standard (k-2) overlap
+           for DBG junctions, or N-gap for UL-bridged jumps.
+
+        Args:
+            graph: StringGraph with .dbg and .edges/.out_edges/.in_edges
+            min_len: Minimum contig length to keep
+
+        Returns:
+            List of SeqRead contig objects
+        """
+        dbg = graph.dbg
+        k = dbg.base_k  # nodes are (k-1)-mers, overlap = k-2
+
+        # ------------------------------------------------------------------
+        # 1. Build unified out/in-neighbor maps over ALL nodes.
+        #    For each node keep a dict  target_node → edge_source
+        #    where edge_source is 'dbg' or 'ul'.
+        # ------------------------------------------------------------------
+        out_neighbors: Dict[int, Dict[int, str]] = defaultdict(dict)
+        in_neighbors: Dict[int, Dict[int, str]] = defaultdict(dict)
+
+        # DBG edges first
+        for edge_id, edge in dbg.edges.items():
+            out_neighbors[edge.from_id][edge.to_id] = 'dbg'
+            in_neighbors[edge.to_id][edge.from_id] = 'dbg'
+
+        # Overlay edges (UL-supported) — overwrite DBG entries if present
+        for edge_id, edge in graph.edges.items():
+            out_neighbors[edge.from_node][edge.to_node] = 'ul'
+            in_neighbors[edge.to_node][edge.from_node] = 'ul'
+
+        # ------------------------------------------------------------------
+        # 2. Walk linear paths (combined in/out degree == 1)
+        # ------------------------------------------------------------------
+        visited: Set[int] = set()
+        paths: List[List[Tuple[int, str]]] = []  # [(node_id, join_type), ...]
+
+        for seed in dbg.nodes:
+            if seed in visited:
+                continue
+
+            # Walk forward
+            fwd: List[Tuple[int, str]] = [(seed, 'start')]
+            visited.add(seed)
+            current = seed
+            while True:
+                outs = out_neighbors.get(current, {})
+                if len(outs) != 1:
+                    break
+                next_node, join_type = next(iter(outs.items()))
+                if len(in_neighbors.get(next_node, {})) != 1:
+                    break
+                if next_node in visited:
+                    break
+                fwd.append((next_node, join_type))
+                visited.add(next_node)
+                current = next_node
+
+            # Walk backward
+            bwd: List[Tuple[int, str]] = []
+            current = seed
+            while True:
+                ins = in_neighbors.get(current, {})
+                if len(ins) != 1:
+                    break
+                prev_node, join_type = next(iter(ins.items()))
+                if len(out_neighbors.get(prev_node, {})) != 1:
+                    break
+                if prev_node in visited:
+                    break
+                bwd.append((prev_node, join_type))
+                visited.add(prev_node)
+                current = prev_node
+
+            # Combine:  reversed(bwd) + fwd
+            # For bwd entries, the join_type describes how prev→seed is
+            # connected, so we keep that when reversing.
+            full_path = list(reversed(bwd)) + fwd
+            paths.append(full_path)
+
+        # ------------------------------------------------------------------
+        # 3. Build contig sequences from paths
+        # ------------------------------------------------------------------
+        contigs: List[SeqRead] = []
+        contig_idx = 0
+        gap_seq = 'N' * 100  # Default scaffold gap for UL-bridged jumps
+
+        for path in paths:
+            if not path:
+                continue
+
+            # Start with the first node's full sequence
+            first_node_id = path[0][0]
+            first_node = dbg.nodes.get(first_node_id)
+            if first_node is None or not first_node.seq:
+                continue
+
+            segments = [first_node.seq]
+            total_coverage = first_node.coverage
+            ul_bridges = 0
+
+            for i in range(1, len(path)):
+                node_id, join_type = path[i]
+                node = dbg.nodes.get(node_id)
+                if node is None or not node.seq:
+                    continue
+
+                if join_type == 'dbg':
+                    # Standard DBG junction: nodes overlap by k-2 chars
+                    overlap = k - 2
+                    if overlap < len(node.seq):
+                        segments.append(node.seq[overlap:])
+                    else:
+                        segments.append(node.seq)
+                else:
+                    # UL-bridged jump: no sequence overlap, insert gap
+                    segments.append(gap_seq)
+                    segments.append(node.seq)
+                    ul_bridges += 1
+
+                total_coverage += node.coverage
+
+            sequence = ''.join(segments)
+            n_nodes = len(path)
+            avg_coverage = total_coverage / n_nodes if n_nodes else 0
+
+            # Apply minimum length filter
+            if min_len > 0 and len(sequence) < min_len:
+                continue
+
+            # Quality string from average coverage
+            avg_qual = min(40, int(20 + 10 * math.log10(avg_coverage + 1)))
+            quality = chr(avg_qual + 33) * len(sequence)
+
+            contig_idx += 1
+            contig = SeqRead(
+                id=f"contig_{contig_idx}",
+                sequence=sequence,
+                quality=quality,
+                metadata={
+                    'source': 'string_graph',
+                    'num_nodes': n_nodes,
+                    'ul_bridges': ul_bridges,
+                    'avg_coverage': round(avg_coverage, 1),
+                    'length': len(sequence),
+                }
+            )
+            contigs.append(contig)
+
+        self.logger.info(
+            f"  String graph traversal: {len(contigs)} contigs from "
+            f"{len(paths)} paths ({sum(1 for p in paths for _, jt in p if jt == 'ul')} UL bridges)"
+        )
+        return contigs
     
     def _add_hic_edges_to_graph(
         self,
