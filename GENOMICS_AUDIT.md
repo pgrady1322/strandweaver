@@ -15,7 +15,7 @@ Systematic review of pipeline logic, scoring models, and biological assumptions.
 | ID | Module | Issue | Reference |
 |----|--------|-------|-----------|
 | G1 | StrandTether | ✅ **FIXED** — Hi-C orientation scoring was inverted. `++`/`--` scored 1.0, `+-`/`-+` scored 0.0. Valid Hi-C pairs are convergent (`+-`/`-+`). | Lieberman-Aiden et al. *Science* 2009; SALSA2 |
-| G2 | StrandTether | ⚠️ **DEFERRED** — Spectral clustering (Fiedler vector) on full contact graph separates chromosomes, not haplotypes. Requires bubble-aware local phasing (architectural redesign). | hifiasm (Cheng et al. *Nat Methods* 2021) |
+| G2 | HaplotypeDetangler / StrandTether | ✅ **FIXED** — Replaced global spectral clustering with bubble-aware local phasing. Detects heterozygous bubbles in the assembly graph, bins Hi-C contacts per-bubble, chains local phase decisions via BFS. Added `ploidy` parameter (haploid assemblies skip phasing). Old spectral method kept as fallback when no bubbles detected. | hifiasm (Cheng et al. *Nat Methods* 2021) |
 | G3 | Pipeline | ✅ **FIXED** — String graph contig extraction was a placeholder. Now traverses combined DBG + UL overlay edges. | pipeline.py `_extract_contigs_from_string_graph()` |
 | G4 | Pipeline | ✅ **FIXED** — Hi-C files now excluded from primary tech vote. | pipeline.py `_step_assemble()` |
 | G5 | Pipeline | ✅ **FIXED** — K-Weaver now selects primary assembly file (HiFi > ONT > Illumina), skipping Hi-C/UL. | pipeline.py `_step_kweaver()` |

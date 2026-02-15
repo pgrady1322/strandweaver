@@ -897,10 +897,15 @@ class PipelineOrchestrator:
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
         # Step 8: Haplotype Detangler - Phase the graph (AFTER first iteration)
-        # Uses Hi-C connectivity clusters from proximity edges already in graph
+        # Uses bubble-aware local Hi-C phasing (G2 fix) instead of global
+        # spectral clustering, which incorrectly separated chromosomes.
         self.logger.info("Step 8: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
@@ -1166,15 +1171,19 @@ class PipelineOrchestrator:
             result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
-        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters (HiFi)
+        # Step 7: Haplotype Detangler - Phase using bubble-aware Hi-C (HiFi)
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
             graph_to_phase,
-            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+            use_hic_edges=True  # Use Hi-C edges for bubble-aware phasing
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
         # Calculate average phasing confidence
@@ -1420,15 +1429,19 @@ class PipelineOrchestrator:
             result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
-        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters
+        # Step 7: Haplotype Detangler - Phase using bubble-aware Hi-C
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
             graph_to_phase,
-            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+            use_hic_edges=True  # Use Hi-C edges for bubble-aware phasing
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
         # Calculate average phasing confidence

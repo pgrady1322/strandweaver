@@ -252,6 +252,7 @@ class StrandTether:
         distance_decay_power: float = 1.5,
         orientation_weight: float = 0.3,
         distance_weight: float = 0.2,
+        ploidy: int = 2,
     ):
         """
         Initialize StrandTether Hi-C integrator.
@@ -265,6 +266,7 @@ class StrandTether:
             distance_decay_power: Exponent for distance decay correction
             orientation_weight: Weight for orientation consistency (0.0-1.0)
             distance_weight: Weight for distance penalty (0.0-1.0)
+            ploidy: Assembly ploidy (1=haploid skips phasing, 2+=diploid+)
         """
         self.min_contact_threshold = min_contact_threshold
         self.phase_confidence_threshold = phase_confidence_threshold
@@ -274,6 +276,7 @@ class StrandTether:
         self.distance_decay_power = distance_decay_power
         self.orientation_weight = orientation_weight
         self.distance_weight = distance_weight
+        self.ploidy = max(1, int(ploidy))
         
         self.logger = logging.getLogger(f"{__name__}.StrandTether")
         
@@ -420,11 +423,17 @@ class StrandTether:
         graph_nodes: Set[int]
     ) -> Dict[int, HiCNodePhaseInfo]:
         """
-        Assign nodes to haplotype phases using 2-way spectral clustering.
+        Assign nodes to haplotype phases using Hi-C contact patterns.
         
-        Uses normalized Laplacian spectral clustering to partition nodes
-        into two haplotypes based on Hi-C contact patterns.
-        GPU-accelerated spectral clustering provides 15-35× speedup.
+        When ploidy >= 2, uses spectral clustering (GPU) or label
+        propagation (CPU fallback) to partition nodes into two
+        haplotype groups.  Note: this method operates on the raw
+        contact matrix and is best suited for intra-chromosomal
+        separation.  For inter-bubble diploid phasing, use
+        HaplotypeDetangler._bubble_aware_hic_phasing() instead.
+        
+        When ploidy == 1, returns all nodes as phase "A" with full
+        confidence (no phasing needed for haploid assemblies).
         
         Args:
             contact_map: Hi-C contact matrix
@@ -434,6 +443,20 @@ class StrandTether:
             Dict mapping node_id -> HiCNodePhaseInfo
         """
         self.logger.info("Computing node-level phasing from Hi-C contacts")
+        
+        # ── Haploid fast-path ──
+        if self.ploidy < 2:
+            self.logger.info("Ploidy=1 (haploid): assigning all nodes to phase A")
+            return {
+                node: HiCNodePhaseInfo(
+                    node_id=node,
+                    phase_A_score=1.0,
+                    phase_B_score=0.0,
+                    contact_count=contact_map.node_total_contacts.get(node, 0),
+                    phase_assignment="A",
+                )
+                for node in graph_nodes
+            }
         
         # Filter to nodes with sufficient contacts
         active_nodes = [
