@@ -558,7 +558,11 @@ class PipelineOrchestrator:
                 corrector = PacBioCorrector(
                     k_size=correction_k
                 )
-                self.logger.info(f"    Using k={correction_k} for PacBio correction")
+                # Build global k-mer spectrum before per-read correction (G20 fix)
+                # Population frequency signal prevents overcorrecting rare-but-correct k-mers
+                global_reads = list(self._read_file_streaming(Path(reads_file)))
+                corrector.build_global_spectrum(global_reads)
+                self.logger.info(f"    Using k={correction_k} for PacBio correction (global spectrum built)")
             else:
                 # Auto-detect or unknown - use generic
                 corrector = IlluminaCorrector()
@@ -1103,7 +1107,7 @@ class PipelineOrchestrator:
         self.logger.info(f"Step 1: Building DBG from {len(hifi_reads)} HiFi reads")
         # Use K-Weaver prediction for optimal k-mer size
         kmer_prediction = self.state.get('kmer_prediction')
-        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 51)
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 31)
         min_coverage = self.config.get('min_coverage', 2)
         self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
@@ -1363,7 +1367,7 @@ class PipelineOrchestrator:
         self.logger.info(f"Step 1: Building DBG from {len(ont_reads)} ONT reads")
         # Use K-Weaver prediction for optimal k-mer size
         kmer_prediction = self.state.get('kmer_prediction')
-        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 41)
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 21)
         min_coverage = self.config.get('min_coverage', 3)  # Higher for noisy ONT
         self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         

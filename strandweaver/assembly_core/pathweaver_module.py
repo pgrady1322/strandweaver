@@ -1867,14 +1867,15 @@ class PathScorer:
         
         # Combine with iteration-appropriate weights
         if is_final_iteration:
-            # Final iteration: all evidence combined
-            # Weights: EdW=25%, GNN=20%, Topology=15%, UL=20%, HiC=15%, Val=5%
+            # Final iteration: all evidence combined (sum = 1.0)
+            # Weights: EdW=20%, GNN=20%, Topology=15%, UL=15%, HiC=25%, Val=5%
+            # Hi-C raised to dominant signal per 3D-DNA / SALSA2 / YaHS (G22)
             total_score = (
-                self.edgewarden_weight * edgewarden_score +
-                self.gnn_weight * gnn_score +
-                self.topology_weight * topology_score +
-                0.20 * ul_score +
-                0.15 * hic_score +
+                0.20 * edgewarden_score +
+                0.20 * gnn_score +
+                0.15 * topology_score +
+                0.15 * ul_score +
+                0.25 * hic_score +
                 0.05 * val_score
             )
         else:
@@ -1972,13 +1973,14 @@ class PathScorer:
         hic_score = hic_confidence if hic_confidence is not None else 0.5
         sv_score = sv_misassembly_score if sv_misassembly_score is not None else 1.0
         
-        # Compute final score with full weights
+        # Compute final score with full weights (sum = 1.0)
+        # Hi-C raised to dominant signal per 3D-DNA / SALSA2 / YaHS (G22)
         final_score = (
-            0.25 * edgewarden_score +      # EdgeWarden
+            0.20 * edgewarden_score +      # EdgeWarden
             0.20 * gnn_score +              # GNN
             0.15 * topology_score +         # Topology
-            0.20 * ul_score +               # UL (now with real data)
-            0.15 * hic_score +              # Hi-C (now with real data)
+            0.15 * ul_score +               # UL (now with real data)
+            0.25 * hic_score +              # Hi-C (dominant signal)
             0.05 * val_score                # Validation penalty
         )
         

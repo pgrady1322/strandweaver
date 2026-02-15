@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
+from collections import defaultdict
 import pickle
 import gzip
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 class KmerPrediction:
     """Predicted k-mer sizes for different assembly stages."""
     dbg_k: int                          # De Bruijn graph k-mer
-    ul_overlap_k: int                   # UL read overlap alignment k-mer
+    ul_overlap_k: int                   # UL read overlap alignment k-mer (advisory; UL mapper uses anchor_k=15)
     extension_k: int                    # Path extension k-mer
     polish_k: int                       # Final polishing k-mer
     dbg_confidence: float = 1.0         # Confidence in DBG k choice (0-1)
@@ -407,31 +408,62 @@ class FeatureExtractor:
     
     def _estimate_genome_size_simple(self, sequences: List[str]) -> int:
         """
-        Simple genome size estimation using unique k-mer counting.
+        Genome size estimation using k-mer histogram peak method.
         
-        This is a basic estimator. For production, consider:
-        - GenomeScope-style estimation from k-mer histograms
-        - Correction for sequencing errors
-        - Handling of heterozygosity
+        Uses the modal k-mer frequency (excluding singletons) to estimate
+        average coverage depth, then divides total k-mer mass by coverage.
+        This handles repetitive genomes much better than unique k-mer counting
+        (G19 fix).
+        
+        Algorithm:
+          1. Count all k-mers across sampled reads
+          2. Build frequency histogram (how many k-mers appear 1×, 2×, etc.)
+          3. Find peak frequency (mode) excluding singletons (freq=1, likely errors)
+          4. Genome size ≈ sum of all k-mer counts / peak_frequency
+          
+        Falls back to unique k-mer counting if histogram is too sparse.
         """
-        # Count unique k-mers
-        kmers = set()
-        for seq in sequences[:min(len(sequences), 10000)]:  # Sample for speed
+        # Count k-mers
+        kmer_counts: Dict[str, int] = defaultdict(int)
+        sample_limit = min(len(sequences), 10000)
+        for seq in sequences[:sample_limit]:
             for i in range(len(seq) - self.kmer_size + 1):
                 kmer = seq[i:i+self.kmer_size]
                 if 'N' not in kmer:
-                    kmers.add(kmer)
+                    kmer_counts[kmer] += 1
         
-        # Rough estimate: genome size ≈ unique k-mers
-        # This underestimates for repetitive genomes but works for rough estimates
-        estimated_size = len(kmers)
+        if len(kmer_counts) == 0:
+            logger.warning("No k-mers found for genome size estimation")
+            return 1
         
-        # Scale up if we subsampled
-        if len(sequences) > 10000:
-            scale_factor = len(sequences) / 10000
+        # Build frequency histogram (exclude singletons as likely errors)
+        freq_histogram: Dict[int, int] = defaultdict(int)
+        for count in kmer_counts.values():
+            freq_histogram[count] += 1
+        
+        # Find modal frequency (peak of histogram, excluding freq=1)
+        non_singleton_freqs = {f: n for f, n in freq_histogram.items() if f >= 2}
+        
+        if non_singleton_freqs:
+            # Peak = frequency with the most k-mers (approximates coverage depth)
+            peak_freq = max(non_singleton_freqs, key=non_singleton_freqs.get)
+            
+            # Total k-mer mass (sum of all counts)
+            total_kmer_mass = sum(kmer_counts.values())
+            
+            # Genome size ≈ total mass / coverage depth
+            estimated_size = int(total_kmer_mass / peak_freq)
+        else:
+            # All k-mers are singletons — fall back to unique count
+            estimated_size = len(kmer_counts)
+            logger.warning("All k-mers are singletons; genome size estimate unreliable")
+        
+        # Scale up if we subsampled reads
+        if len(sequences) > sample_limit:
+            scale_factor = len(sequences) / sample_limit
             estimated_size = int(estimated_size * scale_factor)
         
-        logger.info(f"Estimated genome size: {estimated_size:,} bp")
+        logger.info(f"Estimated genome size: {estimated_size:,} bp (k-mer histogram peak method)")
         return estimated_size
     
     def _detect_read_type(self, 
@@ -605,8 +637,8 @@ class KWeaverPredictor:
         Rule-based k-mer selection (fallback until ML models trained).
         
         Rules based on industry best practices:
-        - HiFi reads: DBG=31, UL_overlap=1001, ext=55, polish=77
-        - ONT reads: DBG=21, UL_overlap=1001, ext=41, polish=55
+        - HiFi reads: DBG=31, UL_overlap=501, ext=55, polish=77
+        - ONT reads: DBG=21, UL_overlap=501, ext=41, polish=55
         - Illumina: DBG=31, UL_overlap=N/A, ext=55, polish=77
         """
         read_type = features.read_type
@@ -619,7 +651,7 @@ class KWeaverPredictor:
             # High-quality long reads - can use larger k
             return KmerPrediction(
                 dbg_k=31,
-                ul_overlap_k=1001 if mean_len > 20000 else 501,
+                ul_overlap_k=501,
                 extension_k=55,
                 polish_k=77,
                 dbg_confidence=0.8,
@@ -631,7 +663,7 @@ class KWeaverPredictor:
             # Higher error rate - need smaller k for DBG
             return KmerPrediction(
                 dbg_k=21 if error_rate > 0.05 else 31,
-                ul_overlap_k=1001 if mean_len > 50000 else 501,
+                ul_overlap_k=501,
                 extension_k=41,
                 polish_k=55,
                 dbg_confidence=0.7,
