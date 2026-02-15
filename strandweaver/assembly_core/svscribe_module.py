@@ -17,7 +17,13 @@ import logging
 import math
 from collections import defaultdict
 from pathlib import Path
-import torch
+
+try:
+    import torch
+    _HAS_TORCH = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    _HAS_TORCH = False
 
 logger = logging.getLogger(__name__)
 
@@ -1520,6 +1526,10 @@ class SVScribe:
         """
         if not self.ml_model:
             return sv_calls
+
+        if not _HAS_TORCH:
+            self.logger.warning("PyTorch not installed — skipping AI refinement")
+            return sv_calls
         
         self.logger.info(f"Applying AI refinement to {len(sv_calls)} SVs")
         
@@ -1554,6 +1564,10 @@ class SVScribe:
         """Load AI model for SV refinement."""
         if not self.ml_model_path:
             self.logger.warning("No AI model path provided")
+            return
+
+        if not _HAS_TORCH:
+            self.logger.warning("PyTorch not installed — AI model not loaded")
             return
         
         try:
