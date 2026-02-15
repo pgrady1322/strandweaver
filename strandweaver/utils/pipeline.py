@@ -2509,15 +2509,17 @@ class PipelineOrchestrator:
         
         # Polishing (if enabled)
         if self.config['finishing']['polishing']['enabled']:
-            self.logger.info("  Polishing contigs...")
-            # TODO: Implement polishing
-            self.logger.info("  ⚠ Polishing not yet implemented")
+            self.logger.warning(
+                "Polishing was requested but is not yet implemented. "
+                "Contigs will proceed unpolished."
+            )
         
         # Gap filling (if enabled)
         if self.config['finishing']['gap_filling']['enabled']:
-            self.logger.info("  Filling gaps...")
-            # TODO: Implement gap filling
-            self.logger.info("  ⚠ Gap filling not yet implemented")
+            self.logger.warning(
+                "Gap filling was requested but is not yet implemented. "
+                "Gaps will remain unfilled in the final assembly."
+            )
         
         # Apply minimum contig length filter
         min_len = self.config.get('runtime', {}).get('min_contig_length', 0)

@@ -945,35 +945,27 @@ def apply_manual_edits(
     
     # Apply breaks
     if breaks:
-        logger.info(f"Processing {len(breaks)} contig breaks...")
-        for brk in breaks:
-            # TODO: Implement break logic in graph
-            # This would require graph.split_node(node_id, position)
-            logger.debug(f"  Break: {brk.contig_id} at {brk.position} ({brk.reason})")
-            result['breaks_applied'] += 1
-        logger.info(f"  Applied {result['breaks_applied']} breaks")
+        raise NotImplementedError(
+            f"Contig break edits ({len(breaks)} requested) are not yet implemented. "
+            "This requires graph.split_node(node_id, position) support. "
+            "Remove break entries from your edits file to proceed."
+        )
     
     # Apply forced joins
     if joins:
-        logger.info(f"Processing {len(joins)} forced joins...")
-        for join in joins:
-            # TODO: Implement join logic in graph
-            # This would require graph.add_edge(from_node, to_node, orientations)
-            logger.debug(f"  Join: {join.from_contig}{join.from_orient} → "
-                        f"{join.to_contig}{join.to_orient}")
-            result['joins_added'] += 1
-        logger.info(f"  Added {result['joins_added']} joins")
+        raise NotImplementedError(
+            f"Forced join edits ({len(joins)} requested) are not yet implemented. "
+            "This requires graph.add_edge(from_node, to_node, orientations) support. "
+            "Remove join entries from your edits file to proceed."
+        )
     
     # Apply exclusions
     if exclusions:
-        logger.info(f"Processing {len(exclusions)} exclusions...")
-        for node_id in exclusions:
-            # TODO: Implement exclusion logic in graph
-            # This would require graph.mark_excluded(node_id) or graph.remove_node(node_id)
-            if node_id in graph.nodes:
-                logger.debug(f"  Excluding: {node_id}")
-                result['nodes_excluded'] += 1
-        logger.info(f"  Excluded {result['nodes_excluded']} nodes")
+        raise NotImplementedError(
+            f"Node exclusion edits ({len(exclusions)} requested) are not yet implemented. "
+            "This requires graph.mark_excluded(node_id) or graph.remove_node(node_id) support. "
+            "Remove exclusion entries from your edits file to proceed."
+        )
     
     logger.info("Manual edits applied successfully")
     return result
