@@ -1,0 +1,71 @@
+# ═══════════════════════════════════════════════════════════════════════
+# StrandWeaver — Tool Configuration
+# ═══════════════════════════════════════════════════════════════════════
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+extend-exclude = '''
+/(
+    \.git
+  | \.eggs
+  | build
+  | dist
+  | archive
+  | notebooks
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["strandweaver"]
+skip_glob = ["archive/*", "notebooks/*"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+# Start permissive — tighten over time
+check_untyped_defs = false
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "strandweaver.user_training.*"
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = [
+    "E203",   # whitespace before ':' (conflicts with black)
+    "E501",   # line too long (black handles this)
+    "W503",   # line break before binary operator
+    "E741",   # ambiguous variable name (common in bioinformatics: l, I)
+]
+per-file-ignores = [
+    "strandweaver/__init__.py:F401",
+    "tests/*:F401,F811",
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+    "archive",
+    "notebooks",
+]
