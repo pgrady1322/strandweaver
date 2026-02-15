@@ -402,7 +402,19 @@ class PipelineOrchestrator:
         kmer_prediction = self.state.get('kmer_prediction')
         profile_k = kmer_prediction.dbg_k if kmer_prediction else 21  # Default fallback
 
-        self.logger.info(f"  Using k={profile_k} for error profiling (from K-Weaver)")
+        # Error profiling needs small k (17–21) for meaningful frequency
+        # signal.  The DBG k (up to 51) is far too specific — almost every
+        # k-mer is unique, so error vs. true-variant discrimination is
+        # impossible (G11 fix).
+        MAX_PROFILE_K = 21
+        if profile_k > MAX_PROFILE_K:
+            self.logger.info(
+                f"  Clamping profiling k from {profile_k} to {MAX_PROFILE_K} "
+                f"(high k lacks frequency signal for error detection)"
+            )
+            profile_k = MAX_PROFILE_K
+
+        self.logger.info(f"  Using k={profile_k} for error profiling")
 
         sample_size = self.config['profiling']['sample_size']
 

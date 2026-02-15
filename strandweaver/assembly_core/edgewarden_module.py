@@ -1525,9 +1525,35 @@ class CascadeClassifier:
     Two-stage cascade: Fast heuristic filter → Deep ML model.
     Reduces ML calls by 30-50% while maintaining accuracy.
     """
-    
-    def __init__(self, ml_model: Optional[Any] = None):
+
+    # Technology-specific mismatch thresholds (G12 fix).
+    # HiFi: <0.1 % expected error → flag at 1 %
+    # ONT R9: 5–10 % error → flag at 8 %
+    # ONT R10: ~2–3 % error → flag at 5 %
+    # Illumina: <0.1 % error → flag at 1 %
+    # aDNA: high damage → flag at 15 %
+    # References: Wenger et al. 2019; Wick et al. 2023; Briggs et al. 2007
+    TECH_MISMATCH_THRESHOLDS: Dict[str, float] = {
+        'hifi': 0.01,
+        'pacbio_hifi': 0.01,
+        'ont_r9': 0.08,
+        'nanopore_r9': 0.08,
+        'ont_r10': 0.05,
+        'nanopore_r10': 0.05,
+        'ont': 0.08,           # conservative default for unspecified ONT
+        'illumina': 0.01,
+        'adna': 0.15,
+        'ancient_dna': 0.15,
+    }
+    DEFAULT_MISMATCH_THRESHOLD: float = 0.05  # fallback
+
+    # Coverage-ratio threshold for repeat / collapse detection (G13 fix).
+    # Diploid collapse starts at 2× (Merqury; Rhie et al. 2020).
+    COVERAGE_RATIO_THRESHOLD: float = 2.5
+
+    def __init__(self, ml_model: Optional[Any] = None, technology: str = 'hifi'):
         self.ml_model = ml_model
+        self.technology = technology.lower().replace('.', '_').replace(' ', '_')
         self.stats = {'heuristic_decisions': 0, 'ml_decisions': 0, 'total': 0}
     
     def predict(self, features: np.ndarray, feature_names: List[str]) -> CascadeDecision:
@@ -1571,25 +1597,34 @@ class CascadeClassifier:
     
     def _evaluate_heuristics(self, features: Dict[str, float]) -> Optional[CascadeDecision]:
         """Evaluate heuristic rules. Return decision if confident, None otherwise."""
-        
-        # Rule 1: Very high mismatch rate
+
+        # Rule 1: Mismatch rate exceeds technology-specific threshold (G12).
         mismatch_rate = features.get('mismatch_rate', 0.0)
-        if mismatch_rate > 0.10:
+        mismatch_threshold = self.TECH_MISMATCH_THRESHOLDS.get(
+            self.technology, self.DEFAULT_MISMATCH_THRESHOLD
+        )
+        if mismatch_rate > mismatch_threshold:
             return CascadeDecision(
                 prediction=0, confidence=0.95, rule_fired=1,
                 rule_name="High mismatch rate",
                 stage="heuristic",
-                reasoning=f"Mismatch rate {mismatch_rate:.1%} exceeds 10% threshold"
+                reasoning=(
+                    f"Mismatch rate {mismatch_rate:.1%} exceeds "
+                    f"{mismatch_threshold:.1%} threshold for {self.technology}"
+                )
             )
-        
-        # Rule 2: Extreme coverage ratio
+
+        # Rule 2: Coverage ratio indicates repeat/collapse (G13).
         coverage_ratio = features.get('coverage_ratio_ab', 1.0)
-        if coverage_ratio > 5.0:
+        if coverage_ratio > self.COVERAGE_RATIO_THRESHOLD:
             return CascadeDecision(
                 prediction=0, confidence=0.92, rule_fired=2,
-                rule_name="Extreme coverage ratio",
+                rule_name="Repeat / diploid collapse",
                 stage="heuristic",
-                reasoning=f"Coverage differs {coverage_ratio:.1f}x between reads"
+                reasoning=(
+                    f"Coverage differs {coverage_ratio:.1f}x between reads "
+                    f"(threshold {self.COVERAGE_RATIO_THRESHOLD:.1f}x)"
+                )
             )
         
         # Rule 3: Perfect high-quality overlap
@@ -1743,15 +1778,19 @@ class HybridRulesMLEnsemble:
         }
     
     def _evaluate_simple_rules(self, features: np.ndarray, feature_names: List[str]) -> Tuple[Optional[int], float]:
-        """Evaluate simple heuristic rules."""
+        """Evaluate simple heuristic rules (technology-aware)."""
         feature_dict = {name: value for name, value in zip(feature_names, features)}
-        
-        # High error rate
-        if feature_dict.get('mismatch_rate', 0.0) > 0.08:
+
+        # High error rate — use cascade thresholds when available
+        mismatch_threshold = CascadeClassifier.TECH_MISMATCH_THRESHOLDS.get(
+            getattr(self, 'technology', 'hifi'),
+            CascadeClassifier.DEFAULT_MISMATCH_THRESHOLD,
+        )
+        if feature_dict.get('mismatch_rate', 0.0) > mismatch_threshold:
             return 0, 0.92
-        
-        # Extreme coverage mismatch
-        if feature_dict.get('coverage_ratio_ab', 1.0) > 4.0:
+
+        # Coverage mismatch — diploid collapse starts at 2× (G13)
+        if feature_dict.get('coverage_ratio_ab', 1.0) > CascadeClassifier.COVERAGE_RATIO_THRESHOLD:
             return 0, 0.90
         
         # Perfect overlap

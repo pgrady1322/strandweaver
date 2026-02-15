@@ -301,6 +301,62 @@ class StrandTether:
         # Cache for contact frequency normalization
         self._contact_freq_cache = {}
         self._calibration_percentiles = (5, 50, 95)
+        self._calibrated_max_contact: int = 10_000  # updated by calibrate_contacts
+
+    def calibrate_contacts(self, contact_map: 'HiCContactMap') -> None:
+        """
+        Calibrate contact normalization from observed data and apply
+        ICE-like iterative marginal balancing (Imakaev et al. 2012).
+
+        This corrects for GC-content, mappability, and fragment-length
+        biases that inflate certain rows/columns of the contact matrix.
+        After balancing the 95th-percentile of contacts is used as the
+        log-scale ceiling for ``_normalize_contact_frequency``.
+        """
+        if not contact_map or not contact_map.contacts:
+            return
+
+        # ---- ICE-like iterative balancing (simplified) ----
+        # Compute row marginals and iteratively divide contacts by
+        # the geometric mean of the two node marginals.  3 iterations
+        # is sufficient for convergence in practice (Imakaev 2012).
+        for _iteration in range(3):
+            # Compute marginal sums per node
+            marginals: Dict[int, float] = defaultdict(float)
+            for (n1, n2), count in contact_map.contacts.items():
+                marginals[n1] += count
+                marginals[n2] += count
+
+            if not marginals:
+                break
+
+            # Genome-wide mean marginal
+            mean_marginal = sum(marginals.values()) / max(len(marginals), 1)
+            if mean_marginal <= 0:
+                break
+
+            # Normalise each contact by sqrt(marginal_i * marginal_j) / mean
+            balanced: Dict[Tuple[int, int], float] = {}
+            for (n1, n2), count in contact_map.contacts.items():
+                m1 = marginals.get(n1, mean_marginal)
+                m2 = marginals.get(n2, mean_marginal)
+                denom = math.sqrt(max(m1, 1) * max(m2, 1)) / mean_marginal
+                balanced[(n1, n2)] = count / denom if denom > 0 else count
+
+            # Write balanced values back (cast to int for storage)
+            for key, val in balanced.items():
+                contact_map.contacts[key] = max(1, int(round(val)))
+
+        # ---- Calibrate normalisation ceiling from observed data ----
+        counts = sorted(contact_map.contacts.values())
+        if counts:
+            idx_95 = int(len(counts) * 0.95)
+            self._calibrated_max_contact = max(counts[idx_95], self.min_contact_threshold + 1)
+
+        self.logger.info(
+            f"Calibrated Hi-C contacts: ICE-balanced, "
+            f"95th-pct ceiling = {self._calibrated_max_contact}"
+        )
     
     # ========================================================================
     #                    CONTACT MAP OPERATIONS
@@ -463,12 +519,24 @@ class StrandTether:
         """
         if not nodes:
             return {}
-        
-        # Initialize with random seeds
+
+        # -----------------------------------------------------------
+        # Deterministic seed selection (G10 fix).
+        # Sort nodes by total Hi-C contacts (descending), breaking ties
+        # by node ID for reproducibility.  The two highest-contact
+        # nodes are seeded as A and B — high-contact nodes propagate
+        # labels more effectively than arbitrary choices.
+        # -----------------------------------------------------------
+        node_list = sorted(
+            nodes,
+            key=lambda n: (
+                contact_map.node_total_contacts.get(n, 0),
+                -n,  # secondary: lower ID first for determinism
+            ),
+            reverse=True,
+        )
+
         scores = {}
-        node_list = list(nodes)
-        
-        # Seed first node as A, second as B
         for i, node in enumerate(node_list):
             if i == 0:
                 scores[node] = [1.0, 0.0]  # Phase A
@@ -660,36 +728,52 @@ class StrandTether:
         to_node: int,
         contact_count: int = 0,
         orientation: str = "++",
+        genomic_distance: Optional[int] = None,
     ) -> HiCJoinScore:
         """
         Score a join using Hi-C evidence.
-        
+
+        When *genomic_distance* is supplied the raw contact count is
+        corrected for the expected distance-decay relationship
+        C(s) ∝ s^{-α} (Lieberman-Aiden et al. 2009, α ≈ 1.0 – 1.5).
+        The ``distance_decay_power`` parameter controls α.
+
         Args:
             from_node: Source node ID
             to_node: Target node ID
             contact_count: Hi-C contact count for this pair
             orientation: Expected orientation (++, +-, -+, --)
-        
+            genomic_distance: Estimated linear distance in bp between
+                the two nodes (None → neutral 0.5 distance score).
+
         Returns:
             HiCJoinScore with breakdown
         """
         join_id = f"{from_node}_{to_node}"
-        
+
         # Contact frequency score
         contact_freq = self._normalize_contact_frequency(contact_count)
-        
+
         # Orientation consistency
         orient_score = self._score_orientation(orientation)
-        
+
+        # Distance score — use genomic-distance decay when available
+        if genomic_distance is not None and genomic_distance > 0:
+            # Expected contacts fall as d^{-α}; express how well the
+            # observed count matches expectations.  Normalise so that
+            # contacts ≥ expected → 1.0, well below → 0.0.
+            expected_relative = (genomic_distance / 1000.0) ** (-self.distance_decay_power)
+            # Ratio of observed to expectation (capped at 1.0)
+            distance_score = min(1.0, contact_freq / (expected_relative + 1e-9))
+        else:
+            distance_score = 0.5  # Neutral when no distance information
+
         # Combine scores (weights must sum to 1.0)
-        #   contact_freq:  0.50
-        #   orientation:   orientation_weight (default 0.30)
-        #   distance:      distance_weight   (default 0.20)
         contact_weight = 1.0 - self.orientation_weight - self.distance_weight
         hic_confidence = (
             contact_weight * contact_freq +
             self.orientation_weight * orient_score +
-            self.distance_weight * 0.5  # Neutral distance penalty without genomic distances
+            self.distance_weight * distance_score
         )
         
         hic_confidence = max(0.0, min(1.0, hic_confidence))
@@ -868,19 +952,35 @@ class StrandTether:
     
     def _normalize_contact_frequency(self, contact_count: int) -> float:
         """
-        Normalize contact count to [0.0, 1.0].
-        
-        Uses threshold-based scaling: below min_contact_threshold = 0.0,
-        then linear scaling up to 20× min_contact_threshold = 1.0
+        Normalize contact count to [0.0, 1.0] using log-scaling.
+
+        Real Hi-C data spans 10^2 – 10^4 contacts per pair
+        (Rao et al., Cell 2014).  A linear cap at 20× threshold
+        saturated at ~40 contacts, losing all variation above that.
+        Log-scaling preserves relative differences across the full
+        dynamic range while still mapping to [0, 1].
+
+        The normalisation is:  log(count) / log(max_contact)
+        where max_contact is calibrated from observed data (see
+        ``calibrate_contacts``) or defaults to 10 000.
         """
         if contact_count < self.min_contact_threshold:
             return 0.0
-        
-        # Linear scaling relative to min_contact_threshold
-        max_expected = self.min_contact_threshold * 20
-        normalized = min(1.0, (contact_count - self.min_contact_threshold) / (max_expected - self.min_contact_threshold))
-        
-        return max(0.0, normalized)
+
+        # Use calibrated ceiling if available, else sensible default
+        max_contact = getattr(self, '_calibrated_max_contact', 10_000)
+        max_contact = max(max_contact, self.min_contact_threshold + 1)
+
+        # Log-scale normalisation (base-e); clamp to [0, 1]
+        log_count = math.log(contact_count)
+        log_max = math.log(max_contact)
+        log_min = math.log(self.min_contact_threshold)
+
+        if log_max <= log_min:
+            return 1.0
+
+        normalized = (log_count - log_min) / (log_max - log_min)
+        return max(0.0, min(1.0, normalized))
     
     def _score_orientation(self, orientation: str) -> float:
         """

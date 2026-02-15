@@ -1942,7 +1942,10 @@ class PathScorer:
         ├─ UL Confidence: 20%           (ultra-long read support)
         ├─ Hi-C Confidence: 15%         (3D contact support)
         ├─ Validation Penalty: 5%       (rule violations)
-        └─ (Optional) SV Misassembly: -10% penalty if detected
+        └─ (Optional) SV Misassembly: severity-based penalty
+              < 0.3 → hard cap at 0.10 (confirmed misassembly)
+              < 0.5 → 50% score reduction (likely misassembly)
+              < 0.8 → up to 25% reduction (marginal SV signal)
         = FINAL combined confidence (0.0-1.0)
         
         Args:
@@ -1979,15 +1982,36 @@ class PathScorer:
             0.05 * val_score                # Validation penalty
         )
         
-        # Apply SVScribe misassembly penalty if provided
+        # Apply SVScribe misassembly penalty (severity-based, G14 fix).
+        # A confirmed SV misassembly should be near-disqualifying, not a
+        # gentle 10% tap (T2T-CHM13; Rhie et al. Nature 2021).
         if sv_misassembly_score is not None and sv_misassembly_score < 0.8:
-            # Significant SV issues detected - apply modest penalty
-            sv_penalty = (1.0 - sv_misassembly_score) * 0.10  # Up to 10% reduction
-            final_score = max(0.0, final_score - sv_penalty)
-            self.logger.warning(
-                f"Path {path.path_id}: SV misassembly score {sv_misassembly_score:.2f}, "
-                f"applying penalty {sv_penalty:.3f}, final={final_score:.3f}"
-            )
+            if sv_misassembly_score < 0.3:
+                # Confirmed misassembly — hard floor
+                final_score = min(final_score, 0.10)
+                self.logger.warning(
+                    f"Path {path.path_id}: CONFIRMED misassembly "
+                    f"(SV score {sv_misassembly_score:.2f}), "
+                    f"capping final at {final_score:.3f}"
+                )
+            elif sv_misassembly_score < 0.5:
+                # Likely misassembly — halve the score
+                sv_penalty = final_score * 0.50
+                final_score = max(0.0, final_score - sv_penalty)
+                self.logger.warning(
+                    f"Path {path.path_id}: likely misassembly "
+                    f"(SV score {sv_misassembly_score:.2f}), "
+                    f"penalty {sv_penalty:.3f}, final={final_score:.3f}"
+                )
+            else:
+                # Marginal SV signal (0.5–0.8) — proportional penalty
+                sv_penalty = (1.0 - sv_misassembly_score) * 0.25
+                final_score = max(0.0, final_score - sv_penalty)
+                self.logger.warning(
+                    f"Path {path.path_id}: marginal SV signal "
+                    f"(SV score {sv_misassembly_score:.2f}), "
+                    f"penalty {sv_penalty:.3f}, final={final_score:.3f}"
+                )
         
         # Compute uncertainty across all evidence
         components = [

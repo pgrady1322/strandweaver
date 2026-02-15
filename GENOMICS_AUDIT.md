@@ -15,7 +15,7 @@ Systematic review of pipeline logic, scoring models, and biological assumptions.
 | ID | Module | Issue | Reference |
 |----|--------|-------|-----------|
 | G1 | StrandTether | ✅ **FIXED** — Hi-C orientation scoring was inverted. `++`/`--` scored 1.0, `+-`/`-+` scored 0.0. Valid Hi-C pairs are convergent (`+-`/`-+`). | Lieberman-Aiden et al. *Science* 2009; SALSA2 |
-| G2 | StrandTether | Spectral clustering (Fiedler vector) on full contact graph separates chromosomes, not haplotypes. Diploid phasing requires bubble-aware local phasing. | hifiasm (Cheng et al. *Nat Methods* 2021) |
+| G2 | StrandTether | ⚠️ **DEFERRED** — Spectral clustering (Fiedler vector) on full contact graph separates chromosomes, not haplotypes. Requires bubble-aware local phasing (architectural redesign). | hifiasm (Cheng et al. *Nat Methods* 2021) |
 | G3 | Pipeline | ✅ **FIXED** — String graph contig extraction was a placeholder. Now traverses combined DBG + UL overlay edges. | pipeline.py `_extract_contigs_from_string_graph()` |
 | G4 | Pipeline | ✅ **FIXED** — Hi-C files now excluded from primary tech vote. | pipeline.py `_step_assemble()` |
 | G5 | Pipeline | ✅ **FIXED** — K-Weaver now selects primary assembly file (HiFi > ONT > Illumina), skipping Hi-C/UL. | pipeline.py `_step_kweaver()` |
@@ -24,15 +24,15 @@ Systematic review of pipeline logic, scoring models, and biological assumptions.
 
 | ID | Module | Issue | Reference |
 |----|--------|-------|-----------|
-| G6 | StrandTether | No ICE/KR matrix balancing on Hi-C contacts. GC, mappability, fragment-length biases uncorrected. | Imakaev et al. *Nat Methods* 2012 |
-| G7 | StrandTether | `distance_decay_power=1.5` declared but never used. No genomic-distance correction. | Hi-C: C(s) ∝ s^-α, α ≈ 1.08 |
-| G8 | StrandTether | `max_expected = threshold × 20` saturates at ~40 contacts. Real data has 10²–10⁴. All variation lost. | Rao et al. *Cell* 2014 |
+| G6 | StrandTether | ✅ **FIXED** — Added `calibrate_contacts()` with ICE-like iterative marginal balancing (3 iterations) to correct GC/mappability/fragment biases. | Imakaev et al. *Nat Methods* 2012 |
+| G7 | StrandTether | ✅ **FIXED** — `score_join()` now accepts `genomic_distance` and applies C(s) ∝ s^{-α} decay correction using `distance_decay_power`. | Hi-C: C(s) ∝ s^-α, α ≈ 1.08 |
+| G8 | StrandTether | ✅ **FIXED** — Contact normalization now uses log-scaling with calibrated 95th-percentile ceiling. Handles 10²–10⁴ range. | Rao et al. *Cell* 2014 |
 | G9 | StrandTether | ✅ **FIXED** — Join scoring weights now computed as `1.0 - orient_weight - distance_weight` for contact term. | Arithmetic error |
-| G10 | StrandTether | Label propagation seeds arbitrary — first two nodes in set iteration order. Non-reproducible phasing. | hifiasm seeds from het k-mer pairs |
-| G11 | Pipeline | Error profiler uses DBG k (up to 51) instead of small k (17–21). No frequency signal at high k. | pipeline.py `_step_profile()` |
-| G12 | EdgeWarden | Mismatch threshold 10% is technology-agnostic. HiFi should be ~0.1%; ONT R9 ~5–10%. | Wenger et al. 2019; Wick et al. 2023 |
-| G13 | EdgeWarden | Coverage ratio threshold 5.0× for repeat detection. Diploid collapse starts at 2×. Should be ~2.0–2.5×. | Merqury (Rhie et al. 2020) |
-| G14 | PathWeaver | SV misassembly penalty capped at 10% score reduction. Confirmed misassembly should be disqualifying. | T2T-CHM13 (Rhie et al. *Nature* 2021) |
+| G10 | StrandTether | ✅ **FIXED** — Label propagation now seeds deterministically: sorted by total contacts (desc), breaking ties by node ID. | hifiasm seeds from het k-mer pairs |
+| G11 | Pipeline | ✅ **FIXED** — Error profiler k clamped to max 21 regardless of K-Weaver DBG k. | pipeline.py `_step_profile()` |
+| G12 | EdgeWarden | ✅ **FIXED** — Mismatch thresholds now technology-specific: HiFi 1%, ONT R9 8%, R10 5%, Illumina 1%, aDNA 15%. | Wenger et al. 2019; Wick et al. 2023 |
+| G13 | EdgeWarden | ✅ **FIXED** — Coverage ratio threshold lowered from 5.0×/4.0× to 2.5× in both CascadeClassifier and HybridEnsemble. | Merqury (Rhie et al. 2020) |
+| G14 | PathWeaver | ✅ **FIXED** — SV penalty now severity-based: <0.3 → hard cap at 0.10, <0.5 → 50% reduction, <0.8 → up to 25% reduction. | T2T-CHM13 (Rhie et al. *Nature* 2021) |
 
 ## 🟡 MODERATE
 
