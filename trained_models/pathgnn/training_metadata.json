@@ -1,39 +1,35 @@
 {
-  "feature_columns": [
-    "overlap_length",
-    "overlap_identity",
-    "coverage_consistency",
-    "gc_similarity",
-    "repeat_match",
-    "branching_score",
-    "path_support",
-    "hic_contact",
-    "mapping_quality",
-    "kmer_match",
-    "sequence_complexity",
-    "orientation_score",
-    "distance_score",
-    "topology_score",
-    "ul_support",
-    "sv_evidence"
-  ],
-  "model_type": "xgboost_binary_classifier",
-  "metrics": {
-    "val_accuracy": 0.9964,
-    "val_f1_weighted": 0.9962,
-    "train_size": 110093,
-    "val_size": 19429,
-    "best_iteration": 44,
-    "cv_accuracy_mean": 0.9958,
-    "cv_accuracy_std": 0.0001,
-    "cv_fold_scores": [
-      0.9959,
-      0.9957
-    ],
-    "label_distribution": {
-      "0": 128848,
-      "1": 674
-    }
+  "val_accuracy": 0.8972,
+  "val_f1_weighted": 0.8971,
+  "val_f1_macro": 0.8971,
+  "per_class_f1": {
+    "0": 0.895,
+    "1": 0.8993
   },
-  "note": "Primary model is pathgnn_scorer.pkl (XGBoost).  pathgnn_model.pt is an untrained scaffold for pipeline integration."
+  "train_size": 167948,
+  "val_size": 29638,
+  "rebalance_strategy": "hybrid",
+  "sweep_best_params": {
+    "max_depth": 10,
+    "learning_rate": 0.05348839150320735,
+    "n_estimators": 500,
+    "subsample": 0.8121691308431794,
+    "colsample_bytree": 0.8190810015304014,
+    "min_child_weight": 3
+  },
+  "cv_accuracy_mean": 0.8968,
+  "cv_accuracy_std": 0.001,
+  "cv_fold_scores": [
+    0.8976,
+    0.8966,
+    0.8966,
+    0.895,
+    0.898
+  ],
+  "label_distribution": {
+    "0": 1087451,
+    "1": 95173
+  },
+  "num_samples": 197586,
+  "num_features": 16
 }

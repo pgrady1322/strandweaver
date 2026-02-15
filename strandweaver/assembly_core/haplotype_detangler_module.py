@@ -667,10 +667,19 @@ class HaplotypeDetangler:
             return detailed_result
         
         try:
-            import torch
             import numpy as np
         except ImportError:
             return detailed_result
+        
+        # torch is only needed for PyTorch models, not XGBoost
+        torch = None
+        if not hasattr(self.ml_model, 'predict_proba'):
+            try:
+                import torch as _torch
+                torch = _torch
+            except ImportError:
+                self.logger.warning("PyTorch not available for AI phasing model")
+                return detailed_result
         
         ambiguous_nodes = list(detailed_result.ambiguous_nodes)
         if not ambiguous_nodes:
@@ -679,29 +688,151 @@ class HaplotypeDetangler:
         self.logger.info(f"    AI boost for {len(ambiguous_nodes)} ambiguous nodes")
         
         # Extract features for ambiguous nodes
+        # XGBoost diploid model expects 26 NODE_SIGNAL_FEATURES;
+        # PyTorch GNN uses simplified 4-feature vector
+        is_xgb = hasattr(self.ml_model, 'predict_proba')
+        
         features = []
         for node_id in ambiguous_nodes:
             node = graph.nodes.get(node_id)
             if not node:
-                features.append([0.5, 0.5, 0.0, 0.0])  # Default features
+                if is_xgb:
+                    features.append([0.0] * 26)
+                else:
+                    features.append([0.5, 0.5, 0.0, 0.0])
                 continue
             
-            # Feature vector: [phase_A_score, phase_B_score, coverage, degree]
-            phase_A = hic_phase_info[node_id].phase_A_score if hic_phase_info and node_id in hic_phase_info else 0.5
-            phase_B = hic_phase_info[node_id].phase_B_score if hic_phase_info and node_id in hic_phase_info else 0.5
-            coverage = getattr(node, 'coverage', 0.0) / 100.0  # Normalize
-            degree = (len(graph.in_edges.get(node_id, set())) + 
-                     len(graph.out_edges.get(node_id, set()))) / 10.0  # Normalize
-            
-            features.append([phase_A, phase_B, coverage, degree])
+            if is_xgb:
+                # Full 26-feature vector matching NODE_SIGNAL_FEATURES schema:
+                # coverage, gc_content, repeat_fraction, kmer_diversity,
+                # branching_factor, hic_contact_density, allele_frequency,
+                # heterozygosity, phase_consistency, mappability,
+                # hic_intra_contacts, hic_inter_contacts,
+                # hic_contact_ratio, hic_phase_signal,
+                # clustering_coeff, component_size,
+                # shannon_entropy, dinucleotide_bias,
+                # homopolymer_max_run, homopolymer_density, low_complexity_fraction,
+                # coverage_skewness, coverage_kurtosis, coverage_cv,
+                # coverage_p10, coverage_p90
+                seq = getattr(node, 'seq', '')
+                cov = getattr(node, 'coverage', 0.0)
+                seq_len = max(len(seq), 1)
+                
+                # GC content
+                gc = (seq.count('G') + seq.count('C') + seq.count('g') + seq.count('c')) / seq_len if seq else 0.0
+                
+                # Repeat fraction (from metadata or estimate via k-mer compression)
+                repeat_frac = node.metadata.get('repeat_fraction', 0.0) if hasattr(node, 'metadata') else 0.0
+                
+                # K-mer diversity (unique k-mers / total k-mers)
+                k = 4
+                if len(seq) >= k:
+                    kmers = [seq[i:i+k] for i in range(len(seq) - k + 1)]
+                    kmer_div = len(set(kmers)) / max(len(kmers), 1)
+                else:
+                    kmer_div = 1.0
+                
+                # Branching factor
+                in_deg = len(graph.in_edges.get(node_id, set()))
+                out_deg = len(graph.out_edges.get(node_id, set()))
+                branch = (in_deg + out_deg) / 2.0
+                
+                # Hi-C features
+                hic_info = hic_phase_info.get(node_id) if hic_phase_info else None
+                hic_density = getattr(hic_info, 'contact_density', 0.0) if hic_info else 0.0
+                allele_freq = getattr(hic_info, 'allele_frequency', 0.5) if hic_info else 0.5
+                het = getattr(hic_info, 'heterozygosity', 0.0) if hic_info else 0.0
+                phase_consist = getattr(hic_info, 'phase_consistency', 0.0) if hic_info else 0.0
+                mappability = getattr(hic_info, 'mappability', 1.0) if hic_info else 1.0
+                hic_intra = getattr(hic_info, 'intra_contacts', 0.0) if hic_info else 0.0
+                hic_inter = getattr(hic_info, 'inter_contacts', 0.0) if hic_info else 0.0
+                hic_ratio = hic_intra / max(hic_intra + hic_inter, 1.0)
+                phase_A = getattr(hic_info, 'phase_A_score', 0.5) if hic_info else 0.5
+                phase_B = getattr(hic_info, 'phase_B_score', 0.5) if hic_info else 0.5
+                hic_phase_sig = phase_A - phase_B
+                
+                # Graph topology
+                cluster_coeff = node.metadata.get('clustering_coeff', 0.0) if hasattr(node, 'metadata') else 0.0
+                comp_size = node.metadata.get('component_size', 1) if hasattr(node, 'metadata') else 1
+                
+                # Sequence complexity
+                from math import log2
+                char_counts = [seq.upper().count(c) for c in 'ACGT']
+                entropy = -sum((c/seq_len) * log2(c/seq_len + 1e-10) for c in char_counts if c > 0) if seq else 0.0
+                
+                # Dinucleotide bias
+                if len(seq) >= 2:
+                    dinucs = [seq[i:i+2] for i in range(len(seq)-1)]
+                    dinuc_div = len(set(dinucs)) / max(len(dinucs), 1)
+                    dinuc_bias = 1.0 - dinuc_div
+                else:
+                    dinuc_bias = 0.0
+                
+                # Homopolymer features
+                max_run = 0
+                cur_run = 1
+                total_hp = 0
+                for i in range(1, len(seq)):
+                    if seq[i] == seq[i-1]:
+                        cur_run += 1
+                    else:
+                        if cur_run >= 3:
+                            total_hp += cur_run
+                        max_run = max(max_run, cur_run)
+                        cur_run = 1
+                max_run = max(max_run, cur_run)
+                if cur_run >= 3:
+                    total_hp += cur_run
+                hp_density = total_hp / seq_len
+                
+                # Low complexity fraction (runs of same base >= 3)
+                low_complex = total_hp / seq_len
+                
+                # Coverage distribution features (not available per-node, use defaults)
+                cov_skew = node.metadata.get('coverage_skewness', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_kurt = node.metadata.get('coverage_kurtosis', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_cv = node.metadata.get('coverage_cv', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_p10 = node.metadata.get('coverage_p10', cov * 0.8) if hasattr(node, 'metadata') else cov * 0.8
+                cov_p90 = node.metadata.get('coverage_p90', cov * 1.2) if hasattr(node, 'metadata') else cov * 1.2
+                
+                features.append([
+                    cov, gc, repeat_frac, kmer_div,
+                    branch, hic_density, allele_freq,
+                    het, phase_consist, mappability,
+                    hic_intra, hic_inter,
+                    hic_ratio, hic_phase_sig,
+                    cluster_coeff, comp_size,
+                    entropy, dinuc_bias,
+                    max_run, hp_density, low_complex,
+                    cov_skew, cov_kurt, cov_cv,
+                    cov_p10, cov_p90,
+                ])
+            else:
+                # PyTorch GNN: simplified 4-feature vector
+                phase_A = hic_phase_info[node_id].phase_A_score if hic_phase_info and node_id in hic_phase_info else 0.5
+                phase_B = hic_phase_info[node_id].phase_B_score if hic_phase_info and node_id in hic_phase_info else 0.5
+                coverage = getattr(node, 'coverage', 0.0) / 100.0
+                degree = (in_deg + out_deg) / 10.0 if 'in_deg' in dir() else \
+                    (len(graph.in_edges.get(node_id, set())) + len(graph.out_edges.get(node_id, set()))) / 10.0
+                features.append([phase_A, phase_B, coverage, degree])
         
-        # Run through model
+        # Run through model — supports both PyTorch (callable) and XGBoost (predict_proba)
         try:
-            features_tensor = torch.tensor(features, dtype=torch.float32)
-            with torch.no_grad():
-                predictions = self.ml_model(features_tensor)
-                # Assuming model outputs [prob_A, prob_B]
-                probs = torch.softmax(predictions, dim=1).numpy()
+            features_array = np.array(features, dtype=np.float32)
+            if hasattr(self.ml_model, 'predict_proba'):
+                # XGBoost / sklearn model
+                raw_probs = self.ml_model.predict_proba(features_array)
+                # Ensure we have exactly 2 columns (haplotype A/B)
+                if raw_probs.shape[1] >= 2:
+                    probs = raw_probs[:, :2]
+                else:
+                    probs = np.column_stack([raw_probs[:, 0], 1.0 - raw_probs[:, 0]])
+            else:
+                # PyTorch model
+                features_tensor = torch.tensor(features_array)
+                with torch.no_grad():
+                    predictions = self.ml_model(features_tensor)
+                    probs = torch.softmax(predictions, dim=1).numpy()[:, :2]
         except Exception as e:
             self.logger.warning(f"AI inference failed: {e}")
             return detailed_result

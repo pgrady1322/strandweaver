@@ -1,55 +1,42 @@
 {
-  "feature_columns": [
-    "overlap_length",
-    "overlap_identity",
-    "read1_length",
-    "read2_length",
-    "coverage_r1",
-    "coverage_r2",
-    "gc_content_r1",
-    "gc_content_r2",
-    "repeat_fraction_r1",
-    "repeat_fraction_r2",
-    "kmer_diversity_r1",
-    "kmer_diversity_r2",
-    "branching_factor_r1",
-    "branching_factor_r2",
-    "hic_support",
-    "mapping_quality_r1",
-    "mapping_quality_r2"
+  "val_accuracy": 0.8807,
+  "val_f1_weighted": 0.8797,
+  "val_f1_macro": 0.8964,
+  "per_class_f1": {
+    "0": 0.9993,
+    "1": 0.8156,
+    "2": 0.8031,
+    "3": 0.9677
+  },
+  "train_size": 285098,
+  "val_size": 50312,
+  "rebalance_strategy": "hybrid",
+  "sweep_best_params": {
+    "max_depth": 12,
+    "learning_rate": 0.11755822520740497,
+    "n_estimators": 700,
+    "subsample": 0.8105957325401224,
+    "colsample_bytree": 0.8314316807585244,
+    "min_child_weight": 2,
+    "gamma": 0.22490132859175832,
+    "reg_alpha": 0.029952793571770556,
+    "reg_lambda": 2.2681210442729207
+  },
+  "cv_accuracy_mean": 0.8782,
+  "cv_accuracy_std": 0.0017,
+  "cv_fold_scores": [
+    0.8764,
+    0.8797,
+    0.8757,
+    0.8799,
+    0.8792
   ],
-  "label_classes": [
-    "ALLELIC",
-    "CHIMERIC",
-    "SV_BREAK",
-    "TRUE"
-  ],
-  "technologies": [
-    "hifi",
-    "ont_r9",
-    "ont_r10",
-    "illumina",
-    "adna"
-  ],
-  "metrics": {
-    "val_accuracy": 0.7962,
-    "val_f1_weighted": 0.7194,
-    "train_size": 110093,
-    "val_size": 19429,
-    "best_iteration": 99,
-    "cv_accuracy_mean": 0.7956,
-    "cv_accuracy_std": 0.0007,
-    "cv_fold_scores": [
-      0.7965,
-      0.7953,
-      0.7961,
-      0.7946
-    ],
-    "label_distribution": {
-      "SV_BREAK": 26979,
-      "ALLELIC": 368,
-      "CHIMERIC": 97221,
-      "TRUE": 4954
-    }
-  }
+  "label_distribution": {
+    "CHIMERIC": 665493,
+    "ALLELIC": 1223,
+    "TRUE": 35410,
+    "SV_BREAK": 480498
+  },
+  "num_samples": 335410,
+  "num_features": 24
 }

@@ -1,35 +1,38 @@
 {
-  "feature_columns": [
-    "coverage",
-    "gc_content",
-    "repeat_fraction",
-    "kmer_diversity",
-    "branching_factor",
-    "hic_contact_density",
-    "allele_frequency",
-    "heterozygosity",
-    "phase_consistency",
-    "mappability"
-  ],
-  "metrics": {
-    "val_accuracy": 0.5293,
-    "val_f1_weighted": 0.5164,
-    "train_size": 1802576,
-    "val_size": 318102,
-    "best_iteration": 199,
-    "cv_accuracy_mean": 0.5273,
-    "cv_accuracy_std": 0.0005,
-    "cv_fold_scores": [
-      0.5267,
-      0.5278
-    ],
-    "label_distribution": {
-      "A": 1060208,
-      "B": 1060470
-    }
+  "val_accuracy": 0.8618,
+  "val_f1_weighted": 0.8618,
+  "val_f1_macro": 0.8618,
+  "per_class_f1": {
+    "0": 0.8611,
+    "1": 0.8624
   },
-  "label_classes": [
-    "A",
-    "B"
-  ]
+  "train_size": 978435,
+  "val_size": 172665,
+  "rebalance_strategy": "none",
+  "sweep_best_params": {
+    "max_depth": 14,
+    "learning_rate": 0.10894798456423375,
+    "n_estimators": 1000,
+    "subsample": 0.7950017732596978,
+    "colsample_bytree": 0.9987143052685449,
+    "min_child_weight": 8,
+    "gamma": 0.33399228352608534,
+    "reg_alpha": 0.0017303152941984007,
+    "reg_lambda": 0.2682583241335385
+  },
+  "cv_accuracy_mean": 0.8582,
+  "cv_accuracy_std": 0.001,
+  "cv_fold_scores": [
+    0.8587,
+    0.858,
+    0.8598,
+    0.8567,
+    0.8579
+  ],
+  "label_distribution": {
+    "A": 566625,
+    "B": 584475
+  },
+  "num_samples": 1151100,
+  "num_features": 26
 }

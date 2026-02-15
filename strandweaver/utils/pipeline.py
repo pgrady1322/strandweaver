@@ -902,8 +902,10 @@ class PipelineOrchestrator:
         self.logger.info("Step 8: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
         ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
         haplotype_detangler = HaplotypeDetangler(
             use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
             ploidy=ploidy,
         )
         
@@ -1175,8 +1177,10 @@ class PipelineOrchestrator:
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
         ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
         haplotype_detangler = HaplotypeDetangler(
             use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
             ploidy=ploidy,
         )
         
@@ -1433,8 +1437,10 @@ class PipelineOrchestrator:
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
         ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
         haplotype_detangler = HaplotypeDetangler(
             use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
             ploidy=ploidy,
         )
         
