@@ -1459,7 +1459,7 @@ class TechSpecificEdgeWarden:
         
         try:
             auc = roc_auc_score(y_true, y_pred)
-        except:
+        except (ValueError, Exception):
             auc = 0.0
         
         cm = confusion_matrix(y_true, y_pred)
@@ -3095,7 +3095,7 @@ class EdgeWarden:
             if coverages:
                 return np.median(coverages)
             return 20.0  # Default fallback
-        except:
+        except Exception:
             return 20.0
     
     def _get_tech_string(self) -> str:
@@ -3235,7 +3235,7 @@ class EdgeWarden:
             else:
                 # HiFi/Illumina: high quality, mean ~30
                 return np.random.normal(30, 3, length).clip(20, 40).astype(np.float32)
-        except:
+        except Exception:
             # Fallback to uniform quality
             return np.full(length, 20.0, dtype=np.float32)
     
@@ -3250,7 +3250,7 @@ class EdgeWarden:
             # Generate default coverage array (uniform with some noise)
             base_coverage = 20.0  # Default coverage
             return np.random.poisson(base_coverage, length).astype(np.float32)
-        except:
+        except Exception:
             # Fallback to uniform coverage
             return np.full(length, 20.0, dtype=np.float32)
     
@@ -3322,7 +3322,7 @@ class EdgeWarden:
             max_edges = len(neighbors) * (len(neighbors) - 1) / 2
             return edge_count / max_edges if max_edges > 0 else 0.0
             
-        except:
+        except Exception:
             return 0.5  # Default clustering
 
 
