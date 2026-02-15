@@ -1197,7 +1197,7 @@ class GPUSpectralClustering:
         # Eigendecomposition
         try:
             eigenvalues, eigenvectors = np.linalg.eigh(L)
-        except:
+        except Exception:
             # Fallback: assign by total contacts
             logger.warning("Eigendecomposition failed, using fallback clustering")
             total_contacts = contact_matrix.sum(axis=1)
@@ -2584,14 +2584,14 @@ def get_gpu_info() -> Dict[str, Any]:
             result['total_memory_gb'] = mem_info[1] / (1024**3)
             result['free_memory_gb'] = mem_info[0] / (1024**3)
             result['used_memory_gb'] = (mem_info[1] - mem_info[0]) / (1024**3)
-        except:
+        except Exception:
             pass
     elif backend_type == 'mps':
         try:
             import torch
             result['device_name'] = 'Apple Silicon GPU'
             result['mps_available'] = torch.backends.mps.is_available()
-        except:
+        except Exception:
             pass
     
     return result
