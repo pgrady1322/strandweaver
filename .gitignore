@@ -4,6 +4,7 @@
 # Training data and tarballs stay LOCAL ONLY — never pushed to GitHub.
 # Trained model weights ARE tracked (small, needed for releases).
 
+
 # ── Training data (large — LOCAL ONLY) ────────────────────────────────
 training_data/
 training_data_10x/
@@ -44,6 +45,9 @@ Thumbs.db
 .nextflow*
 work/
 nextflow/.nextflow*
+
+# ── Internal dev files (not for GitHub) ────────────────────────────────
+Non_Main_Commit_Files/
 
 # ── Misc ──────────────────────────────────────────────────────────────
 archive/
