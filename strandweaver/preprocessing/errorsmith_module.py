@@ -1200,6 +1200,39 @@ class PacBioCorrector(BaseCorrector):
             technology=read.technology,
             metadata=read.metadata
         )
+    
+    def build_global_spectrum(self, reads: List[SeqRead]) -> int:
+        """
+        Build a global k-mer frequency table from ALL reads before correction.
+        
+        HiFi error correction benefits from population-level k-mer frequency
+        signal (hifiasm builds global tables first). Without this, per-read
+        correction has no population frequency context and may overcorrect
+        rare-but-correct k-mers.
+        
+        Must be called BEFORE correct_read() / correct_reads() (G20 fix).
+        
+        Args:
+            reads: Full set of HiFi reads to build spectrum from
+            
+        Returns:
+            Number of solid k-mers in the global spectrum
+        """
+        logger.info(f"Building global k-mer spectrum from {len(reads)} HiFi reads (k={self.k_size})")
+        
+        for read in reads:
+            self.kmer_corrector.spectrum.add_sequence(read.sequence)
+        
+        self.kmer_corrector.spectrum.build_solid_kmers()
+        
+        n_solid = len(self.kmer_corrector.spectrum.solid_kmers)
+        n_total = len(self.kmer_corrector.spectrum.kmer_counts)
+        logger.info(
+            f"Global k-mer spectrum built: {n_solid:,} solid / "
+            f"{n_total:,} total k-mers (min_freq={self.min_kmer_freq})"
+        )
+        
+        return n_solid
 
 
 class IlluminaCorrector(BaseCorrector):
@@ -1341,8 +1374,8 @@ class AncientDNACorrector(BaseCorrector):
         k_size: int = 21,
         min_kmer_freq: int = 3,
         max_corrections: int = 8,
-        damage_5p_rate: float = 0.05,
-        damage_3p_rate: float = 0.05,
+        damage_5p_rate: float = 0.30,
+        damage_3p_rate: float = 0.30,
         damage_decay_length: int = 10,
         collect_viz_data: bool = False
     ):
@@ -1354,8 +1387,12 @@ class AncientDNACorrector(BaseCorrector):
             k_size: K-mer size
             min_kmer_freq: Minimum k-mer frequency
             max_corrections: Maximum corrections per read
-            damage_5p_rate: C→T deamination rate at 5' end
-            damage_3p_rate: G→A deamination rate at 3' end
+            damage_5p_rate: C→T deamination rate at 5' end. Default 0.30 matches
+                           typical ancient specimens (Briggs et al. PNAS 2007).
+                           Well-preserved specimens: ~0.05-0.10.
+                           Degraded (>10k yrs): 0.30-0.40.
+                           Use estimate_damage_from_reads() for data-driven estimation.
+            damage_3p_rate: G→A deamination rate at 3' end (same guidance).
             damage_decay_length: Distance from read end where damage occurs (bp)
             collect_viz_data: Whether to collect visualization data
         """
@@ -1462,6 +1499,78 @@ class AncientDNACorrector(BaseCorrector):
             technology=read.technology,
             metadata=read.metadata
         )
+    
+    def estimate_damage_from_reads(
+        self,
+        reads: List[SeqRead],
+        sample_size: int = 10000
+    ) -> Tuple[float, float]:
+        """
+        Estimate 5' and 3' damage rates from read data (Briggs et al. 2007).
+        
+        Counts C→T substitution frequency at the 5' end and G→A at the 3'
+        end within the damage_decay_length window, compared to a reference
+        expectation of 25% per base (uniform).
+        
+        Updates self.damage_5p_rate and self.damage_3p_rate in-place.
+        
+        Args:
+            reads: List of SeqRead objects (subset is sampled for speed)
+            sample_size: Number of reads to sample
+            
+        Returns:
+            Tuple of (damage_5p_rate, damage_3p_rate)
+        """
+        import random
+        
+        sampled = reads[:sample_size] if len(reads) <= sample_size else random.sample(reads, sample_size)
+        
+        ct_5p = 0   # C→T at 5' end (proxy: count of T in first N bases)
+        total_5p = 0  # Total C+T at 5' end
+        ga_3p = 0   # G→A at 3' end (proxy: count of A in last N bases)
+        total_3p = 0  # Total G+A at 3' end
+        
+        window = self.damage_decay_length
+        
+        for read in sampled:
+            seq = read.sequence.upper()
+            if len(seq) < window * 2:
+                continue
+            
+            # 5' end: count T/(C+T) — elevated T suggests C→T deamination
+            for i in range(min(window, len(seq))):
+                if seq[i] in ('C', 'T'):
+                    total_5p += 1
+                    if seq[i] == 'T':
+                        ct_5p += 1
+            
+            # 3' end: count A/(G+A) — elevated A suggests G→A deamination
+            for i in range(min(window, len(seq))):
+                pos = len(seq) - 1 - i
+                if seq[pos] in ('G', 'A'):
+                    total_3p += 1
+                    if seq[pos] == 'A':
+                        ga_3p += 1
+        
+        # Expected rate in undamaged DNA: ~50% T among C+T (no bias)
+        # Damage rate = excess above 50%
+        baseline = 0.50
+        
+        if total_5p > 0:
+            observed_5p = ct_5p / total_5p
+            self.damage_5p_rate = max(0.0, min(1.0, observed_5p - baseline))
+        
+        if total_3p > 0:
+            observed_3p = ga_3p / total_3p
+            self.damage_3p_rate = max(0.0, min(1.0, observed_3p - baseline))
+        
+        logger.info(
+            f"Estimated aDNA damage rates: 5' C→T = {self.damage_5p_rate:.3f}, "
+            f"3' G→A = {self.damage_3p_rate:.3f} "
+            f"(from {len(sampled)} reads)"
+        )
+        
+        return self.damage_5p_rate, self.damage_3p_rate
 
 
 # ============================================================================

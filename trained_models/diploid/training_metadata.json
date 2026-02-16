@@ -1,0 +1,38 @@
+{
+  "val_accuracy": 0.8618,
+  "val_f1_weighted": 0.8618,
+  "val_f1_macro": 0.8618,
+  "per_class_f1": {
+    "0": 0.8611,
+    "1": 0.8624
+  },
+  "train_size": 978435,
+  "val_size": 172665,
+  "rebalance_strategy": "none",
+  "sweep_best_params": {
+    "max_depth": 14,
+    "learning_rate": 0.10894798456423375,
+    "n_estimators": 1000,
+    "subsample": 0.7950017732596978,
+    "colsample_bytree": 0.9987143052685449,
+    "min_child_weight": 8,
+    "gamma": 0.33399228352608534,
+    "reg_alpha": 0.0017303152941984007,
+    "reg_lambda": 0.2682583241335385
+  },
+  "cv_accuracy_mean": 0.8582,
+  "cv_accuracy_std": 0.001,
+  "cv_fold_scores": [
+    0.8587,
+    0.858,
+    0.8598,
+    0.8567,
+    0.8579
+  ],
+  "label_distribution": {
+    "A": 566625,
+    "B": 584475
+  },
+  "num_samples": 1151100,
+  "num_features": 26
+}

@@ -3,7 +3,8 @@
 **AI & ML-Powered Multi-Technology Genome Assembler with GPU Acceleration**
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Status](https://img.shields.io/badge/status-v0.1_Beta-yellow.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
+[![Status](https://img.shields.io/badge/status-v0.2_Beta-green.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
+[![Models](https://img.shields.io/badge/trained%20models-5%20XGBoost%20%2B%201%20GNN-orange.svg)](trained_models/TRAINING.md)
 [![License](https://img.shields.io/badge/license-Dual%20License%20(Academic/Commercial)-blue.svg)](LICENSE_ACADEMIC.md)
 
 **StrandWeaver** is a next-generation genome assembly pipeline combining machine-learning optimized technology-aware error correction, graph-based assembly with haplotype-aware graph neural network path resolution, and expanded features including comprehensive structural variant detection for ancient DNA, Illumina, ONT, ultra-long ONT, and PacBio sequencing data. Its goal is to relieve manual curation bottlenecks in traditional high-contiguity genome assembly by applying AI/ML to genome graph paths and other complex regions. It uses these technologies to improve accuracy and contiguity, but also to provide functional annotations, such as structural variants, during the assembly process.
@@ -13,16 +14,16 @@ StrandWeaver is optimized for NVIDIA GPU acceleration, but can also take advanta
 StrandWeaver is inspired by the brilliant work of the authors of MaSuRCA *(1)*, Verkko *(2)*, and Hifiasm *(3)*, but includes novel elements such as:
 - **Neural network-based haplotype assembly**: Graph topology simplification with strict protection of biological variation (SNPs, indels, CNVs) across haploid and diploid genomes (polyploid in a future release)
 - **Multi-technology integration**: Seamless combination of ONT, PacBio HiFi, ultra-long reads, and Hi-C data in a unified assembly graph, and expanded methods for short read & ancient DNA (PacBio SBB and Illumina)
-- **Dynamic K-mer size selection**: StrandWeaver optimizes different k-mer sizes for all parts of the assembly process based on heuristics and trained models (v0.2)
-- **Comprehensive Path Scoring**: A score for each graph path is provided based on a comprehensive set of heuristics, including coverage, error profiles, and sequence repetitive complexity, as well as trained models (v0.2)
+- **Dynamic K-mer size selection**: StrandWeaver optimizes different k-mer sizes for all parts of the assembly process based on heuristics and trained models
+- **Comprehensive Path Scoring**: A score for each graph path is provided based on a comprehensive set of heuristics, including coverage, error profiles, and sequence repetitive complexity, as well as trained models
 - **Ancient DNA optimization**: Machine learning models trained to profile and repair deamination damage (C→T/G→A patterns) with configurable confidence thresholds
 - **Easy User Model Training**: CLI commands provided to generate a set of training data matching your genome / clade of choice
 
-The pipeline can be custom trained using provided scripts for any data type (new sequencing technology) or organism-specific scenario (genomes with extreme repeat content, high heterozygosity, or complex structural variation). **Generic models will be provided with the v0.2 release.**
+The pipeline can be custom trained using provided scripts for any data type (new sequencing technology) or organism-specific scenario (genomes with extreme repeat content, high heterozygosity, or complex structural variation). **Pre-trained models ship with v0.2+ and are used automatically.** See the [AI Model Training Guide](trained_models/TRAINING.md) for custom training.
 
-> **🚀 v0.1.0 Release (February 2026):** Beta release with complete end-to-end assembly pipeline. All AI modules functional using optimized heuristics. Core pipeline does not currently include trained models. GPU acceleration fully operational. See [v0.1 Release Notes](#v01-release-notes) below.
+> **🚀 v0.2.0 Beta (February 2026):** Trained ML models now ship for 5 of 7 AI modules (EdgeWarden, PathGNN, DiploidAI, ThreadCompass, SVScribe). All models retrained on 200 synthetic diploid genomes via Colab GPU sweeps. Pre-trained weights load automatically — no user setup required. See [v0.2 Release Notes](#v02-release-notes) below.
 >
-> **v0.2+:** Trained ML models released (after extensive testing on heuristic versions and model training). Architecture for rebuilding genome after custom graph modifications released.
+> **v0.3+:** K-Weaver & ErrorSmith trained models. Standalone `assemble` command. Polyploid assembly support. BUSCO integration.
 
 ---
 
@@ -68,20 +69,20 @@ The pipeline can be custom trained using provided scripts for any data type (new
   - Phasing information
   - IGV / UCSC overage tracks for all read types
   - Chromosome identification using node features, repeat detection, and synteny to allow easier downstream processing
-- 🧪 **Training Infrastructure**: Generic models provided for v0.2+, and custom training can be done for organism-specific optimization
+- 🧪 **Training Infrastructure**: Pre-trained models ship with v0.2+; custom training supported for organism-specific optimization
 - 🔌 **Modular Architecture**: All AI features can be selectively disabled for classical heuristics
 
-### AI/ML Features (v0.1 - Heuristic-Based)
-- **Complete AI Subsystem Suite** (using optimized heuristics - trained models in v0.2+):
-  1. ✅ **K-Weaver**: K-mer optimization with rule-based selection
-  2. ✅ **ErrorSmith**: Technology-specific error profiling
-  3. ✅ **EdgeWarden**: 80-feature edge filtering with heuristic scoring
-  4. ✅ **PathWeaver**: Haplotype-aware path resolution with variation protection
-  5. ✅ **ThreadCompass**: Ultra-long read routing optimization
-  6. ✅ **HaplotypeDetangler**: Hi-C-augmented phasing with spectral clustering
-  7. ✅ **SVScribe**: Assembly-time structural variant detection
+### AI/ML Features (v0.2 — Trained Models)
+- **7-Module AI Subsystem** — 5 ship with trained XGBoost/GNN weights, 2 use optimized heuristics:
+  1. ⚙️ **K-Weaver**: K-mer optimization with rule-based selection *(trained models in v0.3)*
+  2. ⚙️ **ErrorSmith**: Technology-specific error profiling *(trained models in v0.3)*
+  3. 🧠 **EdgeWarden**: 80-feature edge filtering with trained XGBoost — 5 technology-specific models (acc: 0.88, F1-macro: 0.90)
+  4. 🧠 **PathGNN**: Graph neural network edge classification with GATv2Conv attention (acc: 0.90, F1-macro: 0.90)
+  5. 🧠 **DiploidAI**: XGBoost haplotype phasing with 26-feature node classification (acc: 0.86, F1-macro: 0.86)
+  6. 🧠 **ThreadCompass**: Ultra-long read routing with XGBoost regression (R²: 0.997)
+  7. 🧠 **SVScribe**: Structural variant detection with XGBoost classifier (acc: 0.82, F1-weighted: 0.83)
 
-- **Planned**: Trained ML models (XGBoost, PyTorch) for v0.2 release
+- 🧠 = trained model ships | ⚙️ = optimized heuristic (trained models planned for v0.3)
 
 ---
 
@@ -119,9 +120,9 @@ StrandWeaver uses a modular dependency system with three installation tiers:
 - **Gradient Boosting**: `xgboost>=2.0.0`
 
 These are required for:
+- Loading pre-trained models (shipped with v0.2+)
 - Custom model training
 - GPU-accelerated assembly (if CUDA available)
-- Advanced AI features in v0.2+ (current v0.1 uses heuristics)
 
 **Development Dependencies (Optional - `[dev]` flag)**:
 - **Testing**: `pytest>=7.0.0`, `pytest-cov>=4.0.0`
@@ -490,6 +491,7 @@ StrandWeaver includes a complete pipeline for generating custom training data, b
 #### Step 1 — Generate Synthetic Genomes & Reads
 
 ```bash
+# Full mode (writes FASTQ + graph CSVs)
 strandweaver train generate-data \
   --genome-size 5000000 \
   -n 100 \
@@ -497,26 +499,49 @@ strandweaver train generate-data \
   --coverage 30 --coverage 20 --coverage 10 --coverage 15 \
   --graph-training \
   -o training_data/custom
+
+# ⚡ Fast graph-only mode (~3.3× faster, ~27× less disk)
+strandweaver train generate-data \
+  --genome-size 1000000 \
+  -n 200 \
+  --graph-training --graph-only \
+  -o training_data/fast_graphs
 ```
 
 The `--graph-training` flag enables graph synthesis: for every simulated genome, StrandWeaver builds an overlap graph from the reads, labels every edge and node with ground-truth haplotype/topology information, and exports feature CSVs for all five model types (EdgeAI, PathGNN, DiploidAI, UL Routing, SV Detection).
 
+The `--graph-only` flag simulates reads in-memory without writing FASTQ/FASTA to disk, producing only the graph training CSVs (~7 min/genome vs ~23 min/genome).
+
 #### Step 2 — Train Models
 
 ```bash
+# Train all 5 model types with cross-validation
 strandweaver train run \
   --data-dir training_data/custom \
   -o trained_models/
+
+# Train specific models with custom hyperparameters
+strandweaver train run \
+  --data-dir training_data/custom \
+  -o trained_models/ \
+  --models edge_ai --models diploid_ai \
+  --max-depth 8 --n-folds 3
 ```
 
-This discovers the CSV files under every `genome_*/graph_training/` subdirectory, trains XGBoost classifiers/regressors for each model type with cross-validation, and saves weights in the exact directory layout the pipeline expects.
+This discovers the CSV files under every `genome_*/graph_training/` subdirectory, trains XGBoost classifiers/regressors for each model type with cross-validation, and saves weights in the exact directory layout the pipeline expects. Hybrid resampling activates automatically when class imbalance exceeds 5.0×.
 
 #### Step 3 — Assemble with Trained Models
 
 ```bash
+# Pre-trained models load automatically from trained_models/
 strandweaver pipeline \
   --hifi-long-reads reads.fastq.gz \
-  --model-dir trained_models/ \
+  -o assembly/
+
+# Or specify a custom model directory
+strandweaver pipeline \
+  --hifi-long-reads reads.fastq.gz \
+  --model-dir my_custom_models/ \
   -o assembly/
 ```
 
@@ -526,7 +551,7 @@ strandweaver pipeline \
 - Sequencing: read types (Illumina, HiFi, ONT, Ultra-long, Hi-C, Ancient DNA), coverage, error rates
 - Graph: overlap length/identity thresholds, noise edge fraction, GFA export
 
-See [strandweaver/user_training/README.md](strandweaver/user_training/README.md) for the complete parameter reference, graph training architecture, and advanced recipes.
+See [strandweaver/user_training/README.md](strandweaver/user_training/README.md) for the complete parameter reference, graph training architecture, and advanced recipes. For Colab GPU training workflows, see [trained_models/TRAINING.md](trained_models/TRAINING.md).
 
 **Output Files**:
 ```
@@ -720,15 +745,16 @@ pip install "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver
 
 **Problem: "No trained models found" warning**
 ```bash
-# v0.1 uses optimized heuristics (no models needed)
-# This is expected behavior - assembly will complete successfully
+# Pre-trained models ship with v0.2+ and should load automatically.
+# If you see this warning, the trained_models/ directory may be missing.
 
-# For v0.2+: Pre-trained models will be available for download
+# Reinstall to restore pre-trained models:
+pip install --force-reinstall "git+https://github.com/pgrady1322/strandweaver.git#egg=strandweaver[all]"
 
-# Or train custom models (advanced)
-strandweaver train generate-data --genome-size 5000000 --graph-training -o training_data/
+# Or train custom models:
+strandweaver train generate-data --genome-size 5000000 --graph-training --graph-only -o training_data/
 strandweaver train run --data-dir training_data/ -o trained_models/
-# See strandweaver/user_training/README.md for details
+# See trained_models/TRAINING.md for the complete training guide
 ```
 
 **Problem: GPU not being used**
@@ -830,19 +856,31 @@ strandweaver pipeline \
 
 Planned features and known integration gaps for upcoming releases.
 
-### v0.2 — Planned
+### v0.2 Release Notes
 
 | # | Feature | Status | Notes |
 |---|---------|--------|-------|
-| 1 | **Trained ML Models** | In Progress | XGBoost / PyTorch weights for all 7 AI modules |
-| 2 | **PacBio Flowcell / Chemistry Metadata** | Almost Complete | `--pacbio-platform`, `--pacbio-chemistry` flags for the `profile` command (analogous to existing ONT metadata flags) |
+| 1 | **Trained ML Models** | ✅ Complete | XGBoost + GNN weights for 5 of 7 AI modules (EdgeWarden, PathGNN, DiploidAI, ThreadCompass, SVScribe). Trained on 200 synthetic diploid genomes via Colab GPU sweeps with hybrid resampling. |
+| 2 | **DiploidAI Integration** | ✅ Complete | 26-feature XGBoost haplotype phasing wired into HaplotypeDetangler at all 3 pipeline call sites |
+| 3 | **Bubble-Aware Local Phasing** | ✅ Complete | Genomics audit item G2 — local phasing with allelic bubble detection |
+| 4 | **Genomics Audit (24 items)** | ✅ Complete | G1–G24 all resolved — critical, high, and moderate priority fixes |
+| 5 | **Git LFS** | ✅ Complete | Model weights (`.pkl`, `.pt`) tracked via Git LFS |
+| 6 | **Graph-Only Training Mode** | ✅ Complete | `--graph-only` flag: 3.3× faster data generation, 27× less disk |
+| 7 | **Training Documentation** | ✅ Complete | [AI Model Training Guide](trained_models/TRAINING.md) with performance benchmarks |
+
+### v0.3 — Planned
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | **K-Weaver & ErrorSmith Trained Models** | Planned | Requires assembly benchmark approach (not synthetic graph training) |
+| 2 | **PacBio Flowcell / Chemistry Metadata** | Almost Complete | `--pacbio-platform`, `--pacbio-chemistry` flags for the `profile` command |
 | 3 | **Native ONT Metadata Detection** | Almost Complete | `--ont-detect` flag is wired but calls a placeholder. Replace with POD5 / FAST5 / Dorado header parsing |
 | 4 | **Standalone `assemble` / `nf-build-contigs`** | Stub only | Wire to the same assembly engine used by the `pipeline` command |
 | 5 | **Multi-Technology Read Merging (`nf-merge`)** | Stub only | Standalone merge utility for users working with external assemblers |
 | 6 | **QV Score Optimization & Gap Filling** | Planned | `_step_finish()` has stubs; partial T2T-Polish integration exists |
 | 7 | **Validate — Reference Comparison** | Planned | `--reference` flag accepted but comparison logic not implemented |
 | 8 | **BUSCO Integration** | Planned | `--busco-lineage` present on `validate` but not wired to BUSCO |
-| 9 | **Decontamination Screening** | Planned | `--decontaminate` present on `pipeline` but no screening step implemented. Config supports `reference_databases` |
+| 9 | **Decontamination Screening** | Planned | `--decontaminate` present on `pipeline` but no screening step implemented |
 | 10 | **Polyploid Assembly** | Planned | `--ploidy` currently limited to `haploid` / `diploid`; polyploid mode is a future target |
 
 ---
@@ -850,7 +888,8 @@ Planned features and known integration gaps for upcoming releases.
 ## 📚 Documentation
 
 **Available Documentation:**
-- [User Training Guide](strandweaver/user_training/README.md) - Generate custom training data
+- [AI Model Training Guide](trained_models/TRAINING.md) - Pre-trained model details, performance benchmarks, custom training & retraining
+- [User Training Module](strandweaver/user_training/README.md) - Synthetic genome generation & graph training data pipeline
 
 ---
 

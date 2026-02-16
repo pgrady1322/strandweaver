@@ -14,10 +14,19 @@ License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENS
 from __future__ import annotations  # Enable forward references
 from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass, field
+from enum import IntEnum
 import logging
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+
+class Ploidy(IntEnum):
+    """Assembly ploidy level. Controls whether phasing is applied."""
+    HAPLOID = 1
+    DIPLOID = 2
+    TRIPLOID = 3
+    TETRAPLOID = 4
 
 
 class HaplotypeDetangler:
@@ -34,7 +43,8 @@ class HaplotypeDetangler:
         use_ai: bool = False,
         min_confidence: float = 0.6,
         repeat_threshold: float = 0.5,
-        ml_model: Optional[Any] = None
+        ml_model: Optional[Any] = None,
+        ploidy: int = 2
     ):
         """
         Initialize phasing module.
@@ -44,11 +54,13 @@ class HaplotypeDetangler:
             min_confidence: Minimum confidence for haplotype assignment
             repeat_threshold: Threshold for repeat classification
             ml_model: Pre-trained ML model for phasing (if use_ai=True)
+            ploidy: Assembly ploidy (1=haploid skips phasing, 2+=diploid+)
         """
         self.use_ai = use_ai
         self.ml_model = ml_model
         self.min_confidence = min_confidence
         self.repeat_threshold = repeat_threshold
+        self.ploidy = max(1, int(ploidy))
         self.logger = logging.getLogger(f"{__name__}.HaplotypeDetangler")
         
         # Initialize core engine
@@ -72,9 +84,15 @@ class HaplotypeDetangler:
         """
         Phase assembly graph into haplotypes.
         
-        Main pipeline integration method. Uses Hi-C connectivity clustering
-        as primary signal, supplemented by GNN paths, AI annotations, and
-        UL support.
+        For diploid+ assemblies (ploidy >= 2), uses bubble-aware local
+        phasing: heterozygous bubbles in the graph are detected, Hi-C
+        contacts are binned per-bubble, and local phase decisions are
+        chained along each connected component.  This replaces the
+        previous global spectral clustering approach that incorrectly
+        separated chromosomes rather than haplotypes (G2 fix).
+        
+        For haploid assemblies (ploidy == 1), phasing is skipped entirely
+        and all nodes are marked as haplotype 0.
         
         Args:
             graph: Assembly graph (DBGGraph or StringGraph)
@@ -92,18 +110,33 @@ class HaplotypeDetangler:
         self.logger.info("HaplotypeDetangler: Starting graph phasing")
         self.logger.info(f"  Graph nodes: {len(graph.nodes)}")
         self.logger.info(f"  Graph edges: {len(graph.edges)}")
+        self.logger.info(f"  Ploidy: {self.ploidy}")
         self.logger.info(f"  Use Hi-C edges: {use_hic_edges}")
         self.logger.info(f"  AI enabled: {self.use_ai}")
         
-        # Step 1: Extract Hi-C phasing information
+        # ── Haploid fast-path: skip phasing entirely ──
+        if self.ploidy < 2:
+            self.logger.info("  Ploidy=1 (haploid): skipping phasing")
+            node_assignments = {nid: 0 for nid in graph.nodes}
+            return PhasingResult(
+                num_haplotypes=1,
+                node_assignments=node_assignments,
+                confidence_scores={nid: 1.0 for nid in graph.nodes},
+                metadata={'haploid_skip': True, 'ploidy': 1},
+            )
+        
+        # Step 1: Bubble-aware Hi-C phasing (G2 fix)
+        # Instead of global spectral clustering (which separates chromosomes
+        # not haplotypes), detect heterozygous bubbles in the graph and use
+        # Hi-C contacts within each bubble to determine local phase.
         hic_phase_info = None
         if use_hic_edges:
-            self.logger.info("  Step 1/4: Extracting Hi-C connectivity for phasing...")
-            hic_phase_info = self._extract_hic_phase_info(graph)
+            self.logger.info("  Step 1/4: Bubble-aware Hi-C phasing...")
+            hic_phase_info = self._bubble_aware_hic_phasing(graph)
             if hic_phase_info:
-                self.logger.info(f"    Hi-C phasing info for {len(hic_phase_info)} nodes")
+                self.logger.info(f"    Bubble-aware phasing info for {len(hic_phase_info)} nodes")
             else:
-                self.logger.warning("    No Hi-C edges found, using alternative signals")
+                self.logger.warning("    No bubbles or Hi-C edges found, using alternative signals")
         else:
             self.logger.info("  Step 1/4: Skipping Hi-C clustering (disabled)")
         
@@ -114,7 +147,7 @@ class HaplotypeDetangler:
             gnn_paths=gnn_paths,
             hic_phase_info=hic_phase_info,
             ai_annotations=ai_annotations,
-            hic_edge_support=None,  # Could extract from Hi-C edges
+            hic_edge_support=None,
             regional_k_map=None,
             ul_support_map=ul_support_map
         )
@@ -144,6 +177,329 @@ class HaplotypeDetangler:
         
         return phasing_result
     
+    def _bubble_aware_hic_phasing(self, graph) -> Optional[Dict[int, PhaseInfo]]:
+        """
+        Bubble-aware local Hi-C phasing (G2 fix).
+        
+        Instead of running global spectral clustering on the full Hi-C
+        contact matrix (which separates chromosomes, not haplotypes),
+        this method:
+        
+        1. Detects heterozygous bubbles (source → 2 arms → sink) in the
+           assembly graph.
+        2. Bins Hi-C contacts per bubble: reads mapping to opposite arms
+           of the SAME bubble are trans-allelic; reads linking arms of
+           DIFFERENT bubbles reveal which arms are co-phased.
+        3. Chains local phase decisions across bubbles along each
+           connected component using a greedy propagation.
+        
+        Based on the approach used by hifiasm (Cheng et al., 2021).
+        
+        Args:
+            graph: Assembly graph with Hi-C edges
+        
+        Returns:
+            Dict mapping node_id to PhaseInfo, or None if insufficient data
+        """
+        # ── Step 1: Collect Hi-C edges ──
+        hic_edges = []
+        for edge_id, edge in graph.edges.items():
+            edge_type = getattr(edge, 'edge_type', None)
+            if edge_type == 'hic':
+                from_node = getattr(edge, 'from_node',
+                            getattr(edge, 'from_id',
+                            getattr(edge, 'source', None)))
+                to_node = getattr(edge, 'to_node',
+                          getattr(edge, 'to_id',
+                          getattr(edge, 'target', None)))
+                weight = getattr(edge, 'weight',
+                         getattr(edge, 'confidence',
+                         getattr(edge, 'contact_count', 1.0)))
+                if from_node is not None and to_node is not None:
+                    hic_edges.append((from_node, to_node, weight))
+        
+        if not hic_edges:
+            self.logger.warning("No Hi-C edges found in graph")
+            return None
+        
+        self.logger.info(f"    Found {len(hic_edges)} Hi-C edges")
+        
+        # Build a quick Hi-C contact lookup: (nodeA, nodeB) -> total weight
+        hic_contacts: Dict[Tuple[int, int], float] = defaultdict(float)
+        for n1, n2, w in hic_edges:
+            pair = (min(n1, n2), max(n1, n2))
+            hic_contacts[pair] += w
+        
+        # ── Step 2: Detect bubbles ──
+        bubbles = self._detect_bubbles(graph)
+        if not bubbles:
+            self.logger.warning("    No bubbles detected — falling back to spectral clustering")
+            return self._extract_hic_phase_info(graph)
+        
+        self.logger.info(f"    Detected {len(bubbles)} heterozygous bubbles")
+        
+        # Map each node to the bubble(s) and arm it belongs to.
+        # bubble = (source, sink, arm_a_nodes, arm_b_nodes)
+        node_to_bubble: Dict[int, List[Tuple[int, str]]] = defaultdict(list)
+        for bub_idx, (source, sink, arm_a, arm_b) in enumerate(bubbles):
+            for nid in arm_a:
+                node_to_bubble[nid].append((bub_idx, 'A'))
+            for nid in arm_b:
+                node_to_bubble[nid].append((bub_idx, 'B'))
+        
+        # ── Step 3: Score inter-bubble phasing via Hi-C contacts ──
+        # For each pair of bubbles that share Hi-C contacts between their
+        # arms, tally: do contacts link same-labelled arms (cis = co-phased)
+        # or opposite-labelled arms (trans = anti-phased)?
+        # Edge between bubble pair: positive weight → cis, negative → trans.
+        bubble_graph: Dict[Tuple[int, int], float] = defaultdict(float)
+        
+        for (n1, n2), contact_w in hic_contacts.items():
+            entries_1 = node_to_bubble.get(n1, [])
+            entries_2 = node_to_bubble.get(n2, [])
+            
+            for bub_i, arm_i in entries_1:
+                for bub_j, arm_j in entries_2:
+                    if bub_i == bub_j:
+                        # Intra-bubble trans contact (confirms they are
+                        # on opposite haplotypes — already encoded by
+                        # the bubble structure itself).
+                        continue
+                    
+                    pair = (min(bub_i, bub_j), max(bub_i, bub_j))
+                    # Same arm label → cis (want to keep same phase)
+                    # Different arm label → trans (want to flip phase)
+                    if arm_i == arm_j:
+                        bubble_graph[pair] += contact_w   # cis evidence
+                    else:
+                        bubble_graph[pair] -= contact_w   # trans evidence
+        
+        # ── Step 4: Chain phases across bubbles (greedy BFS) ──
+        num_bubbles = len(bubbles)
+        bubble_phase: Dict[int, int] = {}   # bubble_idx → 0 or 1
+        
+        # Build adjacency list for the bubble graph
+        bubble_adj: Dict[int, List[Tuple[int, float]]] = defaultdict(list)
+        for (bi, bj), w in bubble_graph.items():
+            bubble_adj[bi].append((bj, w))
+            bubble_adj[bj].append((bi, w))
+        
+        # BFS from highest-connectivity bubbles outward
+        bubble_order = sorted(
+            range(num_bubbles),
+            key=lambda b: sum(abs(w) for _, w in bubble_adj.get(b, [])),
+            reverse=True,
+        )
+        
+        for start_bub in bubble_order:
+            if start_bub in bubble_phase:
+                continue
+            # Seed this component
+            bubble_phase[start_bub] = 0
+            queue = [start_bub]
+            while queue:
+                current = queue.pop(0)
+                for neighbor, weight in bubble_adj.get(current, []):
+                    if neighbor in bubble_phase:
+                        continue
+                    # weight > 0 → cis (same phase), weight < 0 → trans (flip)
+                    if weight >= 0:
+                        bubble_phase[neighbor] = bubble_phase[current]
+                    else:
+                        bubble_phase[neighbor] = 1 - bubble_phase[current]
+                    queue.append(neighbor)
+        
+        # Assign any isolated bubbles (no inter-bubble contacts)
+        for bub_idx in range(num_bubbles):
+            if bub_idx not in bubble_phase:
+                bubble_phase[bub_idx] = 0
+        
+        # ── Step 5: Convert bubble phases to node PhaseInfo ──
+        phase_info: Dict[int, PhaseInfo] = {}
+        
+        for bub_idx, (source, sink, arm_a, arm_b) in enumerate(bubbles):
+            bp = bubble_phase[bub_idx]  # 0 or 1
+            
+            # If bubble phase = 0: arm_a → hapA, arm_b → hapB
+            # If bubble phase = 1: arm_a → hapB, arm_b → hapA (flip)
+            for nid in arm_a:
+                if bp == 0:
+                    pa, pb = 0.85, 0.15
+                    cluster = 0
+                else:
+                    pa, pb = 0.15, 0.85
+                    cluster = 1
+                
+                contact_count = sum(
+                    1 for (n1, n2) in hic_contacts
+                    if nid in (n1, n2)
+                )
+                phase_info[nid] = PhaseInfo(
+                    node_id=nid,
+                    phase_A_score=pa,
+                    phase_B_score=pb,
+                    hic_contact_count=contact_count,
+                    cluster_id=cluster,
+                )
+            
+            for nid in arm_b:
+                if bp == 0:
+                    pa, pb = 0.15, 0.85
+                    cluster = 1
+                else:
+                    pa, pb = 0.85, 0.15
+                    cluster = 0
+                
+                contact_count = sum(
+                    1 for (n1, n2) in hic_contacts
+                    if nid in (n1, n2)
+                )
+                phase_info[nid] = PhaseInfo(
+                    node_id=nid,
+                    phase_A_score=pa,
+                    phase_B_score=pb,
+                    hic_contact_count=contact_count,
+                    cluster_id=cluster,
+                )
+            
+            # Source and sink nodes are shared (homozygous flanks)
+            for shared_nid in (source, sink):
+                if shared_nid not in phase_info:
+                    phase_info[shared_nid] = PhaseInfo(
+                        node_id=shared_nid,
+                        phase_A_score=0.5,
+                        phase_B_score=0.5,
+                        hic_contact_count=0,
+                        cluster_id=-1,
+                    )
+        
+        hap_a_count = sum(1 for p in phase_info.values() if p.phase_A_score > 0.6)
+        hap_b_count = sum(1 for p in phase_info.values() if p.phase_B_score > 0.6)
+        self.logger.info(
+            f"    Bubble-aware phasing: {hap_a_count} hap-A nodes, "
+            f"{hap_b_count} hap-B nodes from {len(bubbles)} bubbles"
+        )
+        
+        return phase_info
+    
+    def _detect_bubbles(
+        self,
+        graph,
+        max_arm_length: int = 50
+    ) -> List[Tuple[int, int, List[int], List[int]]]:
+        """
+        Detect heterozygous bubble structures in the assembly graph.
+        
+        A bubble is defined as two diverging paths from a common source
+        node that reconverge at a common sink node.  This is the
+        structural signature of heterozygosity in diploid genomes.
+        
+        Algorithm mirrors DBGEngine._pop_error_bubbles() bubble detection
+        but returns bubbles instead of collapsing them.
+        
+        Args:
+            graph: Assembly graph
+            max_arm_length: Maximum number of nodes in each bubble arm
+        
+        Returns:
+            List of (source_id, sink_id, arm_a_nodes, arm_b_nodes)
+        """
+        bubbles = []
+        seen_sources: Set[int] = set()
+        
+        for source_id in graph.nodes:
+            if source_id in seen_sources:
+                continue
+            
+            # Only consider sequence edges (not Hi-C proximity edges)
+            out_edge_ids = [
+                eid for eid in graph.out_edges.get(source_id, set())
+                if eid in graph.edges and getattr(graph.edges[eid], 'edge_type', None) != 'hic'
+            ]
+            if len(out_edge_ids) < 2:
+                continue
+            
+            # Check all pairs of outgoing edges for bubble structures
+            for i in range(len(out_edge_ids)):
+                for j in range(i + 1, len(out_edge_ids)):
+                    if out_edge_ids[i] not in graph.edges or out_edge_ids[j] not in graph.edges:
+                        continue
+                    
+                    arm_a_start = graph.edges[out_edge_ids[i]].to_id
+                    arm_b_start = graph.edges[out_edge_ids[j]].to_id
+                    
+                    # Walk each arm to find convergence
+                    path_a, sink_a = self._walk_arm(graph, arm_a_start, max_arm_length)
+                    path_b, sink_b = self._walk_arm(graph, arm_b_start, max_arm_length)
+                    
+                    if sink_a is None or sink_b is None:
+                        continue
+                    if sink_a != sink_b:
+                        continue
+                    
+                    # Valid bubble found
+                    bubbles.append((source_id, sink_a, path_a, path_b))
+                    seen_sources.add(source_id)
+        
+        return bubbles
+    
+    def _walk_arm(
+        self,
+        graph,
+        start_node: int,
+        max_length: int
+    ) -> Tuple[List[int], Optional[int]]:
+        """
+        Walk a linear path from start_node until a convergence point.
+        
+        A convergence point is a node with in_degree > 1 (another path
+        merges here).  Returns the path and the convergence node, or
+        (path, None) if the arm branches or dead-ends.
+        
+        Only follows sequence-based edges (ignores Hi-C proximity edges).
+        
+        Args:
+            graph: Assembly graph
+            start_node: First node of the arm
+            max_length: Maximum nodes to walk
+        
+        Returns:
+            (path_node_ids, sink_node_or_None)
+        """
+        path = [start_node]
+        current = start_node
+        
+        for _ in range(max_length):
+            # Only count sequence edges (skip Hi-C edges)
+            out_edges = [
+                eid for eid in graph.out_edges.get(current, set())
+                if eid in graph.edges and getattr(graph.edges[eid], 'edge_type', None) != 'hic'
+            ]
+            if len(out_edges) != 1:
+                # Dead-end or branch — not a clean bubble arm
+                return path, None
+            
+            edge = graph.edges.get(out_edges[0])
+            if edge is None:
+                return path, None
+            
+            next_node = edge.to_id
+            
+            # Check if next node is a convergence point (sequence edges only)
+            in_edges_seq = [
+                eid for eid in graph.in_edges.get(next_node, set())
+                if eid in graph.edges and getattr(graph.edges[eid], 'edge_type', None) != 'hic'
+            ]
+            if len(in_edges_seq) > 1:
+                # Convergence point — this is the potential sink
+                return path, next_node
+            
+            path.append(next_node)
+            current = next_node
+        
+        # Exceeded max length
+        return path, None
+    
     def _extract_hic_phase_info(self, graph) -> Optional[Dict[int, PhaseInfo]]:
         """
         Extract Hi-C connectivity for phasing via spectral clustering.
@@ -165,9 +521,15 @@ class HaplotypeDetangler:
         for edge_id, edge in graph.edges.items():
             edge_type = getattr(edge, 'edge_type', None)
             if edge_type == 'hic':
-                from_node = getattr(edge, 'from_node', getattr(edge, 'from_id', None))
-                to_node = getattr(edge, 'to_node', getattr(edge, 'to_id', None))
-                weight = getattr(edge, 'weight', getattr(edge, 'confidence', 1.0))
+                from_node = getattr(edge, 'from_node',
+                            getattr(edge, 'from_id',
+                            getattr(edge, 'source', None)))
+                to_node = getattr(edge, 'to_node',
+                          getattr(edge, 'to_id',
+                          getattr(edge, 'target', None)))
+                weight = getattr(edge, 'weight',
+                         getattr(edge, 'confidence',
+                         getattr(edge, 'contact_count', 1.0)))
                 
                 if from_node is not None and to_node is not None:
                     hic_edges.append((from_node, to_node, weight))
@@ -305,10 +667,19 @@ class HaplotypeDetangler:
             return detailed_result
         
         try:
-            import torch
             import numpy as np
         except ImportError:
             return detailed_result
+        
+        # torch is only needed for PyTorch models, not XGBoost
+        torch = None
+        if not hasattr(self.ml_model, 'predict_proba'):
+            try:
+                import torch as _torch
+                torch = _torch
+            except ImportError:
+                self.logger.warning("PyTorch not available for AI phasing model")
+                return detailed_result
         
         ambiguous_nodes = list(detailed_result.ambiguous_nodes)
         if not ambiguous_nodes:
@@ -317,29 +688,151 @@ class HaplotypeDetangler:
         self.logger.info(f"    AI boost for {len(ambiguous_nodes)} ambiguous nodes")
         
         # Extract features for ambiguous nodes
+        # XGBoost diploid model expects 26 NODE_SIGNAL_FEATURES;
+        # PyTorch GNN uses simplified 4-feature vector
+        is_xgb = hasattr(self.ml_model, 'predict_proba')
+        
         features = []
         for node_id in ambiguous_nodes:
             node = graph.nodes.get(node_id)
             if not node:
-                features.append([0.5, 0.5, 0.0, 0.0])  # Default features
+                if is_xgb:
+                    features.append([0.0] * 26)
+                else:
+                    features.append([0.5, 0.5, 0.0, 0.0])
                 continue
             
-            # Feature vector: [phase_A_score, phase_B_score, coverage, degree]
-            phase_A = hic_phase_info[node_id].phase_A_score if hic_phase_info and node_id in hic_phase_info else 0.5
-            phase_B = hic_phase_info[node_id].phase_B_score if hic_phase_info and node_id in hic_phase_info else 0.5
-            coverage = getattr(node, 'coverage', 0.0) / 100.0  # Normalize
-            degree = (len(graph.in_edges.get(node_id, set())) + 
-                     len(graph.out_edges.get(node_id, set()))) / 10.0  # Normalize
-            
-            features.append([phase_A, phase_B, coverage, degree])
+            if is_xgb:
+                # Full 26-feature vector matching NODE_SIGNAL_FEATURES schema:
+                # coverage, gc_content, repeat_fraction, kmer_diversity,
+                # branching_factor, hic_contact_density, allele_frequency,
+                # heterozygosity, phase_consistency, mappability,
+                # hic_intra_contacts, hic_inter_contacts,
+                # hic_contact_ratio, hic_phase_signal,
+                # clustering_coeff, component_size,
+                # shannon_entropy, dinucleotide_bias,
+                # homopolymer_max_run, homopolymer_density, low_complexity_fraction,
+                # coverage_skewness, coverage_kurtosis, coverage_cv,
+                # coverage_p10, coverage_p90
+                seq = getattr(node, 'seq', '')
+                cov = getattr(node, 'coverage', 0.0)
+                seq_len = max(len(seq), 1)
+                
+                # GC content
+                gc = (seq.count('G') + seq.count('C') + seq.count('g') + seq.count('c')) / seq_len if seq else 0.0
+                
+                # Repeat fraction (from metadata or estimate via k-mer compression)
+                repeat_frac = node.metadata.get('repeat_fraction', 0.0) if hasattr(node, 'metadata') else 0.0
+                
+                # K-mer diversity (unique k-mers / total k-mers)
+                k = 4
+                if len(seq) >= k:
+                    kmers = [seq[i:i+k] for i in range(len(seq) - k + 1)]
+                    kmer_div = len(set(kmers)) / max(len(kmers), 1)
+                else:
+                    kmer_div = 1.0
+                
+                # Branching factor
+                in_deg = len(graph.in_edges.get(node_id, set()))
+                out_deg = len(graph.out_edges.get(node_id, set()))
+                branch = (in_deg + out_deg) / 2.0
+                
+                # Hi-C features
+                hic_info = hic_phase_info.get(node_id) if hic_phase_info else None
+                hic_density = getattr(hic_info, 'contact_density', 0.0) if hic_info else 0.0
+                allele_freq = getattr(hic_info, 'allele_frequency', 0.5) if hic_info else 0.5
+                het = getattr(hic_info, 'heterozygosity', 0.0) if hic_info else 0.0
+                phase_consist = getattr(hic_info, 'phase_consistency', 0.0) if hic_info else 0.0
+                mappability = getattr(hic_info, 'mappability', 1.0) if hic_info else 1.0
+                hic_intra = getattr(hic_info, 'intra_contacts', 0.0) if hic_info else 0.0
+                hic_inter = getattr(hic_info, 'inter_contacts', 0.0) if hic_info else 0.0
+                hic_ratio = hic_intra / max(hic_intra + hic_inter, 1.0)
+                phase_A = getattr(hic_info, 'phase_A_score', 0.5) if hic_info else 0.5
+                phase_B = getattr(hic_info, 'phase_B_score', 0.5) if hic_info else 0.5
+                hic_phase_sig = phase_A - phase_B
+                
+                # Graph topology
+                cluster_coeff = node.metadata.get('clustering_coeff', 0.0) if hasattr(node, 'metadata') else 0.0
+                comp_size = node.metadata.get('component_size', 1) if hasattr(node, 'metadata') else 1
+                
+                # Sequence complexity
+                from math import log2
+                char_counts = [seq.upper().count(c) for c in 'ACGT']
+                entropy = -sum((c/seq_len) * log2(c/seq_len + 1e-10) for c in char_counts if c > 0) if seq else 0.0
+                
+                # Dinucleotide bias
+                if len(seq) >= 2:
+                    dinucs = [seq[i:i+2] for i in range(len(seq)-1)]
+                    dinuc_div = len(set(dinucs)) / max(len(dinucs), 1)
+                    dinuc_bias = 1.0 - dinuc_div
+                else:
+                    dinuc_bias = 0.0
+                
+                # Homopolymer features
+                max_run = 0
+                cur_run = 1
+                total_hp = 0
+                for i in range(1, len(seq)):
+                    if seq[i] == seq[i-1]:
+                        cur_run += 1
+                    else:
+                        if cur_run >= 3:
+                            total_hp += cur_run
+                        max_run = max(max_run, cur_run)
+                        cur_run = 1
+                max_run = max(max_run, cur_run)
+                if cur_run >= 3:
+                    total_hp += cur_run
+                hp_density = total_hp / seq_len
+                
+                # Low complexity fraction (runs of same base >= 3)
+                low_complex = total_hp / seq_len
+                
+                # Coverage distribution features (not available per-node, use defaults)
+                cov_skew = node.metadata.get('coverage_skewness', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_kurt = node.metadata.get('coverage_kurtosis', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_cv = node.metadata.get('coverage_cv', 0.0) if hasattr(node, 'metadata') else 0.0
+                cov_p10 = node.metadata.get('coverage_p10', cov * 0.8) if hasattr(node, 'metadata') else cov * 0.8
+                cov_p90 = node.metadata.get('coverage_p90', cov * 1.2) if hasattr(node, 'metadata') else cov * 1.2
+                
+                features.append([
+                    cov, gc, repeat_frac, kmer_div,
+                    branch, hic_density, allele_freq,
+                    het, phase_consist, mappability,
+                    hic_intra, hic_inter,
+                    hic_ratio, hic_phase_sig,
+                    cluster_coeff, comp_size,
+                    entropy, dinuc_bias,
+                    max_run, hp_density, low_complex,
+                    cov_skew, cov_kurt, cov_cv,
+                    cov_p10, cov_p90,
+                ])
+            else:
+                # PyTorch GNN: simplified 4-feature vector
+                phase_A = hic_phase_info[node_id].phase_A_score if hic_phase_info and node_id in hic_phase_info else 0.5
+                phase_B = hic_phase_info[node_id].phase_B_score if hic_phase_info and node_id in hic_phase_info else 0.5
+                coverage = getattr(node, 'coverage', 0.0) / 100.0
+                degree = (in_deg + out_deg) / 10.0 if 'in_deg' in dir() else \
+                    (len(graph.in_edges.get(node_id, set())) + len(graph.out_edges.get(node_id, set()))) / 10.0
+                features.append([phase_A, phase_B, coverage, degree])
         
-        # Run through model
+        # Run through model — supports both PyTorch (callable) and XGBoost (predict_proba)
         try:
-            features_tensor = torch.tensor(features, dtype=torch.float32)
-            with torch.no_grad():
-                predictions = self.ml_model(features_tensor)
-                # Assuming model outputs [prob_A, prob_B]
-                probs = torch.softmax(predictions, dim=1).numpy()
+            features_array = np.array(features, dtype=np.float32)
+            if hasattr(self.ml_model, 'predict_proba'):
+                # XGBoost / sklearn model
+                raw_probs = self.ml_model.predict_proba(features_array)
+                # Ensure we have exactly 2 columns (haplotype A/B)
+                if raw_probs.shape[1] >= 2:
+                    probs = raw_probs[:, :2]
+                else:
+                    probs = np.column_stack([raw_probs[:, 0], 1.0 - raw_probs[:, 0]])
+            else:
+                # PyTorch model
+                features_tensor = torch.tensor(features_array)
+                with torch.no_grad():
+                    predictions = self.ml_model(features_tensor)
+                    probs = torch.softmax(predictions, dim=1).numpy()[:, :2]
         except Exception as e:
             self.logger.warning(f"AI inference failed: {e}")
             return detailed_result

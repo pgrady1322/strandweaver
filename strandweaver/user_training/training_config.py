@@ -245,6 +245,13 @@ class UserTrainingConfig:
     output_dir: Path
     graph_config: Optional[GraphTrainingConfig] = None
     
+    # ── Fast graph-only mode ─────────────────────────────────────
+    # When True, reads are simulated in memory for realistic coverage
+    # and overlap features, but FASTQ/FASTA files are NOT written to
+    # disk.  Only the graph training CSVs are produced.  This is
+    # ~10× faster and uses ~95% less disk.
+    graph_only: bool = False
+    
     # Processing parameters
     num_workers: int = 4
     generate_labels: bool = True
@@ -277,6 +284,7 @@ class UserTrainingConfig:
                 'gene_dense_fraction': self.genome_config.gene_dense_fraction,
                 'random_seed': self.genome_config.random_seed
             },
+            'graph_only': self.graph_only,
             'read_configs': [
                 {
                     'read_type': rc.read_type.value,

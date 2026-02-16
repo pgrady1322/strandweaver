@@ -16,6 +16,7 @@ from typing import Dict, Set, List, Optional, Tuple, Any
 from collections import defaultdict, Counter
 from pathlib import Path
 import logging
+import math
 
 from strandweaver.utils.hardware_management import GPUKmerExtractor, GPUGraphBuilder
 
@@ -38,7 +39,10 @@ class KmerGraphConfig:
         if self.k < 7:
             raise ValueError(f"k must be >= 7, got {self.k}")
         if self.k % 2 == 0:
-            logger.warning(f"Even k-mer size {self.k} may cause palindrome issues. Odd k recommended.")
+            raise ValueError(
+                f"Even k-mer size {self.k} creates palindrome ambiguity in "
+                f"canonical de Bruijn graphs. Use an odd k (e.g. {self.k + 1})."
+            )
         if self.min_kmer_count < 1:
             raise ValueError(f"min_kmer_count must be >= 1, got {self.min_kmer_count}")
 
@@ -947,7 +951,8 @@ class DeBruijnGraphBuilder:
         graph: DBGGraph,
         hic_phase_info: Optional[Dict] = None,
         ul_support_map: Optional[Dict] = None,
-        ai_annotations: Optional[Dict] = None
+        ai_annotations: Optional[Dict] = None,
+        error_rate: Optional[float] = None
     ) -> DBGGraph:
         """
         Collapse short parallel paths (bubbles) caused by sequencing errors.
@@ -961,6 +966,11 @@ class DeBruijnGraphBuilder:
              → collapse to the higher-support arm (coverage + UL + AI)
           3. If arms differ by more → PROTECT (potential heterozygosity)
         
+        The max_error_differences threshold is now technology-aware (G15):
+          max_diffs = max(2, ceil(error_rate × arm_length × 3))
+        This allows ONT (10% error) to tolerate more substitutions while
+        remaining conservative for HiFi (0.1% error).
+        
         Support scoring when phasing/UL/AI data is available:
           support = 0.5 * coverage_norm + 0.3 * ul_support_norm + 0.2 * ai_score
         Falls back to pure coverage when no auxiliary signals are available.
@@ -970,14 +980,19 @@ class DeBruijnGraphBuilder:
             hic_phase_info: Optional Dict[node_id] -> phase ('A', 'B', 'ambiguous')
             ul_support_map: Optional Dict[edge_id] -> UL read support count
             ai_annotations: Optional Dict[edge_id] -> AI quality score (0-1)
+            error_rate: Optional sequencing error rate (0-1). If None, defaults
+                        to 0.001 (HiFi). Pass ~0.05 for ONT R10 or ~0.10 for ONT R9.
             
         Returns:
             Graph with error bubbles collapsed, allelic/heterozygous bubbles intact
         """
         max_bubble_arm_length = self.base_k * 10
-        # For HiFi (0.1% error): 1-2 substitutions per arm is error-derived.
-        # Anything beyond that is potential heterozygosity → protect.
-        max_error_differences = 2
+        # Technology-aware error threshold (G15 fix):
+        # HiFi (0.1% error): ~2 diffs per arm (conservative)
+        # ONT R10 (5% error): ~8 diffs in 50bp arm
+        # ONT R9 (10% error): ~15 diffs in 50bp arm
+        # Floor of 2 prevents collapsing 0-diff arms as "too many"
+        tech_error_rate = error_rate if error_rate is not None else 0.001
         
         has_phasing = hic_phase_info is not None and len(hic_phase_info) > 0
         has_ul = ul_support_map is not None and len(ul_support_map) > 0
@@ -1055,6 +1070,14 @@ class DeBruijnGraphBuilder:
                             bubbles_protected += 1
                             bubbles_phased += 1
                             continue
+                    
+                    # Compute technology-aware max error differences
+                    # based on arm length and error rate (G15 fix)
+                    arm_len = max(len(seq_a) if seq_a else 0,
+                                 len(seq_b) if seq_b else 0)
+                    max_error_differences = max(
+                        2, math.ceil(tech_error_rate * arm_len * 3)
+                    )
                     
                     if n_differences <= max_error_differences:
                         # ── Error bubble → pop (keep higher-support arm) ──

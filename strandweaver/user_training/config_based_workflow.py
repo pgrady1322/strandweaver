@@ -28,16 +28,20 @@ from .training_config import (
     GraphTrainingConfig
 )
 
-# Import from existing training infrastructure.
-# The 'training' package only exists in strandweaver-dev; in the release repo
-# these symbols are unavailable.  We guard the import so the rest of the
-# module (and the user_training package) remains importable.
+# Import from the training backend (strandweaver.training).
+# We try the absolute package path first, then fall back to a relative
+# import for editable / in-tree installs.  If neither works the rest of
+# the module (and the user_training package) remains importable.
 _TRAINING_BACKEND_AVAILABLE = False
+_TRAINING_IMPORT_NAMES = (
+    'GenomeConfig', 'DiploidGenome', 'generate_diploid_genome',
+    'IlluminaConfig', 'HiFiConfig', 'ONTConfig', 'ULConfig',
+    'HiCConfig', 'AncientDNAConfig',
+    'simulate_illumina_reads', 'simulate_long_reads',
+    'simulate_hic_reads', 'write_fastq', 'write_paired_fastq',
+)
 try:
-    import sys as _sys
-    _sys.path.append(str(Path(__file__).parent.parent))
-
-    from training.synthetic_data_generator import (  # type: ignore[import-not-found]
+    from strandweaver.training.synthetic_data_generator import (
         GenomeConfig,
         DiploidGenome,
         generate_diploid_genome,
@@ -51,7 +55,7 @@ try:
         simulate_long_reads,
         simulate_hic_reads,
         write_fastq,
-        write_paired_fastq
+        write_paired_fastq,
     )
     _TRAINING_BACKEND_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):
@@ -78,9 +82,9 @@ class TrainingDataGenerator:
     """
     Orchestrates user-configured training data generation.
     
-    Requires the ``training`` package (available in strandweaver-dev).
-    If the package is not installed, instantiation will raise
-    ``RuntimeError`` with installation guidance.
+    Requires the ``strandweaver.training`` backend (synthetic data
+    generator).  If the backend cannot be imported, instantiation will
+    raise ``RuntimeError`` with installation guidance.
     """
     
     def __init__(self, config: UserTrainingConfig):
@@ -95,10 +99,13 @@ class TrainingDataGenerator:
         """
         if not _TRAINING_BACKEND_AVAILABLE:
             raise RuntimeError(
-                "Training data generation requires the 'training' package "
-                "which is only available in strandweaver-dev.  Install it with:\n"
-                "  pip install strandweaver-dev\n"
-                "or clone the strandweaver-dev repo and install in editable mode."
+                "Training data generation requires the strandweaver.training "
+                "backend.  Make sure you installed StrandWeaver with:\n"
+                "  pip install 'strandweaver[all]'\n"
+                "or in editable mode from the repo root:\n"
+                "  pip install -e '.[all]'\n"
+                "If running on Colab, ensure 'pip install -e .' ran in the "
+                "cloned strandweaver/ directory."
             )
         
         self.config = config
@@ -186,11 +193,11 @@ class TrainingDataGenerator:
                 all_reads = reads_A + reads_B
                 raw_simulated_reads.setdefault('illumina', []).extend(all_reads)
                 
-                # Write paired FASTQ
-                r1_path = output_subdir / f'illumina_R1.fastq'
-                r2_path = output_subdir / f'illumina_R2.fastq'
-                write_paired_fastq(all_reads, str(r1_path), str(r2_path))
-                output_files[read_type.value] = [r1_path, r2_path]
+                if not self.config.graph_only:
+                    r1_path = output_subdir / f'illumina_R1.fastq'
+                    r2_path = output_subdir / f'illumina_R2.fastq'
+                    write_paired_fastq(all_reads, str(r1_path), str(r2_path))
+                    output_files[read_type.value] = [r1_path, r2_path]
                 
             elif read_type == ReadType.HIFI:
                 # PacBio HiFi
@@ -207,9 +214,10 @@ class TrainingDataGenerator:
                 all_reads = reads_A + reads_B
                 raw_simulated_reads.setdefault('hifi', []).extend(all_reads)
 
-                fastq_path = output_subdir / f'hifi.fastq'
-                write_fastq(all_reads, str(fastq_path))
-                output_files[read_type.value] = [fastq_path]
+                if not self.config.graph_only:
+                    fastq_path = output_subdir / f'hifi.fastq'
+                    write_fastq(all_reads, str(fastq_path))
+                    output_files[read_type.value] = [fastq_path]
                 
             elif read_type == ReadType.ONT:
                 # Oxford Nanopore
@@ -226,9 +234,10 @@ class TrainingDataGenerator:
                 all_reads = reads_A + reads_B
                 raw_simulated_reads.setdefault('ont', []).extend(all_reads)
 
-                fastq_path = output_subdir / f'ont.fastq'
-                write_fastq(all_reads, str(fastq_path))
-                output_files[read_type.value] = [fastq_path]
+                if not self.config.graph_only:
+                    fastq_path = output_subdir / f'ont.fastq'
+                    write_fastq(all_reads, str(fastq_path))
+                    output_files[read_type.value] = [fastq_path]
                 
             elif read_type == ReadType.ULTRA_LONG:
                 # Ultra-long ONT
@@ -245,9 +254,10 @@ class TrainingDataGenerator:
                 all_reads = reads_A + reads_B
                 raw_simulated_reads.setdefault('ultra_long', []).extend(all_reads)
 
-                fastq_path = output_subdir / f'ultralong.fastq'
-                write_fastq(all_reads, str(fastq_path))
-                output_files[read_type.value] = [fastq_path]
+                if not self.config.graph_only:
+                    fastq_path = output_subdir / f'ultralong.fastq'
+                    write_fastq(all_reads, str(fastq_path))
+                    output_files[read_type.value] = [fastq_path]
                 
             elif read_type == ReadType.HIC:
                 # Hi-C proximity ligation
@@ -261,10 +271,11 @@ class TrainingDataGenerator:
                 hic_pairs = simulate_hic_reads(diploid_genome.hapA, diploid_genome.hapB, config)
                 raw_simulated_reads.setdefault('hic', []).extend(hic_pairs)
 
-                r1_path = output_subdir / f'hic_R1.fastq'
-                r2_path = output_subdir / f'hic_R2.fastq'
-                write_paired_fastq(hic_pairs, str(r1_path), str(r2_path))
-                output_files[read_type.value] = [r1_path, r2_path]
+                if not self.config.graph_only:
+                    r1_path = output_subdir / f'hic_R1.fastq'
+                    r2_path = output_subdir / f'hic_R2.fastq'
+                    write_paired_fastq(hic_pairs, str(r1_path), str(r2_path))
+                    output_files[read_type.value] = [r1_path, r2_path]
                 
             elif read_type == ReadType.ANCIENT_DNA:
                 # Ancient DNA fragments
@@ -283,9 +294,10 @@ class TrainingDataGenerator:
                 all_reads = reads_A + reads_B
                 raw_simulated_reads.setdefault('ancient_dna', []).extend(all_reads)
 
-                fastq_path = output_subdir / f'ancient_dna.fastq'
-                write_fastq(all_reads, str(fastq_path))
-                output_files[read_type.value] = [fastq_path]
+                if not self.config.graph_only:
+                    fastq_path = output_subdir / f'ancient_dna.fastq'
+                    write_fastq(all_reads, str(fastq_path))
+                    output_files[read_type.value] = [fastq_path]
         
         return output_files, raw_simulated_reads
     
@@ -336,28 +348,31 @@ class TrainingDataGenerator:
             # Generate diploid (also used for triploid/tetraploid)
             diploid_genome = generate_diploid_genome(genome_config)
         
-        # Save genome sequences
-        with open(genome_dir / 'haplotype_A.fasta', 'w') as f:
-            f.write(f'>hapA\n{diploid_genome.hapA}\n')
-        
-        with open(genome_dir / 'haplotype_B.fasta', 'w') as f:
-            f.write(f'>hapB\n{diploid_genome.hapB}\n')
-        
-        # Save SV truth table
-        sv_data = [
-            {
-                'sv_type': sv.sv_type.value,
-                'haplotype': sv.haplotype,
-                'chrom': sv.chrom,
-                'pos': sv.pos,
-                'end': sv.end,
-                'size': sv.size,
-                'description': sv.description
-            }
-            for sv in diploid_genome.sv_truth_table
-        ]
-        with open(genome_dir / 'sv_truth.json', 'w') as f:
-            json.dump(sv_data, f, indent=2)
+        # Save genome sequences (skip in graph-only mode)
+        if not self.config.graph_only:
+            with open(genome_dir / 'haplotype_A.fasta', 'w') as f:
+                f.write(f'>hapA\n{diploid_genome.hapA}\n')
+            
+            with open(genome_dir / 'haplotype_B.fasta', 'w') as f:
+                f.write(f'>hapB\n{diploid_genome.hapB}\n')
+            
+            # Save SV truth table
+            sv_data = [
+                {
+                    'sv_type': sv.sv_type.value,
+                    'haplotype': sv.haplotype,
+                    'chrom': sv.chrom,
+                    'pos': sv.pos,
+                    'end': sv.end,
+                    'size': sv.size,
+                    'description': sv.description
+                }
+                for sv in diploid_genome.sv_truth_table
+            ]
+            with open(genome_dir / 'sv_truth.json', 'w') as f:
+                json.dump(sv_data, f, indent=2)
+        else:
+            logger.info("  ⚡ Graph-only mode: skipping FASTA/FASTQ/SV writes")
         
         # Simulate reads
         output_files, raw_simulated_reads = self._simulate_reads_for_genome(
@@ -370,6 +385,14 @@ class TrainingDataGenerator:
                 and raw_simulated_reads):
             from .graph_training_data import generate_graph_training_data
             logger.info("Generating graph training data...")
+
+            # v2.0: Pass genome-level metadata for CSV provenance columns
+            genome_meta = {
+                'genome_idx': genome_idx,
+                'chromosome_id': f'chr{genome_idx + 1}',
+                'ploidy': self.config.genome_config.ploidy.name.lower(),
+                'random_seed': genome_config.random_seed,
+            }
             graph_summary = generate_graph_training_data(
                 all_simulated_reads=raw_simulated_reads,
                 diploid_genome=diploid_genome,
@@ -377,6 +400,7 @@ class TrainingDataGenerator:
                 graph_config=self.config.graph_config,
                 output_dir=genome_dir,
                 genome_idx=genome_idx,
+                genome_metadata=genome_meta,
             )
         
         # Create metadata
@@ -417,6 +441,8 @@ class TrainingDataGenerator:
         logger.info(f"GC content: {self.config.genome_config.gc_content:.2%}")
         logger.info(f"Repeat density: {self.config.genome_config.repeat_density:.2%}")
         logger.info(f"Read types: {', '.join(rc.read_type.value for rc in self.config.read_configs)}")
+        if self.config.graph_only:
+            logger.info(f"⚡ GRAPH-ONLY MODE: reads simulated in-memory, no FASTQ/FASTA written")
         logger.info(f"Output directory: {self.output_dir}")
         logger.info(f"{'='*80}\n")
         

@@ -15,6 +15,7 @@ License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENS
 # SECTION 1: IMPORTS AND DEPENDENCIES
 # =============================================================================
 
+import logging
 import subprocess
 import json
 import shutil
@@ -24,6 +25,8 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -1043,7 +1046,10 @@ def classify_read_technology(read_length: int, quality_scores: Optional[List[int
         if quality_scores:
             # Ancient DNA typically has lower quality and damage patterns
             # For now, default to Illumina
-            pass
+            logger.debug(
+                "Ancient DNA vs Illumina distinction not yet implemented; "
+                "defaulting to Illumina for short reads with quality scores"
+            )
         return ReadTechnology.ILLUMINA
     
     return ReadTechnology.UNKNOWN

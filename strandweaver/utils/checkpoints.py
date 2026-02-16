@@ -161,8 +161,16 @@ class CheckpointManager:
         Args:
             step_name: Remove checkpoints before this step
         """
-        # TODO: Implement selective cleanup
         self.logger.info(f"Cleaning checkpoints before: {step_name}")
+        checkpoints = self.list_checkpoints()
+        removed = 0
+        for cp in checkpoints:
+            # Checkpoint IDs are "NNN_stepname"; compare step field
+            if cp.get('step') == step_name:
+                break  # Stop once we reach the target step
+            self.remove(cp['id'])
+            removed += 1
+        self.logger.info(f"Removed {removed} checkpoint(s) before '{step_name}'")
     
     def _generate_checkpoint_id(self, step_name: str) -> str:
         """

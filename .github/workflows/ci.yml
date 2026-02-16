@@ -1,0 +1,102 @@
+# ═══════════════════════════════════════════════════════════════════════
+# StrandWeaver CI — Lint + Test on every push / PR
+# ═══════════════════════════════════════════════════════════════════════
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  lint:
+    name: Lint (flake8 + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 mypy
+          pip install -r requirements.txt
+
+      - name: Flake8 — syntax errors and critical issues only
+        run: |
+          # E9/F63/F7 are fatal parse errors — always fail on these
+          # F821 excluded: forward-ref strings and optional GPU imports are expected patterns
+          flake8 strandweaver/ --count --select=E9,F63,F7,F822 --show-source --statistics
+
+      - name: Flake8 — full style check (warnings)
+        run: |
+          flake8 strandweaver/ --count \
+            --max-line-length=100 \
+            --extend-ignore=E203,E501,W503,E741 \
+            --statistics \
+            --exit-zero
+
+      - name: Mypy — type checking
+        run: |
+          mypy strandweaver/ --ignore-missing-imports \
+            --no-implicit-optional \
+            --warn-redundant-casts \
+            --warn-unused-ignores \
+            --no-error-summary \
+            || true  # advisory for now — remove '|| true' to enforce
+
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run tests
+        run: |
+          pytest tests/ -v --tb=short
+
+  syntax-check:
+    name: Syntax check (all .py files parse)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check all Python files parse
+        run: |
+          python -c "
+          import ast, sys, pathlib
+          errors = []
+          for f in pathlib.Path('strandweaver').rglob('*.py'):
+              try:
+                  ast.parse(f.read_text())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              print('Syntax errors found:')
+              for e in errors:
+                  print(f'  {e}')
+              sys.exit(1)
+          print(f'All {len(list(pathlib.Path(\"strandweaver\").rglob(\"*.py\")))} files parse OK')
+          "

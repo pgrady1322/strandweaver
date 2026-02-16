@@ -44,7 +44,7 @@ from .pathweaver_module import (
     PathGNNModel, SimpleGNN, MediumGNN, DeepGNN, GNNConfig
 )
 from .svscribe_module import SVScribe  # Fixed: was SVDetector
-from .haplotype_detangler_module import HaplotypeDetangler
+from .haplotype_detangler_module import HaplotypeDetangler, Ploidy
 
 # ULRouter is an alias for ThreadCompass (the actual implementation)
 # ThreadCompass provides the complete UL read routing functionality
@@ -74,6 +74,7 @@ __all__ = [
     "ULRouter",
     "SVScribe",  # Fixed: was SVDetector
     "HaplotypeDetangler",
+    "Ploidy",
     # Data structures
     "KmerGraph",
     "KmerNode",

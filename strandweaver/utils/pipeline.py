@@ -12,7 +12,7 @@ License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENS
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Union, Tuple
+from typing import Optional, Dict, Any, List, Union, Tuple, Set
 import logging
 import json
 import pickle
@@ -336,9 +336,28 @@ class PipelineOrchestrator:
         )
         predictor = KWeaverPredictor(model_dir=kweaver_model_dir, use_ml=use_ai)
         
-        # Extract features from first input file (representative sample)
-        first_file = Path(self.state['read_files'][0])
-        self.logger.info(f"  Extracting features from: {first_file.name}")
+        # Select a representative primary-assembly file for feature
+        # extraction.  Hi-C and UL reads have very different length and
+        # error-rate distributions that would produce wrong k-mer
+        # predictions if sampled.  Prefer HiFi > ONT > Illumina > ancient
+        # > anything else.
+        read_files = self.state['read_files']
+        techs = self.state['technologies']
+        _PRIORITY = {'pacbio': 0, 'hifi': 0, 'ont': 1, 'illumina': 2,
+                     'ancient': 3}
+        best_idx = 0
+        best_rank = 999
+        for idx, tech in enumerate(techs):
+            t = tech.lower()
+            if t in ('hic', 'ont_ultralong'):
+                continue  # never sample these
+            rank = _PRIORITY.get(t, 4)
+            if rank < best_rank:
+                best_rank = rank
+                best_idx = idx
+        first_file = Path(read_files[best_idx])
+        self.logger.info(f"  Extracting features from: {first_file.name} "
+                         f"(technology: {techs[best_idx]})")
         
         # Initialize extractor with subsampling
         subsample_size = min(100000, self.config['profiling']['sample_size'])
@@ -383,7 +402,19 @@ class PipelineOrchestrator:
         kmer_prediction = self.state.get('kmer_prediction')
         profile_k = kmer_prediction.dbg_k if kmer_prediction else 21  # Default fallback
 
-        self.logger.info(f"  Using k={profile_k} for error profiling (from K-Weaver)")
+        # Error profiling needs small k (17–21) for meaningful frequency
+        # signal.  The DBG k (up to 51) is far too specific — almost every
+        # k-mer is unique, so error vs. true-variant discrimination is
+        # impossible (G11 fix).
+        MAX_PROFILE_K = 21
+        if profile_k > MAX_PROFILE_K:
+            self.logger.info(
+                f"  Clamping profiling k from {profile_k} to {MAX_PROFILE_K} "
+                f"(high k lacks frequency signal for error detection)"
+            )
+            profile_k = MAX_PROFILE_K
+
+        self.logger.info(f"  Using k={profile_k} for error profiling")
 
         sample_size = self.config['profiling']['sample_size']
 
@@ -527,7 +558,11 @@ class PipelineOrchestrator:
                 corrector = PacBioCorrector(
                     k_size=correction_k
                 )
-                self.logger.info(f"    Using k={correction_k} for PacBio correction")
+                # Build global k-mer spectrum before per-read correction (G20 fix)
+                # Population frequency signal prevents overcorrecting rare-but-correct k-mers
+                global_reads = list(self._read_file_streaming(Path(reads_file)))
+                corrector.build_global_spectrum(global_reads)
+                self.logger.info(f"    Using k={correction_k} for PacBio correction (global spectrum built)")
             else:
                 # Auto-detect or unknown - use generic
                 corrector = IlluminaCorrector()
@@ -571,9 +606,19 @@ class PipelineOrchestrator:
         use_ai = self.config['ai']['enabled']
         ai_models = self._load_ai_models() if use_ai else None
         
-        # Determine primary technology for assembly strategy
+        # Determine primary technology for assembly strategy.
+        # Exclude Hi-C from the vote — it is proximity-ligation data, not
+        # an assembly read type, and will win the vote when ≥2 Hi-C files
+        # are provided alongside fewer primary read files.
         technologies = self.state['technologies']
-        primary_tech = max(set(technologies), key=technologies.count)
+        assembly_techs = [t for t in technologies if t.lower() != 'hic']
+        if not assembly_techs:
+            raise ValueError(
+                "No assembly read files found (only Hi-C data provided). "
+                "StrandWeaver requires at least one primary read file "
+                "(HiFi, ONT, Illumina, or ancient DNA)."
+            )
+        primary_tech = max(set(assembly_techs), key=assembly_techs.count)
         
         self.logger.info(f"  Primary technology: {primary_tech}")
         self.logger.info(f"  AI-powered assembly: {use_ai}")
@@ -856,10 +901,17 @@ class PipelineOrchestrator:
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
         # Step 8: Haplotype Detangler - Phase the graph (AFTER first iteration)
-        # Uses Hi-C connectivity clusters from proximity edges already in graph
+        # Uses bubble-aware local Hi-C phasing (G2 fix) instead of global
+        # spectral clustering, which incorrectly separated chromosomes.
         self.logger.info("Step 8: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
@@ -1055,7 +1107,7 @@ class PipelineOrchestrator:
         self.logger.info(f"Step 1: Building DBG from {len(hifi_reads)} HiFi reads")
         # Use K-Weaver prediction for optimal k-mer size
         kmer_prediction = self.state.get('kmer_prediction')
-        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 51)
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 31)
         min_coverage = self.config.get('min_coverage', 2)
         self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
@@ -1125,15 +1177,21 @@ class PipelineOrchestrator:
             result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
-        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters (HiFi)
+        # Step 7: Haplotype Detangler - Phase using bubble-aware Hi-C (HiFi)
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
             graph_to_phase,
-            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+            use_hic_edges=True  # Use Hi-C edges for bubble-aware phasing
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
         # Calculate average phasing confidence
@@ -1309,7 +1367,7 @@ class PipelineOrchestrator:
         self.logger.info(f"Step 1: Building DBG from {len(ont_reads)} ONT reads")
         # Use K-Weaver prediction for optimal k-mer size
         kmer_prediction = self.state.get('kmer_prediction')
-        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 41)
+        base_k = kmer_prediction.dbg_k if kmer_prediction else self.config.get('dbg_k', 21)
         min_coverage = self.config.get('min_coverage', 3)  # Higher for noisy ONT
         self.logger.info(f"  Using k={base_k} for DBG construction (from K-Weaver)")
         
@@ -1379,15 +1437,21 @@ class PipelineOrchestrator:
             result.stats['hic_edges_added'] = self._count_hic_edges(result.dbg)
             result.stats['hic_coverage_pct'] = self._calculate_hic_coverage(result.dbg)
         
-        # Step 7: Haplotype Detangler - Phase using Hi-C connectivity clusters
+        # Step 7: Haplotype Detangler - Phase using bubble-aware Hi-C
         self.logger.info("Step 7: Applying Haplotype Detangler for phasing")
         use_diploid_ai = self.config.get('assembly', {}).get('diploid', {}).get('use_diploid_ai', True)
-        haplotype_detangler = HaplotypeDetangler(use_ai=use_diploid_ai and self.config['ai']['enabled'])
+        ploidy = self.config.get('assembly', {}).get('ploidy', 2)
+        ai_models = self._load_ai_models()
+        haplotype_detangler = HaplotypeDetangler(
+            use_ai=use_diploid_ai and self.config['ai']['enabled'],
+            ml_model=ai_models.get('diploid_ai'),
+            ploidy=ploidy,
+        )
         
         graph_to_phase = result.string_graph or result.dbg
         phasing_result = haplotype_detangler.phase_graph(
             graph_to_phase,
-            use_hic_edges=True  # Use Hi-C edges for connectivity clustering
+            use_hic_edges=True  # Use Hi-C edges for bubble-aware phasing
         )
         result.stats['haplotypes_detected'] = phasing_result.num_haplotypes
         # Calculate average phasing confidence
@@ -1706,48 +1770,186 @@ class PipelineOrchestrator:
             return contigs
         
         elif isinstance(graph, StringGraph):
-            # Traverse string graph to find paths
-            # Placeholder: just return DBG contigs
-            return self._extract_contigs_from_graph(graph.dbg)
+            # Traverse string graph: walk linear paths through the
+            # combined edge set (DBG edges + UL overlay edges).  UL
+            # overlay edges bridge distant DBG nodes, producing longer
+            # scaffolded contigs than the DBG alone.
+            return self._extract_contigs_from_string_graph(graph, min_len)
         
         return []
     
-    def _run_hic_scaffolding(
+    def _extract_contigs_from_string_graph(
         self,
-        contigs: List[SeqRead],
-        hic_data: Optional[Any],
-        phasing_info: Optional[Any] = None
+        graph: 'StringGraph',
+        min_len: int = 0
     ) -> List[SeqRead]:
         """
-        Run Hi-C scaffolding on contigs.
-        
-        TODO: This is a placeholder implementation.
-        
+        Extract contigs by traversing linear paths through the combined
+        DBG + UL-overlay edge set.
+
+        UL overlay edges (StringGraphEdge) bridge distant DBG nodes that
+        share ultra-long read support.  By walking the combined edge set
+        we produce contigs that incorporate UL bridging — the core value
+        of the string graph approach.
+
+        Algorithm:
+        1. Build a unified adjacency from DBG edges + string graph
+           overlay edges, preferring overlay edges when both exist
+           (they carry UL support).
+        2. Walk linear paths (in-degree 1, out-degree 1).
+        3. Concatenate node sequences using the standard (k-2) overlap
+           for DBG junctions, or N-gap for UL-bridged jumps.
+
         Args:
-            contigs: List of assembled contigs (SeqRead objects)
-            hic_data: Hi-C read data for proximity ligation
-            phasing_info: Optional phasing information from Haplotype Detangler
-        
+            graph: StringGraph with .dbg and .edges/.out_edges/.in_edges
+            min_len: Minimum contig length to keep
+
         Returns:
-            List of scaffolded contigs (SeqRead objects)
-        
-        Real implementation would:
-        1. Build contig contact matrix from Hi-C alignments
-        2. Cluster contigs by contact frequency
-        3. Order and orient contigs within scaffolds
-        4. Use phasing_info to separate haplotypes if available
-        5. Join contigs with N-gaps
-        6. Return scaffolded sequences
+            List of SeqRead contig objects
         """
-        self.logger.warning(
-            f"Hi-C scaffolding is not yet implemented. "
-            f"Returning {len(contigs)} unscaffolded contigs."
+        dbg = graph.dbg
+        k = dbg.base_k  # nodes are (k-1)-mers, overlap = k-2
+
+        # ------------------------------------------------------------------
+        # 1. Build unified out/in-neighbor maps over ALL nodes.
+        #    For each node keep a dict  target_node → edge_source
+        #    where edge_source is 'dbg' or 'ul'.
+        # ------------------------------------------------------------------
+        out_neighbors: Dict[int, Dict[int, str]] = defaultdict(dict)
+        in_neighbors: Dict[int, Dict[int, str]] = defaultdict(dict)
+
+        # DBG edges first
+        for edge_id, edge in dbg.edges.items():
+            out_neighbors[edge.from_id][edge.to_id] = 'dbg'
+            in_neighbors[edge.to_id][edge.from_id] = 'dbg'
+
+        # Overlay edges (UL-supported) — overwrite DBG entries if present
+        for edge_id, edge in graph.edges.items():
+            out_neighbors[edge.from_node][edge.to_node] = 'ul'
+            in_neighbors[edge.to_node][edge.from_node] = 'ul'
+
+        # ------------------------------------------------------------------
+        # 2. Walk linear paths (combined in/out degree == 1)
+        # ------------------------------------------------------------------
+        visited: Set[int] = set()
+        paths: List[List[Tuple[int, str]]] = []  # [(node_id, join_type), ...]
+
+        for seed in dbg.nodes:
+            if seed in visited:
+                continue
+
+            # Walk forward
+            fwd: List[Tuple[int, str]] = [(seed, 'start')]
+            visited.add(seed)
+            current = seed
+            while True:
+                outs = out_neighbors.get(current, {})
+                if len(outs) != 1:
+                    break
+                next_node, join_type = next(iter(outs.items()))
+                if len(in_neighbors.get(next_node, {})) != 1:
+                    break
+                if next_node in visited:
+                    break
+                fwd.append((next_node, join_type))
+                visited.add(next_node)
+                current = next_node
+
+            # Walk backward
+            bwd: List[Tuple[int, str]] = []
+            current = seed
+            while True:
+                ins = in_neighbors.get(current, {})
+                if len(ins) != 1:
+                    break
+                prev_node, join_type = next(iter(ins.items()))
+                if len(out_neighbors.get(prev_node, {})) != 1:
+                    break
+                if prev_node in visited:
+                    break
+                bwd.append((prev_node, join_type))
+                visited.add(prev_node)
+                current = prev_node
+
+            # Combine:  reversed(bwd) + fwd
+            # For bwd entries, the join_type describes how prev→seed is
+            # connected, so we keep that when reversing.
+            full_path = list(reversed(bwd)) + fwd
+            paths.append(full_path)
+
+        # ------------------------------------------------------------------
+        # 3. Build contig sequences from paths
+        # ------------------------------------------------------------------
+        contigs: List[SeqRead] = []
+        contig_idx = 0
+        gap_seq = 'N' * 100  # Default scaffold gap for UL-bridged jumps
+
+        for path in paths:
+            if not path:
+                continue
+
+            # Start with the first node's full sequence
+            first_node_id = path[0][0]
+            first_node = dbg.nodes.get(first_node_id)
+            if first_node is None or not first_node.seq:
+                continue
+
+            segments = [first_node.seq]
+            total_coverage = first_node.coverage
+            ul_bridges = 0
+
+            for i in range(1, len(path)):
+                node_id, join_type = path[i]
+                node = dbg.nodes.get(node_id)
+                if node is None or not node.seq:
+                    continue
+
+                if join_type == 'dbg':
+                    # Standard DBG junction: nodes overlap by k-2 chars
+                    overlap = k - 2
+                    if overlap < len(node.seq):
+                        segments.append(node.seq[overlap:])
+                    else:
+                        segments.append(node.seq)
+                else:
+                    # UL-bridged jump: no sequence overlap, insert gap
+                    segments.append(gap_seq)
+                    segments.append(node.seq)
+                    ul_bridges += 1
+
+                total_coverage += node.coverage
+
+            sequence = ''.join(segments)
+            n_nodes = len(path)
+            avg_coverage = total_coverage / n_nodes if n_nodes else 0
+
+            # Apply minimum length filter
+            if min_len > 0 and len(sequence) < min_len:
+                continue
+
+            # Quality string from average coverage
+            avg_qual = min(40, int(20 + 10 * math.log10(avg_coverage + 1)))
+            quality = chr(avg_qual + 33) * len(sequence)
+
+            contig_idx += 1
+            contig = SeqRead(
+                id=f"contig_{contig_idx}",
+                sequence=sequence,
+                quality=quality,
+                metadata={
+                    'source': 'string_graph',
+                    'num_nodes': n_nodes,
+                    'ul_bridges': ul_bridges,
+                    'avg_coverage': round(avg_coverage, 1),
+                    'length': len(sequence),
+                }
+            )
+            contigs.append(contig)
+
+        self.logger.info(
+            f"  String graph traversal: {len(contigs)} contigs from "
+            f"{len(paths)} paths ({sum(1 for p in paths for _, jt in p if jt == 'ul')} UL bridges)"
         )
-        
-        if phasing_info:
-            self.logger.info(f"Phasing information available: {phasing_info.num_haplotypes} haplotypes detected")
-        
-        # Placeholder: return contigs unchanged
         return contigs
     
     def _add_hic_edges_to_graph(
@@ -2509,15 +2711,17 @@ class PipelineOrchestrator:
         
         # Polishing (if enabled)
         if self.config['finishing']['polishing']['enabled']:
-            self.logger.info("  Polishing contigs...")
-            # TODO: Implement polishing
-            self.logger.info("  ⚠ Polishing not yet implemented")
+            self.logger.warning(
+                "Polishing was requested but is not yet implemented. "
+                "Contigs will proceed unpolished."
+            )
         
         # Gap filling (if enabled)
         if self.config['finishing']['gap_filling']['enabled']:
-            self.logger.info("  Filling gaps...")
-            # TODO: Implement gap filling
-            self.logger.info("  ⚠ Gap filling not yet implemented")
+            self.logger.warning(
+                "Gap filling was requested but is not yet implemented. "
+                "Gaps will remain unfilled in the final assembly."
+            )
         
         # Apply minimum contig length filter
         min_len = self.config.get('runtime', {}).get('min_contig_length', 0)
