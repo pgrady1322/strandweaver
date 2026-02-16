@@ -370,10 +370,13 @@ class PipelineOrchestrator:
         # Log predictions
         self.logger.info("✓ K-mer predictions complete:")
         self.logger.info(f"  DBG construction: k={kmer_prediction.dbg_k} (confidence: {kmer_prediction.dbg_confidence:.2f})")
-        self.logger.info(f"  UL overlaps: k={kmer_prediction.ul_overlap_k} (confidence: {kmer_prediction.ul_overlap_confidence:.2f})")
+        ul_tag = "" if kmer_prediction.ul_applicable else " ⚠ advisory"
+        self.logger.info(f"  UL overlaps: k={kmer_prediction.ul_overlap_k} (confidence: {kmer_prediction.ul_overlap_confidence:.2f}){ul_tag}")
         self.logger.info(f"  Extension: k={kmer_prediction.extension_k} (confidence: {kmer_prediction.extension_confidence:.2f})")
         self.logger.info(f"  Polish: k={kmer_prediction.polish_k} (confidence: {kmer_prediction.polish_confidence:.2f})")
-        
+
+        if kmer_prediction.ul_warning:
+            self.logger.warning(f"  {kmer_prediction.ul_warning}")
         if kmer_prediction.reasoning:
             self.logger.info(f"  Reasoning: {kmer_prediction.reasoning}")
         

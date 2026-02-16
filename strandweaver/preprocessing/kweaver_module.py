@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 # Data Structures
 # ============================================================================
 
+# Minimum read-length N50 (bp) for UL overlap k to be reliable.
+# Below this threshold, reads are too short to benefit from ultra-long
+# overlap detection; using the UL k value is likely to cause problems
+# (mis-joins, false overlaps, fragmented string graph).
+UL_MIN_N50 = 50_000
+
+
 @dataclass
 class KmerPrediction:
     """Predicted k-mer sizes for different assembly stages."""
@@ -40,16 +47,35 @@ class KmerPrediction:
     extension_confidence: float = 1.0   # Extension k confidence
     polish_confidence: float = 1.0      # Polish k confidence
     reasoning: Optional[str] = None     # Explanation of k choice
-    
+    ul_applicable: bool = True          # Whether UL k is meaningful for these reads
+    read_n50: Optional[float] = None    # Read N50 used for UL applicability check
+
     @property
     def ul_overlap_confidence(self) -> float:
         """Alias for ul_confidence."""
         return self.ul_confidence
-    
+
+    @property
+    def ul_warning(self) -> Optional[str]:
+        """Human-readable warning when UL k is not applicable.
+
+        Returns None if UL k is reliable, otherwise a string explaining
+        why the predicted UL k should not be trusted.
+        """
+        if self.ul_applicable:
+            return None
+        n50_str = f"{self.read_n50:,.0f}" if self.read_n50 else "unknown"
+        return (
+            f"UL overlap k={self.ul_overlap_k} is advisory only — reads "
+            f"have N50={n50_str} bp (need ≥{UL_MIN_N50:,} bp for reliable "
+            f"ultra-long overlap detection). Using shorter reads in the UL "
+            f"slot will likely cause mis-joins and fragmented scaffolds."
+        )
+
     def get_primary_k(self) -> int:
         """Get primary k-mer (for DBG) from prediction."""
         return self.dbg_k
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -62,6 +88,8 @@ class KmerPrediction:
             'extension_confidence': self.extension_confidence,
             'polish_confidence': self.polish_confidence,
             'reasoning': self.reasoning,
+            'ul_applicable': self.ul_applicable,
+            'ul_warning': self.ul_warning,
         }
     
     def get_all_ks(self) -> Dict[str, int]:
@@ -635,18 +663,33 @@ class KWeaverPredictor:
     def _predict_rule_based(self, features: ReadFeatures) -> KmerPrediction:
         """
         Rule-based k-mer selection (fallback until ML models trained).
-        
+
         Rules based on industry best practices:
         - HiFi reads: DBG=31, UL_overlap=501, ext=55, polish=77
         - ONT reads: DBG=21, UL_overlap=501, ext=41, polish=55
         - Illumina: DBG=31, UL_overlap=N/A, ext=55, polish=77
+
+        UL overlap k is only marked as *applicable* when the read N50
+        exceeds ``UL_MIN_N50`` (50 Kb).  Shorter reads will still get
+        a predicted UL k (for the rare case where a user intentionally
+        feeds non-UL reads into the UL slot), but ``ul_applicable``
+        will be False and ``ul_confidence`` will be reduced.
         """
         read_type = features.read_type
         mean_len = features.mean_read_length
         error_rate = features.estimated_error_rate
-        
+        read_n50 = features.read_length_n50
+
+        # UL applicability: need N50 ≥ 50 Kb for reliable ultra-long overlap
+        ul_ok = read_n50 >= UL_MIN_N50
+
         logger.info(f"Using rule-based k-mer selection for {read_type} reads")
-        
+        if not ul_ok:
+            logger.info(
+                f"  UL overlap k is advisory only (read N50={read_n50:,.0f} bp "
+                f"< {UL_MIN_N50:,} bp threshold)"
+            )
+
         if read_type == 'hifi':
             # High-quality long reads - can use larger k
             return KmerPrediction(
@@ -655,9 +698,11 @@ class KWeaverPredictor:
                 extension_k=55,
                 polish_k=77,
                 dbg_confidence=0.8,
-                ul_confidence=0.8,
+                ul_confidence=0.8 if ul_ok else 0.3,
                 extension_confidence=0.8,
                 polish_confidence=0.8,
+                ul_applicable=ul_ok,
+                read_n50=read_n50,
             )
         elif read_type == 'ont':
             # Higher error rate - need smaller k for DBG
@@ -667,9 +712,11 @@ class KWeaverPredictor:
                 extension_k=41,
                 polish_k=55,
                 dbg_confidence=0.7,
-                ul_confidence=0.8,
+                ul_confidence=0.8 if ul_ok else 0.3,
                 extension_confidence=0.7,
                 polish_confidence=0.7,
+                ul_applicable=ul_ok,
+                read_n50=read_n50,
             )
         elif read_type == 'illumina':
             # Short reads - moderate k
@@ -679,9 +726,11 @@ class KWeaverPredictor:
                 extension_k=55,
                 polish_k=77,
                 dbg_confidence=0.8,
-                ul_confidence=0.5,  # Lower confidence - no UL reads
+                ul_confidence=0.2,  # Very low — Illumina can never be UL
                 extension_confidence=0.8,
                 polish_confidence=0.8,
+                ul_applicable=False,
+                read_n50=read_n50,
             )
         else:
             # Unknown - conservative defaults
@@ -692,9 +741,11 @@ class KWeaverPredictor:
                 extension_k=41,
                 polish_k=55,
                 dbg_confidence=0.5,
-                ul_confidence=0.5,
+                ul_confidence=0.3,
                 extension_confidence=0.5,
                 polish_confidence=0.5,
+                ul_applicable=False,
+                read_n50=read_n50,
             )
     
     def _predict_ml_based(self, features: ReadFeatures) -> KmerPrediction:
@@ -722,9 +773,19 @@ class KWeaverPredictor:
         ul_conf = 0.95 if 'ul_overlap' in self.models else rule_based.ul_confidence
         ext_conf = 0.95 if 'extension' in self.models else rule_based.extension_confidence
         pol_conf = 0.95 if 'polish' in self.models else rule_based.polish_confidence
-        
+
+        # UL applicability — reads need N50 ≥ 50 Kb to benefit from UL overlap
+        read_n50 = features.read_length_n50
+        ul_ok = read_n50 >= UL_MIN_N50
+        if not ul_ok:
+            ul_conf = min(ul_conf, 0.3)
+            logger.info(
+                f"  UL overlap k={k_ul} is advisory only (read N50="
+                f"{read_n50:,.0f} bp < {UL_MIN_N50:,} bp threshold)"
+            )
+
         logger.info(f"ML predictions: DBG={k_dbg}, UL={k_ul}, ext={k_ext}, pol={k_pol}")
-        
+
         return KmerPrediction(
             dbg_k=k_dbg,
             ul_overlap_k=k_ul,
@@ -734,6 +795,8 @@ class KWeaverPredictor:
             ul_confidence=ul_conf,
             extension_confidence=ext_conf,
             polish_confidence=pol_conf,
+            ul_applicable=ul_ok,
+            read_n50=read_n50,
         )
     
     def predict_single_k(self, features: ReadFeatures, stage: str) -> int:
@@ -785,6 +848,9 @@ class KWeaverPredictor:
                 self.read_type = tech
                 self.mean_read_length = 15000 if tech in ['hifi', 'ont'] else 150
                 self.estimated_error_rate = 0.01 if tech == 'hifi' else 0.05 if tech == 'ont' else 0.001
+                # Conservative N50 defaults — callers with real reads should
+                # use predict() / predict_from_file() which compute real N50
+                self.read_length_n50 = 15000 if tech == 'hifi' else 20000 if tech == 'ont' else 150
         
         features = MinimalFeatures(normalized_tech)
         return self._predict_rule_based(features)
