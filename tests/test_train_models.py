@@ -54,7 +54,11 @@ needs_xgb = pytest.mark.skipif(not _HAS_XGB, reason="xgboost not installed")
 class TestModelSpecs:
     """Validate the MODEL_SPECS constant structure."""
 
-    EXPECTED_MODELS = {"edge_ai", "path_gnn", "diploid_ai", "ul_routing", "sv_ai"}
+    EXPECTED_MODELS = {
+        "edge_ai", "path_gnn", "diploid_ai", "ul_routing", "sv_ai",
+        "kweaver_dbg", "kweaver_ul", "kweaver_extension", "kweaver_polish",
+        "errorsmith",
+    }
 
     def test_all_models_present(self):
         assert set(MODEL_SPECS.keys()) == self.EXPECTED_MODELS

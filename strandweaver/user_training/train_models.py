@@ -3,8 +3,9 @@
 """
 StrandWeaver v0.1.0
 
-Training Runner — trains five graph-related XGBoost models from CSV data,
-evaluates with k-fold cross-validation, and saves weights.
+Training Runner — trains XGBoost models from CSV data, evaluates with
+k-fold cross-validation, and saves weights.  Supports 10 model types:
+5 graph models + 4 K-Weaver regressors + 1 ErrorSmith classifier.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -229,6 +230,122 @@ MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         'save_subdir': 'sv_detector',
         'xgb_defaults': {'max_depth': 7, 'learning_rate': 0.05, 'n_estimators': 150},
         'desc': 'SV type detection     (del / ins / inv / dup / trans / none)',
+    },
+
+    # ── K-Weaver: 4 regression models for optimal k-mer prediction ────
+    'kweaver_dbg': {
+        'csv_glob': '**/kweaver_training.csv',
+        'features': [
+            'mean_read_length', 'median_read_length', 'read_length_n50',
+            'min_read_length', 'max_read_length', 'read_length_std',
+            'mean_base_quality', 'median_base_quality', 'estimated_error_rate',
+            'total_bases', 'num_reads',
+            'estimated_genome_size', 'estimated_coverage',
+            'gc_content', 'gc_std',
+            'read_type_encoded', 'is_paired_end',
+            'kmer_spectrum_peak', 'kmer_diversity',
+        ],
+        'label_col': 'best_dbg_k',
+        'task': 'regression',
+        'save_subdir': 'kweaver',
+        'save_name': 'dbg_model.pkl',
+        'xgb_defaults': {
+            'max_depth': 8, 'learning_rate': 0.05, 'n_estimators': 300,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+            'min_child_weight': 3, 'reg_alpha': 0.1, 'reg_lambda': 1.0,
+        },
+        'desc': 'K-Weaver DBG k         (regression: optimal DBG k-mer size)',
+    },
+    'kweaver_ul': {
+        'csv_glob': '**/kweaver_training.csv',
+        'features': [
+            'mean_read_length', 'median_read_length', 'read_length_n50',
+            'min_read_length', 'max_read_length', 'read_length_std',
+            'mean_base_quality', 'median_base_quality', 'estimated_error_rate',
+            'total_bases', 'num_reads',
+            'estimated_genome_size', 'estimated_coverage',
+            'gc_content', 'gc_std',
+            'read_type_encoded', 'is_paired_end',
+            'kmer_spectrum_peak', 'kmer_diversity',
+        ],
+        'label_col': 'best_ul_k',
+        'task': 'regression',
+        'save_subdir': 'kweaver',
+        'save_name': 'ul_overlap_model.pkl',
+        'xgb_defaults': {
+            'max_depth': 8, 'learning_rate': 0.05, 'n_estimators': 300,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+        },
+        'desc': 'K-Weaver UL overlap k  (regression: optimal UL overlap k-mer size)',
+    },
+    'kweaver_extension': {
+        'csv_glob': '**/kweaver_training.csv',
+        'features': [
+            'mean_read_length', 'median_read_length', 'read_length_n50',
+            'min_read_length', 'max_read_length', 'read_length_std',
+            'mean_base_quality', 'median_base_quality', 'estimated_error_rate',
+            'total_bases', 'num_reads',
+            'estimated_genome_size', 'estimated_coverage',
+            'gc_content', 'gc_std',
+            'read_type_encoded', 'is_paired_end',
+            'kmer_spectrum_peak', 'kmer_diversity',
+        ],
+        'label_col': 'best_extension_k',
+        'task': 'regression',
+        'save_subdir': 'kweaver',
+        'save_name': 'extension_model.pkl',
+        'xgb_defaults': {
+            'max_depth': 8, 'learning_rate': 0.05, 'n_estimators': 300,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+        },
+        'desc': 'K-Weaver extension k   (regression: optimal extension k-mer size)',
+    },
+    'kweaver_polish': {
+        'csv_glob': '**/kweaver_training.csv',
+        'features': [
+            'mean_read_length', 'median_read_length', 'read_length_n50',
+            'min_read_length', 'max_read_length', 'read_length_std',
+            'mean_base_quality', 'median_base_quality', 'estimated_error_rate',
+            'total_bases', 'num_reads',
+            'estimated_genome_size', 'estimated_coverage',
+            'gc_content', 'gc_std',
+            'read_type_encoded', 'is_paired_end',
+            'kmer_spectrum_peak', 'kmer_diversity',
+        ],
+        'label_col': 'best_polish_k',
+        'task': 'regression',
+        'save_subdir': 'kweaver',
+        'save_name': 'polish_model.pkl',
+        'xgb_defaults': {
+            'max_depth': 8, 'learning_rate': 0.05, 'n_estimators': 300,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+        },
+        'desc': 'K-Weaver polish k      (regression: optimal polishing k-mer size)',
+    },
+
+    # ── ErrorSmith: per-base error type classifier ────────────────────
+    'errorsmith': {
+        'csv_glob': '**/errorsmith_training.csv',
+        'features': [
+            'base_quality', 'mean_quality_window_5', 'mean_quality_window_20',
+            'position_in_read', 'read_length',
+            'gc_content_local', 'gc_content_read',
+            'homopolymer_length', 'homopolymer_base', 'distance_to_hp',
+            'trinucleotide_context', 'pentanucleotide_context',
+            'technology_encoded',
+            'ref_gc_window_50', 'ref_repeat_flag', 'ref_homopolymer_length',
+        ],
+        'label_col': 'error_type',
+        'task': 'multiclass',
+        'save_subdir': 'errorsmith',
+        'save_name': 'error_classifier.pkl',
+        'xgb_defaults': {
+            'max_depth': 10, 'learning_rate': 0.03, 'n_estimators': 500,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+            'min_child_weight': 5, 'gamma': 0.1,
+            'reg_alpha': 0.1, 'reg_lambda': 1.0,
+        },
+        'desc': 'ErrorSmith classifier  (correct / sub / ins / del / hp_error)',
     },
 }
 
