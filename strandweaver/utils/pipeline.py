@@ -866,6 +866,13 @@ class PipelineOrchestrator:
             self.logger.info("Step 5: Loading UL reads for string graph overlay")
             for ul_file in ul_read_files:
                 ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+            kmer_pred = self.state.get('kmer_prediction')
+            if kmer_pred and not kmer_pred.ul_applicable:
+                self.logger.warning(
+                    f"  ⚠ UL reads loaded but N50 is below {50_000:,} bp — "
+                    f"string graph overlay will proceed with low confidence. "
+                    f"Results may contain mis-joins."
+                )
         
         if ul_reads:
             self.logger.info("Step 5: Building string graph with UL overlay")
@@ -1145,6 +1152,13 @@ class PipelineOrchestrator:
             self.logger.info("Step 4: Loading UL reads for string graph overlay")
             for ul_file in ul_read_files:
                 ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+            kmer_pred = self.state.get('kmer_prediction')
+            if kmer_pred and not kmer_pred.ul_applicable:
+                self.logger.warning(
+                    f"  ⚠ UL reads loaded but N50 is below {50_000:,} bp — "
+                    f"string graph overlay will proceed with low confidence. "
+                    f"Results may contain mis-joins."
+                )
         
         if ul_reads:
             self.logger.info("Step 4: Building string graph with UL overlay")
@@ -1405,6 +1419,13 @@ class PipelineOrchestrator:
             self.logger.info("Step 4: Loading UL reads for string graph overlay (essential for ONT)")
             for ul_file in ul_read_files:
                 ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+            kmer_pred = self.state.get('kmer_prediction')
+            if kmer_pred and not kmer_pred.ul_applicable:
+                self.logger.warning(
+                    f"  ⚠ UL reads loaded but N50 is below {50_000:,} bp — "
+                    f"string graph overlay will proceed with low confidence. "
+                    f"Results may contain mis-joins."
+                )
         
         if ul_reads:
             self.logger.info("Step 4: Building string graph with UL overlay (essential for ONT)")
