@@ -413,7 +413,7 @@ class GPUSequenceAligner:
         self.gap_penalty = gap_penalty
         
         # Check GPU availability
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         self.use_gpu = use_gpu and self.gpu_available
         self.backend_type = None
         
@@ -622,7 +622,7 @@ class GPUKmerExtractor:
         self.k = k
         
         # Check GPU availability
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         self.use_gpu = use_gpu and self.gpu_available
         self.backend_type = None
         
@@ -725,7 +725,7 @@ class GPUGraphBuilder:
         self.k = k
         
         # Check GPU availability
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         self.use_gpu = use_gpu and self.gpu_available
         self.backend_type = None
         
@@ -1790,7 +1790,7 @@ class GPUAnchorFinder:
         self.batch_size = batch_size
         
         # Check GPU availability
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         self.use_gpu = use_gpu and self.gpu_available
         self.backend_type = None
         
@@ -1961,7 +1961,7 @@ class GPUOverlapDetector:
         self.base_to_int = {'A': 0, 'C': 1, 'G': 2, 'T': 3, 'N': -1}
         
         # Check GPU availability
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         self.use_gpu = use_gpu and self.gpu_available
         self.backend_type = None
         
@@ -2058,7 +2058,7 @@ class GPUAssemblyManager:
             use_gpu: Whether to attempt GPU acceleration
         """
         self.use_gpu = use_gpu
-        self.gpu_available, self.gpu_info = GPUAvailability.check_gpu()
+        _, self.gpu_available, self.gpu_info = GPUBackend.initialize()
         
         # Initialize components
         self.aligner = GPUSequenceAligner(use_gpu=use_gpu)
