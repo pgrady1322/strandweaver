@@ -42,19 +42,18 @@ Once generated, test StrandWeaver with the example data:
 cd ecoli_synthetic
 
 # Basic assembly with long reads
-strandweaver assemble \
-    --hifi reads/hifi_reads.fastq.gz \
-    --ont reads/ont_reads.fastq.gz \
-    --output assembly.fasta
+strandweaver core-assemble \
+    --hifi-long-reads reads/hifi_reads.fastq.gz \
+    --ont-long-reads reads/ont_reads.fastq.gz \
+    --output asm_out/
 
 # Full assembly with all data types
-strandweaver assemble \
-    --hifi reads/hifi_reads.fastq.gz \
-    --ont reads/ont_reads.fastq.gz \
-    --illumina reads/illumina_R1.fastq.gz reads/illumina_R2.fastq.gz \
-    --hic reads/hic_R1.fastq.gz reads/hic_R2.fastq.gz \
-    --phased \
-    --output assembly_phased.fasta
+strandweaver core-assemble \
+    --hifi-long-reads reads/hifi_reads.fastq.gz \
+    --ont-long-reads reads/ont_reads.fastq.gz \
+    --illumina-r1 reads/illumina_R1.fastq.gz --illumina-r2 reads/illumina_R2.fastq.gz \
+    --hic-r1 reads/hic_R1.fastq.gz --hic-r2 reads/hic_R2.fastq.gz \
+    --output asm_out/
 ```
 
 ## Data Characteristics

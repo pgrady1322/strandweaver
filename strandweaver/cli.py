@@ -1194,7 +1194,7 @@ def build_contigs(input, output, min_overlap, threads):
     click.echo("   Current workaround: Use flye/hifiasm/miniasm for short read assembly first")
 
 
-@main.command()
+@main.command('core-assemble')
 @click.option('-r1', '--reads1', type=click.Path(exists=True),
               help='Read file 1 (pairs with --technology1)')
 @click.option('-r2', '--reads2', type=click.Path(exists=True),
@@ -1224,8 +1224,14 @@ def build_contigs(input, output, min_overlap, threads):
               help='Illumina paired-end R1 reads (forward reads)')
 @click.option('--illumina-r2', type=click.Path(exists=True),
               help='Illumina paired-end R2 reads (reverse reads)')
+@click.option('--hifi-long-reads', type=click.Path(exists=True),
+              help='PacBio HiFi long reads (convenience shortcut)')
+@click.option('--ont-long-reads', type=click.Path(exists=True),
+              help='ONT long reads (convenience shortcut)')
+@click.option('--ont-ul', type=click.Path(exists=True),
+              help='ONT ultra-long reads (convenience shortcut)')
 @click.option('--output', '-o', required=True, type=click.Path(),
-              help='Output assembly file (FASTA)')
+              help='Output directory for assembly results')
 @click.option('--graph', '-g', type=click.Path(),
               help='Output assembly graph file (GFA)')
 @click.option('--graph-type', 
@@ -1238,34 +1244,59 @@ def build_contigs(input, output, min_overlap, threads):
 @click.option('--ploidy', type=click.Choice(['haploid', 'diploid']),
               default=None,
               help='Ploidy mode (default: auto-detect). Polyploid support is planned.')
+@click.option('--use-ai/--classical', default=True,
+              help='Enable/disable AI-powered assembly modules (default: enabled)')
+@click.option('--model-dir', type=click.Path(exists=True), default=None,
+              help='Path to trained model directory')
+@click.option('--use-gpu', is_flag=True, default=False,
+              help='Enable GPU acceleration for AI modules')
+@click.option('--config', '-c', type=click.Path(exists=True), default=None,
+              help='YAML config file (overrides defaults)')
 @click.option('--threads', '-t', type=int, default=1,
               help='Number of threads to use')
-def assemble(reads1, reads2, reads3, reads4, reads5,
-             technology1, technology2, technology3, technology4, technology5,
-             illumina_r1, illumina_r2, output, graph, graph_type,
-             min_coverage, kmer_size, ploidy, threads):
+@click.option('--hic-r1', type=click.Path(exists=True), default=None,
+              help='Hi-C forward reads for scaffolding')
+@click.option('--hic-r2', type=click.Path(exists=True), default=None,
+              help='Hi-C reverse reads for scaffolding')
+def core_assemble(reads1, reads2, reads3, reads4, reads5,
+                  technology1, technology2, technology3, technology4, technology5,
+                  illumina_r1, illumina_r2, hifi_long_reads, ont_long_reads, ont_ul,
+                  output, graph, graph_type,
+                  min_coverage, kmer_size, ploidy,
+                  use_ai, model_dir, use_gpu, config, threads,
+                  hic_r1, hic_r2):
     """
-    Perform graph-based genome assembly.
+    Core assembly: graph build + path resolution (no preprocessing).
     
-    Constructs an assembly graph from reads/contigs and traverses it
-    to generate draft genome sequences. Supports multi-technology input.
+    Runs the core assembly steps only (DBG construction, EdgeWarden,
+    PathWeaver, string graph overlay, ThreadCompass routing, haplotype
+    phasing, SV detection, and contig extraction). Skips K-Weaver
+    prediction, error profiling, read correction, and post-assembly
+    finishing — use 'strandweaver pipeline' for the full end-to-end flow.
+    
+    Intended for pre-corrected reads or when you want fine-grained
+    control over the assembly step alone.
     
     Examples:
-        # Single technology
-        strandweaver assemble -r1 corrected.fq --technology1 illumina -o assembly.fa
+        # HiFi reads (pre-corrected)
+        strandweaver core-assemble --hifi-long-reads corrected_hifi.fq -o asm_out/
         
-        # Illumina paired-end separate files
-        strandweaver assemble --illumina-r1 R1.fq --illumina-r2 R2.fq -o assembly.fa
+        # Illumina paired-end
+        strandweaver core-assemble --illumina-r1 R1.fq --illumina-r2 R2.fq -o asm_out/
         
         # Multi-technology (hybrid)
-        strandweaver assemble \\
+        strandweaver core-assemble \\
             -r1 illumina.fq --technology1 illumina \\
             -r2 ont.fq --technology2 ont \\
             -r3 hifi.fq --technology3 pacbio \\
-            -o hybrid_assembly.fa -g assembly.gfa
+            -o asm_out/ -g assembly.gfa
         
-        # Auto-detect technologies (omit --technology flags)
-        strandweaver assemble -r1 reads1.fq -r2 reads2.fq -o assembly.fa
+        # Classical mode (no AI models)
+        strandweaver core-assemble --hifi-long-reads hifi.fq --classical -o asm_out/
+        
+        # With Hi-C scaffolding
+        strandweaver core-assemble --hifi-long-reads hifi.fq \\
+            --hic-r1 hic_R1.fq --hic-r2 hic_R2.fq -o asm_out/
     """
     # Collect numbered reads and technologies
     numbered_reads = {}
@@ -1293,6 +1324,16 @@ def assemble(reads1, reads2, reads3, reads4, reads5,
         from sys import exit
         exit(1)
     
+    # Validate Hi-C paired input
+    if hic_r1 and not hic_r2:
+        click.echo(f"❌ Error: --hic-r1 requires --hic-r2", err=True)
+        from sys import exit
+        exit(1)
+    if hic_r2 and not hic_r1:
+        click.echo(f"❌ Error: --hic-r2 requires --hic-r1", err=True)
+        from sys import exit
+        exit(1)
+    
     # Build complete reads list
     all_reads = []
     all_technologies = []
@@ -1300,6 +1341,19 @@ def assemble(reads1, reads2, reads3, reads4, reads5,
     if illumina_r1 and illumina_r2:
         all_reads.extend([illumina_r1, illumina_r2])
         all_technologies.extend(['illumina', 'illumina'])
+    
+    # Convenience shortcuts
+    if hifi_long_reads:
+        all_reads.append(hifi_long_reads)
+        all_technologies.append('pacbio')
+    
+    if ont_long_reads:
+        all_reads.append(ont_long_reads)
+        all_technologies.append('ont')
+    
+    if ont_ul:
+        all_reads.append(ont_ul)
+        all_technologies.append('ont_ultralong')
     
     # Numbered syntax
     for num in sorted(numbered_reads.keys()):
@@ -1313,30 +1367,123 @@ def assemble(reads1, reads2, reads3, reads4, reads5,
     
     # Ensure we have at least some input
     if not all_reads:
-        click.echo(f"❌ Error: No input reads specified. Use --illumina-r1/--illumina-r2 or -r1/-r2/etc", err=True)
+        click.echo(f"❌ Error: No input reads specified. Use --hifi-long-reads, --ont-long-reads, --illumina-r1/--illumina-r2, or -r1/-r2/etc", err=True)
         from sys import exit
         exit(1)
     
-    click.echo(f"Assembling genome from {len(all_reads)} input file(s):")
+    click.echo(f"{'='*60}")
+    click.echo(f"StrandWeaver v{__version__} — Core Assembly")
+    click.echo(f"{'='*60}")
+    click.echo(f"\n📁 Input Read Files: {len(all_reads)}")
     for i, (reads, tech) in enumerate(zip(all_reads, all_technologies), 1):
         click.echo(f"  {i}. {reads} ({tech})")
     
+    click.echo(f"\n📂 Output: {output}")
     click.echo(f"Graph type: {graph_type}")
     click.echo(f"Min coverage: {min_coverage}x")
     if kmer_size:
         click.echo(f"K-mer size: {kmer_size} (KWeaver disabled)")
     else:
-        click.echo(f"K-mer size: auto (KWeaver)")
+        click.echo(f"K-mer size: auto (adaptive)")
     if ploidy:
         click.echo(f"Ploidy: {ploidy}")
-    click.echo(f"Output assembly: {output}")
+    click.echo(f"AI-powered: {'ENABLED' if use_ai else 'DISABLED (classical)'}")
+    if hic_r1:
+        click.echo(f"Hi-C R1: {hic_r1}")
+        click.echo(f"Hi-C R2: {hic_r2}")
     
     if graph:
         click.echo(f"Output graph: {graph}")
     
-    click.echo(f"\n⚠️ Assembly from graph files:")
-    click.echo("   This feature is planned for v0.2 (unified single-command assembly)")
-    click.echo("   v0.1 requires using the main 'assemble' command with read files directly")
+    click.echo(f"{'='*60}\n")
+    
+    # ====================================================================
+    # Build pipeline config and run core assembly step only
+    # ====================================================================
+    from .utils.pipeline import PipelineOrchestrator
+    
+    # Load base config (from file or defaults)
+    pipeline_config = load_config(Path(config) if config else None)
+    
+    # Override: run ONLY the assemble step (skip preprocessing + finishing)
+    pipeline_config['pipeline']['steps'] = ['assemble']
+    
+    # AI settings
+    if not use_ai:
+        pipeline_config['ai']['enabled'] = False
+    
+    if model_dir:
+        pipeline_config['ai']['model_dir'] = model_dir
+    
+    if use_gpu:
+        pipeline_config['hardware']['use_gpu'] = True
+    
+    if threads:
+        pipeline_config['hardware']['threads'] = threads
+    
+    # Assembly options
+    if kmer_size is not None:
+        pipeline_config['assembly']['graph']['kmer_size'] = kmer_size
+        pipeline_config['assembly']['dbg']['adaptive_k'] = False
+        pipeline_config['dbg_k'] = kmer_size
+    
+    pipeline_config['min_coverage'] = min_coverage
+    
+    if ploidy:
+        ploidy_int = 1 if ploidy == 'haploid' else 2
+        pipeline_config['assembly']['ploidy'] = ploidy_int
+        pipeline_config['assembly']['diploid']['mode'] = ploidy
+    
+    # Hi-C scaffolding
+    if hic_r1 and hic_r2:
+        pipeline_config['scaffolding']['hic']['enabled'] = True
+    
+    # Runtime parameters
+    pipeline_config['runtime'] = {
+        'reads': all_reads,
+        'technologies': all_technologies,
+        'output_dir': output,
+        'hic_r1': hic_r1,
+        'hic_r2': hic_r2,
+        'verbose': False,
+        'min_contig_length': 500,
+        'illumina_paired_indices': None,
+    }
+    
+    # Validate configuration
+    config_errors = validate_config(pipeline_config)
+    if config_errors:
+        click.echo("❌ Configuration validation failed:", err=True)
+        for error in config_errors:
+            click.echo(f"  • {error}", err=True)
+        from sys import exit
+        exit(1)
+    
+    # Initialize and run orchestrator (assemble step only)
+    orchestrator = PipelineOrchestrator(config=pipeline_config)
+    
+    try:
+        result = orchestrator.run()
+        
+        click.echo("\n" + "="*60)
+        click.echo("✅ Core assembly completed successfully!")
+        click.echo("="*60)
+        click.echo(f"Output directory: {output}")
+        
+        # Copy GFA to user-specified path if --graph was given
+        if graph:
+            import shutil
+            default_gfa = Path(output) / "assembly_graph.gfa"
+            if default_gfa.exists():
+                shutil.copy2(default_gfa, graph)
+                click.echo(f"Assembly graph: {graph}")
+        
+    except Exception as e:
+        click.echo(f"\n❌ Core assembly failed: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        from sys import exit
+        exit(1)
 
 
 @main.command()

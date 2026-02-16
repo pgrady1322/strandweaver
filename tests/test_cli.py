@@ -43,10 +43,10 @@ class TestCLIBasics:
             
             assert result.exit_code == 0
     
-    def test_assemble_help(self):
-        """Test assemble command help."""
+    def test_core_assemble_help(self):
+        """Test core-assemble command help."""
         runner = CliRunner()
-        result = runner.invoke(main, ['assemble', '--help'])
+        result = runner.invoke(main, ['core-assemble', '--help'])
         
         assert result.exit_code == 0
         assert 'assemble' in result.output.lower()
@@ -60,23 +60,23 @@ class TestCLIBasics:
         assert result.exit_code != 0
 
 
-class TestAssembleCLI:
-    """Test assemble command specifically."""
+class TestCoreAssembleCLI:
+    """Test core-assemble command specifically."""
     
-    def test_assemble_missing_input(self):
-        """Test assemble fails gracefully without input."""
+    def test_core_assemble_missing_input(self):
+        """Test core-assemble fails gracefully without input."""
         runner = CliRunner()
-        result = runner.invoke(main, ['assemble', '--output', 'test_out'])
+        result = runner.invoke(main, ['core-assemble', '--output', 'test_out'])
         
         # Should fail due to missing input reads
         assert result.exit_code != 0
     
-    def test_assemble_with_nonexistent_file(self):
-        """Test assemble handles nonexistent input files."""
+    def test_core_assemble_with_nonexistent_file(self):
+        """Test core-assemble handles nonexistent input files."""
         runner = CliRunner()
         result = runner.invoke(main, [
-            'assemble',
-            '--hifi', 'nonexistent.fastq',
+            'core-assemble',
+            '--hifi-long-reads', 'nonexistent.fastq',
             '--output', 'test_out'
         ])
         

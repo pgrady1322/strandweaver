@@ -262,18 +262,18 @@ ecoli_synthetic/
 
 ```bash
 # Basic assembly with HiFi + ONT
-strandweaver assemble \\
-    --hifi reads/hifi_reads.fastq.gz \\
-    --ont reads/ont_reads.fastq.gz \\
-    --output assembly.fasta
+strandweaver core-assemble \\
+    --hifi-long-reads reads/hifi_reads.fastq.gz \\
+    --ont-long-reads reads/ont_reads.fastq.gz \\
+    --output asm_out/
 
 # Assembly with all data types
-strandweaver assemble \\
-    --hifi reads/hifi_reads.fastq.gz \\
-    --ont reads/ont_reads.fastq.gz \\
-    --illumina reads/illumina_R1.fastq.gz reads/illumina_R2.fastq.gz \\
-    --hic reads/hic_R1.fastq.gz reads/hic_R2.fastq.gz \\
-    --output assembly.fasta
+strandweaver core-assemble \\
+    --hifi-long-reads reads/hifi_reads.fastq.gz \\
+    --ont-long-reads reads/ont_reads.fastq.gz \\
+    --illumina-r1 reads/illumina_R1.fastq.gz --illumina-r2 reads/illumina_R2.fastq.gz \\
+    --hic-r1 reads/hic_R1.fastq.gz --hic-r2 reads/hic_R2.fastq.gz \\
+    --output asm_out/
 ```
 
 ## Read Statistics
@@ -393,9 +393,9 @@ def main():
     print()
     print("Test with:")
     print("  cd examples/ecoli_synthetic")
-    print("  strandweaver assemble --hifi reads/hifi_reads.fastq.gz \\")
-    print("                        --ont reads/ont_reads.fastq.gz \\")
-    print("                        --output assembly.fasta")
+    print("  strandweaver core-assemble --hifi-long-reads reads/hifi_reads.fastq.gz \\")
+    print("                              --ont-long-reads reads/ont_reads.fastq.gz \\")
+    print("                              --output asm_out/")
     print("=" * 70)
 
 
