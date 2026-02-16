@@ -423,43 +423,39 @@ def _fast_k_score(
     reads: List[SeqRead],
     k: int,
     genome_size_est: int,
+    median_read_length: int = 0,
+    technology: str = 'unknown',
     min_cov: int = 2,
     max_bases_sample: int = 1_000_000,
 ) -> Dict[str, float]:
     """
     Fast k-mer spectrum scoring — **no DBG construction**.
 
-    Instead of building a full de Bruijn graph (~45 s per call), this
-    computes k-mer frequency statistics that are highly predictive of
-    assembly quality at a given k:
+    Combines k-mer frequency statistics with assembly-theory priors
+    on ideal k / read-length ratios to select biologically sensible
+    k-mer sizes for each technology:
 
-      * **distinct_ratio**: fraction of k-mers appearing ≥ min_cov times.
-        Higher = better (more usable nodes in a DBG).
-      * **repetitiveness**: fraction of total k-mer mass in the top-0.1%
-        most frequent k-mers.  Lower = less repeat-induced branching.
-      * **coverage_uniformity**: std-dev / mean of the coverage
-        distribution.  Lower = more uniform, better assembly.
-      * **composite**: weighted combination → higher is better.
+        Technology   Ideal DBG k range   Typical ratio k/read_len
+        ──────────   ─────────────────   ────────────────────────
+        HiFi         31 – 77             0.002 – 0.005
+        ONT          21 – 51             0.001 – 0.003
+        Illumina     21 – 71             0.20  – 0.50
 
-    ~200× faster than `_run_assembly_at_k` — takes <0.3 s for a
-    typical read set (compared to ~45 s for a full DBG build).
+    ~200× faster than full DBG assembly (~0.3 s vs ~45 s per k).
 
     Args:
         reads: Read set (subsampled to *max_bases_sample* total bases).
         k: K-mer size to evaluate.
-        genome_size_est: Estimated genome size (for expected-coverage calc).
+        genome_size_est: Estimated genome size in bp.
+        median_read_length: Median read length (for k/read ratio penalty).
+        technology: One of 'hifi', 'ont', 'illumina', 'unknown'.
         min_cov: Minimum coverage to count a k-mer as "solid".
-        max_bases_sample: Cap total bases in the sample.  Default 1 Mb
-            is ample for spectrum statistics (≥1× any genome in the
-            training range).  Takes <0.5 s per k-value.
+        max_bases_sample: Cap total bases in the sample.
 
     Returns:
-        Dict with 'distinct_ratio', 'repetitiveness',
-        'coverage_uniformity', 'composite'.
+        Dict with spectrum metrics + 'composite' score (higher = better).
     """
-    # Subsample reads to stay within the base budget.
-    # For long reads (15 Kb), 200 reads ≈ 3 Mb.
-    # For Illumina (150 bp), 20 000 reads ≈ 3 Mb.
+    # ── Subsample reads ───────────────────────────────────────────
     sample = []
     bases_so_far = 0
     for r in reads:
@@ -472,63 +468,86 @@ def _fast_k_score(
     concat = 'N'.join(r.sequence.upper() for r in sample)
     n = len(concat)
 
+    _zero = {'distinct_frac': 0.0, 'repetitiveness': 1.0,
+             'singleton_frac': 1.0, 'coverage_uniformity': 999.0,
+             'read_length_fit': 0.0, 'composite': 0.0}
     if n < k:
-        return {'distinct_ratio': 0.0, 'repetitiveness': 1.0,
-                'coverage_uniformity': 999.0, 'composite': 0.0}
+        return _zero
 
-    # Count k-mers from the concatenated string in a single pass.
-    # N-separators create a few boundary k-mers; they'll be singletons
-    # and get filtered by min_cov, so no explicit N-check needed.
+    # ── Count k-mers in a single pass ─────────────────────────────
     counts: Counter = Counter(
         concat[i:i + k] for i in range(n - k + 1)
     )
-
     if not counts:
-        return {'distinct_ratio': 0.0, 'repetitiveness': 1.0,
-                'coverage_uniformity': 999.0, 'composite': 0.0}
+        return _zero
 
     total_distinct = len(counts)
     freqs = np.array(list(counts.values()), dtype=np.float64)
     total_mass = float(freqs.sum())
 
     # ── Spectrum shape metrics ────────────────────────────────────
-    # At subsampled coverage, absolute thresholds are unreliable.
-    # Focus on metrics that capture how k interacts with read length,
-    # genome complexity, and coverage.
 
-    # 1) Distinct k-mer ratio vs genome-size estimate.
-    #    Ideal: distinct ≈ genome_size. Over-distinct (k too small) →
-    #    repeats create fewer unique kmers. Under-distinct (k too large)
-    #    → fewer kmers extracted per read.
+    # 1) Distinct k-mer fraction vs expected genome-unique k-mers
     expected_distinct = max(1, genome_size_est - k + 1)
     distinct_frac = min(total_distinct / expected_distinct, 2.0) / 2.0
 
-    # 2) Repetitiveness — mass in top 0.1% of k-mers.
-    #    Lower = less repeat-induced branching.
+    # 2) Repetitiveness — mass concentration in top 0.1%
     top_n = max(1, total_distinct // 1000)
     top_mass = float(np.sort(freqs)[-top_n:].sum())
     repetitiveness = top_mass / total_mass if total_mass else 1.0
 
-    # 3) Singleton fraction — k-mers appearing exactly once.
-    #    High singleton fraction means k is too large for the coverage.
+    # 3) Singleton fraction
     singletons = int((freqs == 1).sum())
     singleton_frac = singletons / total_distinct if total_distinct else 1.0
 
-    # 4) Coverage uniformity (CV of non-singleton k-mers)
+    # 4) Coverage uniformity (CV of solid k-mers)
     solid_freqs = freqs[freqs >= 2]
-    if len(solid_freqs) > 10:
-        cv = float(np.std(solid_freqs) / np.mean(solid_freqs))
-    else:
-        cv = 1.0  # Not enough data
+    cv = float(np.std(solid_freqs) / np.mean(solid_freqs)) if len(solid_freqs) > 10 else 1.0
 
-    # 5) Composite — higher is better
-    #    The key insight: best k balances distinct coverage (not too
-    #    small → repeat collapse, not too large → low yield)
+    # ── Read-length & technology prior ────────────────────────────
+    # Assembly theory: best DBG k is a characteristic fraction of the
+    # median read length, differing by technology.
+    #
+    #   HiFi  (15 Kb, Q35):  k ∈ [31, 77]  → ideal ratio 0.003
+    #   ONT   (20 Kb, Q15):  k ∈ [21, 51]  → ideal ratio 0.002
+    #   Illumina (150 bp):   k ∈ [21, 71]  → ideal ratio 0.35
+    #
+    # We compute a Gaussian-like fitness around the ideal ratio.
+    if median_read_length > 0:
+        ratio = k / median_read_length
+    else:
+        ratio = 0.0
+
+    # Technology-specific ideal ratio and tolerance (σ)
+    _ideal = {
+        'hifi':     (0.003, 0.004),   # peak at k≈45 for 15 Kb reads, ±60
+        'ont':      (0.002, 0.003),   # peak at k≈40 for 20 Kb reads
+        'illumina': (0.35,  0.20),    # peak at k≈53 for 150 bp reads
+    }
+    ideal_ratio, sigma = _ideal.get(technology, (0.01, 0.02))
+
+    if median_read_length > 0:
+        # Gaussian penalty centred on ideal ratio
+        read_length_fit = math.exp(-0.5 * ((ratio - ideal_ratio) / sigma) ** 2)
+    else:
+        read_length_fit = 0.5  # neutral if unknown
+
+    # Hard penalty: k must be < read_length (especially critical for
+    # short reads).  For k > 0.8 × read_length, assembly is unreliable.
+    if median_read_length > 0 and k > 0.8 * median_read_length:
+        read_length_fit *= 0.1  # near-zero
+
+    # ── Composite score ───────────────────────────────────────────
+    # read_length_fit gets the largest weight because the spectrum
+    # metrics have low discriminative power at ~1× subsampled coverage,
+    # but the read-length prior is physics (information-theoretically
+    # grounded).
     composite = (
-        0.35 * distinct_frac                          # reward: ~genome-size distinct kmers
-        + 0.25 * (1.0 - min(repetitiveness, 1.0))    # reward: low repeat mass
-        + 0.20 * (1.0 - singleton_frac)               # reward: few singletons
-        + 0.20 * max(0.0, 1.0 - cv)                   # reward: uniform coverage
+        0.15 * distinct_frac
+        + 0.10 * (1.0 - min(repetitiveness, 1.0))
+        + 0.10 * (1.0 - singleton_frac)
+        + 0.10 * max(0.0, 1.0 - cv)
+        + 0.55 * read_length_fit
     )
 
     return {
@@ -536,6 +555,7 @@ def _fast_k_score(
         'repetitiveness': repetitiveness,
         'singleton_frac': singleton_frac,
         'coverage_uniformity': cv,
+        'read_length_fit': read_length_fit,
         'composite': composite,
     }
 
@@ -647,19 +667,23 @@ def _find_best_k(
     reference: str,
     k_values: List[int],
     min_read_length: int = 0,
+    median_read_length: int = 0,
+    technology: str = 'unknown',
 ) -> Tuple[int, float, Dict[int, Dict]]:
     """
     Sweep k values and return the best k.
 
-    Uses a **fast k-mer spectrum proxy** (~0.2 s per k) instead of full
-    DBG assembly (~45 s per k).  This makes the k-sweep ~200× faster
-    while producing highly correlated rankings.
+    Uses a **fast k-mer spectrum proxy** (~0.2 s per k) combined with
+    assembly-theory priors on k / read-length ratios.  ~200× faster
+    than full DBG assembly.
 
     Args:
         reads: Reads to assemble
         reference: Ground-truth reference sequence
         k_values: List of k-mer sizes to try
         min_read_length: Skip k values larger than shortest read
+        median_read_length: Median read length (for k-ratio prior)
+        technology: Read technology ('hifi', 'ont', 'illumina')
 
     Returns:
         (best_k, best_score, all_scores_by_k)
@@ -678,7 +702,11 @@ def _find_best_k(
 
     for k in k_values:
         logger.debug(f"    Scoring k={k} (fast proxy)...")
-        score = _fast_k_score(reads, k, genome_size_est)
+        score = _fast_k_score(
+            reads, k, genome_size_est,
+            median_read_length=median_read_length,
+            technology=technology,
+        )
         all_scores[k] = score
 
         if score['composite'] > best_score:
@@ -875,7 +903,10 @@ def generate_kweaver_training_data(
                 logger.info(f"    Sweeping k ∈ {valid_ks}")
                 t_sweep = time.time()
                 best_dbg_k, best_dbg_score, _ = _find_best_k(
-                    reads, reference, valid_ks, min_read_length=min_rl,
+                    reads, reference, valid_ks,
+                    min_read_length=min_rl,
+                    median_read_length=int(features.median_read_length),
+                    technology=tech,
                 )
                 logger.info(
                     f"    Best DBG k={best_dbg_k} (score={best_dbg_score:.4f}) "
@@ -1024,18 +1055,21 @@ def _derive_ul_k(dbg_k: int, technology: str) -> int:
     """
     Derive ultra-long overlap k from the best DBG k.
 
-    UL overlap k is much larger — typically 10–20× the DBG k, clamped
-    to odd values in the [201, 1001] range for long-read overlapping.
-    For Illumina (no UL reads), returns the DBG k itself.
+    UL overlap k is much larger — typically 5–15× the DBG k for long
+    reads, clamped to odd values in the [201, 1001] range.
+    For Illumina (no UL reads), returns the DBG k (clamped to odd).
     """
     if technology == 'illumina':
-        return dbg_k
+        # Illumina has no ultra-long reads; UL k = DBG k
+        ul_k = dbg_k
+        if ul_k % 2 == 0:
+            ul_k += 1
+        return ul_k
 
-    # Scale up: UL reads are long enough for large-k overlap detection
-    ul_k = int(dbg_k * 15)
-    # Clamp to sensible range
+    # Long reads: scale up for overlap detection.
+    # dbg_k is typically 31–77 → ul_k should land in ~400–800 range.
+    ul_k = int(dbg_k * 11)
     ul_k = max(201, min(1001, ul_k))
-    # Ensure odd
     if ul_k % 2 == 0:
         ul_k += 1
     return ul_k
