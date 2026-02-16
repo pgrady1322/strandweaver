@@ -293,23 +293,13 @@ def _run_assembly_at_k(reads: List[SeqRead], k: int, min_cov: int = 2) -> List[s
         logger.warning(f"  DBG build failed at k={k}: {e}")
         return []
 
-    # Extract contigs by walking maximal unitigs
+    # Extract contigs from compacted unitig nodes
+    # After compaction, each node is a unitig with its sequence in node.seq
     contigs = []
-    visited_edges = set()
-    for edge_id, edge in dbg.edges.items():
-        if edge_id in visited_edges:
-            continue
-        visited_edges.add(edge_id)
-        seq = getattr(edge, 'sequence', None) or getattr(edge, 'label', '')
+    for node_id, node in dbg.nodes.items():
+        seq = node.seq
         if isinstance(seq, str) and len(seq) >= k:
             contigs.append(seq)
-
-    # Fallback: try extracting from nodes if edges don't carry sequences
-    if not contigs:
-        for node_id, node in dbg.nodes.items():
-            seq = getattr(node, 'sequence', None) or getattr(node, 'kmer', '')
-            if isinstance(seq, str) and len(seq) >= k:
-                contigs.append(seq)
 
     return contigs
 

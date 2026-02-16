@@ -511,7 +511,12 @@ class DeBruijnGraphBuilder:
                     graph.nodes[node_id] = node
                 
                 # Create edges
-                for from_id, to_id in edge_list:
+                for from_kmer, to_kmer, edge_cov in edge_list:
+                    from_id = node_ids.get(from_kmer)
+                    to_id = node_ids.get(to_kmer)
+                    if from_id is None or to_id is None:
+                        continue  # Skip edges with missing nodes
+                    
                     edge_id = self.next_edge_id
                     self.next_edge_id += 1
                     
@@ -519,7 +524,7 @@ class DeBruijnGraphBuilder:
                         id=edge_id,
                         from_id=from_id,
                         to_id=to_id,
-                        coverage=1.0,  # Coverage tracked on nodes
+                        coverage=float(edge_cov),
                         overlap_len=self.base_k - 1
                     )
                     graph.edges[edge_id] = edge
