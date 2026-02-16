@@ -762,18 +762,20 @@ class GPUGraphBuilder:
         self,
         filtered_kmers: Dict[str, int],
         node_id_offset: int = 0,
-        edge_id_offset: int = 0
+        edge_id_offset: int = 0,
+        min_coverage: int = 0
     ) -> Tuple[Dict[str, int], List[Tuple[str, str, float]], Dict[str, float]]:
         """
-        Build graph nodes and edges from filtered k-mers.
+        Build graph nodes and edges from k-mers.
         
         This replaces the slow Python loops in build_raw_kmer_graph with
         vectorized operations.
         
         Args:
-            filtered_kmers: Dictionary of k-mer -> count (already filtered)
+            filtered_kmers: Dictionary of k-mer -> count
             node_id_offset: Starting node ID
             edge_id_offset: Starting edge ID
+            min_coverage: Minimum k-mer count to include (0 = keep all)
             
         Returns:
             Tuple of:
@@ -781,6 +783,10 @@ class GPUGraphBuilder:
             - edges: List of (from_kmer, to_kmer, coverage) tuples
             - node_coverages: node_id -> average coverage
         """
+        # Apply coverage filter if requested
+        if min_coverage > 0:
+            filtered_kmers = {k: v for k, v in filtered_kmers.items() if v >= min_coverage}
+        
         if self.use_gpu and len(filtered_kmers) > 5000:
             return self._build_graph_gpu(filtered_kmers, node_id_offset, edge_id_offset)
         else:
