@@ -4,7 +4,7 @@
 
 [![Models](https://img.shields.io/badge/models-7%20AI%20modules-green.svg)](#model-architecture)
 [![Training Data](https://img.shields.io/badge/training%20data-200%20genomes-blue.svg)](#training-data-generation)
-[![XGBoost](https://img.shields.io/badge/XGBoost-5%20models-orange.svg)](#xgboost-models)
+[![XGBoost](https://img.shields.io/badge/XGBoost-9%20models-orange.svg)](#xgboost-models)
 [![GNN](https://img.shields.io/badge/GNN-GATv2Conv-purple.svg)](#pathgnn-graph-neural-network)
 
 StrandWeaver ships with pre-trained models for all 7 AI modules. This guide covers how the models were trained, how to generate custom training data for your organism or sequencing technology, and how to retrain from scratch.
@@ -31,7 +31,7 @@ StrandWeaver uses a **two-tier ML architecture**:
 
 | Tier | Framework | Models | Purpose |
 |------|-----------|--------|---------|
-| **Tabular** | XGBoost | 5 models | Classification & regression on extracted graph features |
+| **Tabular** | XGBoost | 9 models | Classification & regression on extracted graph/read features |
 | **Graph** | PyTorch Geometric | 1 GNN | Graph-aware edge classification using GATv2Conv attention |
 
 The XGBoost models handle structured feature analysis (edge scoring, haplotype phasing, SV detection, ultra-long routing), while the GNN propagates information across assembly graph neighborhoods to capture structural patterns that tabular features miss.
@@ -61,7 +61,8 @@ All pre-trained models are stored in `trained_models/` and managed via Git LFS:
 | Module | Model | File(s) | Task |
 |--------|-------|---------|------|
 | 🛡️ **EdgeWarden** | XGBoost (×5) | `edgewarden/edgewarden_{tech}.pkl` | Edge quality scoring (per-technology) |
-| 🧬 **PathGNN** | GATv2Conv GNN | `pathgnn/pathgnn_model.pt` | Graph-aware edge classification |
+| � **K-Weaver** | XGBoost (×4) | `kweaver/{dbg,ul_overlap,extension,polish}_model.pkl` | Optimal k-mer size prediction |
+| �🧬 **PathGNN** | GATv2Conv GNN | `pathgnn/pathgnn_model.pt` | Graph-aware edge classification |
 | 🔀 **DiploidAI** | XGBoost | `diploid/diploid_model.pkl` | Haplotype phasing (26 features) |
 | 🔍 **SVScribe** | XGBoost | `sv_detector/sv_detector_model.pkl` | Structural variant detection |
 | 🧵 **ThreadCompass** | XGBoost | `ul_routing/ul_routing_model.pkl` | Ultra-long read routing |
@@ -74,6 +75,14 @@ EdgeWarden includes 5 technology-specific models with paired feature scalers:
 - `edgewarden_adna.pkl` / `scaler_adna.pkl`
 
 > **Fallback behavior**: If any model file is missing, StrandWeaver automatically falls back to optimized heuristic scoring. The pipeline never fails due to a missing model.
+
+K-Weaver includes 4 regression models predicting optimal k-mer sizes from 19 `ReadFeatures`:
+- `dbg_model.pkl` — De Bruijn graph construction k
+- `ul_overlap_model.pkl` — Ultra-long read overlap k
+- `extension_model.pkl` — Contig extension k
+- `polish_model.pkl` — Polishing iteration k
+
+K-Weaver models also enforce **UL applicability**: when read N50 < 50 Kb, UL predictions are marked non-applicable with capped confidence, and the pipeline warns at assembly time.
 
 ---
 
@@ -177,6 +186,26 @@ strandweaver train evaluate-models \
 
 For large-scale hyperparameter sweeps, we recommend Google Colab with a T4 GPU.
 
+### Phase 0a: K-Weaver Training
+
+1. **Open** `strandweaver/training/notebooks/KWeaver_Training_Colab.ipynb`
+
+2. **Self-contained**: Generates 300 synthetic assembly benchmarks internally — no external data upload needed
+
+3. **Run all cells** — Optuna sweeps 20 trials per model with CUDA/hist
+
+4. **Download** tarball → extract to `trained_models/kweaver/`
+
+### Phase 0b: ErrorSmith Training
+
+1. **Open** `strandweaver/training/notebooks/ErrorSmith_Training_Colab.ipynb`
+
+2. **Upload** CHM13 BAMs or use automatic SRA download
+
+3. **Run all cells** — minimap2 alignment + error profiling + model training
+
+4. **Download** trained model to `trained_models/errorsmith/`
+
 ### Phase 1: XGBoost Sweep
 
 1. **Package training data**:
@@ -245,6 +274,17 @@ For large-scale hyperparameter sweeps, we recommend Google Colab with a T4 GPU.
 | 🔍 SVScribe | 0.823 | 0.828 | 0.557 | 0.817 ± 0.005 |
 | 🧵 ThreadCompass | R²=0.997 | RMSE=0.0004 | — | R²=0.997 ± 0.0003 |
 
+### K-Weaver Metrics (v1)
+
+Trained on 300 synthetic assembly benchmarks using Optuna (20 trials) + 5-fold CV, CUDA/hist tree method.
+
+| Model | Target | R² | MAE | CV (5-fold) |
+|-------|--------|-----|-----|-------------|
+| 🧠 DBG | Best DBG k | 0.863 | 0.63 | 0.863 ± 0.064 |
+| 🧠 UL Overlap | Best UL overlap k | 0.982 | 9.36 | 0.982 ± 0.020 |
+| 🧠 Extension | Best extension k | 0.849 | 1.20 | 0.849 ± 0.074 |
+| 🧠 Polish | Best polish k | 0.881 | 1.51 | 0.881 ± 0.067 |
+
 ### EdgeWarden Per-Class Performance
 
 | Edge Class | F1 Score | Description |
@@ -298,6 +338,9 @@ strandweaver train train-models \
 
 - [Main README](../README.md) — Full pipeline documentation
 - [Training Report](training_report.json) — Detailed metrics for all models
+- [K-Weaver Training Results](kweaver/training_results.json) — K-Weaver model metrics
+- [K-Weaver Training Notebook](../strandweaver/training/notebooks/KWeaver_Training_Colab.ipynb)
+- [ErrorSmith Training Notebook](../strandweaver/training/notebooks/ErrorSmith_Training_Colab.ipynb)
 - [XGBoost Colab Notebook](../Non_Main_Commit_Files/notebooks/XGBoost_Retraining_Colab.ipynb)
 - [PathGNN Colab Notebook](../Non_Main_Commit_Files/notebooks/PathGNN_Training_Colab.ipynb)
 
