@@ -602,12 +602,21 @@ class KWeaverPredictor:
         
         logger.info("Loading K-Weaver ML models...")
         
-        # Determine model directory
+        # Determine model directory — check multiple locations
         if self.model_dir:
             model_path = Path(self.model_dir)
         else:
-            # Default: look in package data
-            model_path = Path(__file__).parent / 'training' / 'trained_models'
+            # Search order:
+            #   1. Package-internal: strandweaver/preprocessing/training/trained_models/
+            #   2. Repo-level:       trained_models/kweaver/
+            candidates = [
+                Path(__file__).parent / 'training' / 'trained_models',
+                Path(__file__).resolve().parent.parent.parent / 'trained_models' / 'kweaver',
+            ]
+            model_path = next(
+                (p for p in candidates if (p / 'dbg_model.pkl').exists()),
+                candidates[0],  # fallback to first for error message
+            )
         
         # Check if models exist
         model_files = {
