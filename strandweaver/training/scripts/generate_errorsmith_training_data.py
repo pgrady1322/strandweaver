@@ -590,6 +590,82 @@ def _gc_content_of_read_window(seq: str, centre: int, window: int) -> float:
 #  DATA DOWNLOAD HELPERS
 # ═══════════════════════════════════════════════════════════════════════
 
+# ENA mirror URLs — direct HTTPS download, no SRA toolkit needed.
+# Pattern: https://ftp.sra.ebi.ac.uk/vol1/fastq/SRRxxx/0pp/SRRxxxxxxxxx/
+#   where xxx = first 6 digits after SRR, 0pp = zero-padded last 2 digits
+# (only for accessions with 10+ digit numbers).
+ENA_FASTQ_URLS = {
+    'SRR19325710': [  # HiFi — single-end
+        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR193/010/SRR19325710/SRR19325710.fastq.gz',
+    ],
+    'SRR23571061': [  # ONT — single-end
+        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR235/061/SRR23571061/SRR23571061.fastq.gz',
+    ],
+    'SRR3189741': [   # Illumina — paired-end
+        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR318/001/SRR3189741/SRR3189741_1.fastq.gz',
+        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR318/001/SRR3189741/SRR3189741_2.fastq.gz',
+    ],
+}
+
+
+def _configure_sra_toolkit() -> None:
+    """Configure SRA toolkit for headless/Colab environments."""
+    ncbi_dir = Path.home() / '.ncbi'
+    ncbi_dir.mkdir(exist_ok=True)
+    config = ncbi_dir / 'user-settings.mkfg'
+    if not config.exists():
+        config.write_text(
+            '/LIBS/GUID = "strandweaver-colab"\n'
+            '/libs/cloud/accept_aws_charges = "false"\n'
+            '/libs/cloud/accept_gcp_charges = "true"\n'
+            '/libs/cloud/report_instance_identity = "true"\n'
+        )
+    # Also try the CLI flags (some versions need this)
+    for cmd in [
+        ['vdb-config', '--accept-gcp-charges', 'yes'],
+        ['vdb-config', '--set', '/repository/user/cache-disabled=true'],
+    ]:
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=10)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+
+def _download_from_ena(accession: str, fastq_dir: Path) -> List[Path]:
+    """Download FASTQ files directly from ENA mirror (no SRA toolkit)."""
+    urls = ENA_FASTQ_URLS.get(accession)
+    if not urls:
+        raise ValueError(
+            f"No ENA mirror URL configured for {accession}. "
+            f"Known accessions: {list(ENA_FASTQ_URLS.keys())}"
+        )
+
+    downloaded = []
+    for url in urls:
+        fname = url.rsplit('/', 1)[-1]
+        gz_path = fastq_dir / fname
+        fq_path = fastq_dir / fname.replace('.fastq.gz', '.fastq')
+
+        # Already decompressed?
+        if fq_path.exists():
+            downloaded.append(fq_path)
+            continue
+
+        if not gz_path.exists():
+            logger.info(f"  Downloading {fname} from ENA...")
+            subprocess.run(
+                ['wget', '-q', '--show-progress', '-O', str(gz_path), url],
+                check=True,
+            )
+
+        # Decompress
+        logger.info(f"  Decompressing {fname}...")
+        subprocess.run(['gunzip', '-f', str(gz_path)], check=True)
+        downloaded.append(fq_path)
+
+    return downloaded
+
+
 def download_sra_and_align(
     accession: str,
     technology: str,
@@ -600,14 +676,11 @@ def download_sra_and_align(
     """
     Download SRA data, convert to FASTQ, align to reference, sort + index.
 
-    Requires: sra-toolkit (prefetch, fasterq-dump), minimap2, samtools.
-
-    Notes:
-        - Uses ``--temp`` to avoid /tmp exhaustion on Colab.
-        - Retries fasterq-dump once on failure, then falls back to the
-          slower ``fastq-dump --split-3`` which is more tolerant of
-          older SRA formats.
-        - Validates that the prefetch output exists before converting.
+    Download strategy (in order of preference):
+      1. ``fasterq-dump`` directly from accession (no prefetch)
+      2. ``prefetch`` + ``fasterq-dump`` from local cache
+      3. ``fastq-dump --split-3`` (slower, more tolerant)
+      4. Direct HTTPS download from ENA mirror (no SRA toolkit at all)
 
     Returns:
         Path to sorted, indexed BAM file
@@ -622,39 +695,50 @@ def download_sra_and_align(
 
     logger.info(f"  Downloading {accession} ({technology})...")
 
-    # Step 1: prefetch
-    sra_dir = output_dir / 'sra_cache'
-    sra_dir.mkdir(exist_ok=True)
-    subprocess.run(
-        ['prefetch', '--output-directory', str(sra_dir), accession],
-        check=True,
-    )
+    # Configure SRA toolkit (idempotent)
+    _configure_sra_toolkit()
 
-    # Validate prefetch output
-    sra_file = sra_dir / accession
-    if not sra_file.exists():
-        # Some prefetch versions nest inside accession/accession.sra
-        sra_file_alt = sra_dir / accession / f'{accession}.sra'
-        if sra_file_alt.exists():
-            sra_file = sra_dir / accession
-        else:
-            raise FileNotFoundError(
-                f"prefetch completed but SRA data not found at "
-                f"{sra_file} or {sra_file_alt}"
-            )
-
-    # Step 2: fasterq-dump → FASTQ (with retry + fallback)
     fastq_dir = output_dir / 'fastq'
     fastq_dir.mkdir(exist_ok=True)
-
-    # Use a dedicated temp dir — Colab's /tmp can fill up
     temp_dir = output_dir / 'fasterq_tmp'
     temp_dir.mkdir(exist_ok=True)
 
-    fasterq_ok = False
-    for attempt in (1, 2):
+    fastq_obtained = False
+
+    # ── Strategy 1: fasterq-dump directly from accession ────────────
+    #    (downloads on the fly, no prefetch needed)
+    if not fastq_obtained:
         try:
-            logger.info(f"  fasterq-dump attempt {attempt}/2...")
+            logger.info("  Strategy 1: fasterq-dump from accession...")
+            subprocess.run(
+                ['fasterq-dump',
+                 '--outdir', str(fastq_dir),
+                 '--temp', str(temp_dir),
+                 '--threads', str(threads),
+                 '--split-3',
+                 accession],
+                check=True, capture_output=True, text=True,
+            )
+            fastq_obtained = True
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            logger.warning(f"  Strategy 1 failed: {exc}")
+
+    # ── Strategy 2: prefetch + fasterq-dump ─────────────────────────
+    if not fastq_obtained:
+        sra_dir = output_dir / 'sra_cache'
+        sra_dir.mkdir(exist_ok=True)
+        try:
+            logger.info("  Strategy 2: prefetch + fasterq-dump...")
+            subprocess.run(
+                ['prefetch', '--max-size', '50G',
+                 '--output-directory', str(sra_dir), accession],
+                check=True, capture_output=True, text=True,
+            )
+            # Find the prefetch output
+            sra_file = sra_dir / accession
+            if not sra_file.exists():
+                sra_file = sra_dir / accession / f'{accession}.sra'
+
             subprocess.run(
                 ['fasterq-dump',
                  '--outdir', str(fastq_dir),
@@ -662,26 +746,31 @@ def download_sra_and_align(
                  '--threads', str(threads),
                  '--split-3',
                  str(sra_file)],
-                check=True,
-                capture_output=True,
-                text=True,
+                check=True, capture_output=True, text=True,
             )
-            fasterq_ok = True
-            break
-        except subprocess.CalledProcessError as exc:
-            logger.warning(
-                f"  fasterq-dump attempt {attempt} failed "
-                f"(exit {exc.returncode}): {exc.stderr.strip()}"
-            )
+            fastq_obtained = True
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            logger.warning(f"  Strategy 2 failed: {exc}")
 
-    if not fasterq_ok:
-        # Fallback: fastq-dump is slower but handles older SRA formats
-        logger.info("  Falling back to fastq-dump --split-3 ...")
-        subprocess.run(
-            ['fastq-dump', '--split-3', '--outdir', str(fastq_dir),
-             str(sra_file)],
-            check=True,
-        )
+    # ── Strategy 3: fastq-dump (slower, more tolerant) ──────────────
+    if not fastq_obtained:
+        try:
+            logger.info("  Strategy 3: fastq-dump --split-3...")
+            subprocess.run(
+                ['fastq-dump', '--split-3',
+                 '--outdir', str(fastq_dir),
+                 accession],
+                check=True, capture_output=True, text=True,
+            )
+            fastq_obtained = True
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            logger.warning(f"  Strategy 3 failed: {exc}")
+
+    # ── Strategy 4: Direct download from ENA ────────────────────────
+    if not fastq_obtained:
+        logger.info("  Strategy 4: Direct download from ENA mirror...")
+        _download_from_ena(accession, fastq_dir)
+        fastq_obtained = True
 
     # Step 3: Align with minimap2
     # Preset selection
