@@ -602,6 +602,13 @@ def download_sra_and_align(
 
     Requires: sra-toolkit (prefetch, fasterq-dump), minimap2, samtools.
 
+    Notes:
+        - Uses ``--temp`` to avoid /tmp exhaustion on Colab.
+        - Retries fasterq-dump once on failure, then falls back to the
+          slower ``fastq-dump --split-3`` which is more tolerant of
+          older SRA formats.
+        - Validates that the prefetch output exists before converting.
+
     Returns:
         Path to sorted, indexed BAM file
     """
@@ -623,14 +630,58 @@ def download_sra_and_align(
         check=True,
     )
 
-    # Step 2: fasterq-dump → FASTQ
+    # Validate prefetch output
+    sra_file = sra_dir / accession
+    if not sra_file.exists():
+        # Some prefetch versions nest inside accession/accession.sra
+        sra_file_alt = sra_dir / accession / f'{accession}.sra'
+        if sra_file_alt.exists():
+            sra_file = sra_dir / accession
+        else:
+            raise FileNotFoundError(
+                f"prefetch completed but SRA data not found at "
+                f"{sra_file} or {sra_file_alt}"
+            )
+
+    # Step 2: fasterq-dump → FASTQ (with retry + fallback)
     fastq_dir = output_dir / 'fastq'
     fastq_dir.mkdir(exist_ok=True)
-    subprocess.run(
-        ['fasterq-dump', '--outdir', str(fastq_dir), '--threads', str(threads),
-         str(sra_dir / accession)],
-        check=True,
-    )
+
+    # Use a dedicated temp dir — Colab's /tmp can fill up
+    temp_dir = output_dir / 'fasterq_tmp'
+    temp_dir.mkdir(exist_ok=True)
+
+    fasterq_ok = False
+    for attempt in (1, 2):
+        try:
+            logger.info(f"  fasterq-dump attempt {attempt}/2...")
+            subprocess.run(
+                ['fasterq-dump',
+                 '--outdir', str(fastq_dir),
+                 '--temp', str(temp_dir),
+                 '--threads', str(threads),
+                 '--split-3',
+                 str(sra_file)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            fasterq_ok = True
+            break
+        except subprocess.CalledProcessError as exc:
+            logger.warning(
+                f"  fasterq-dump attempt {attempt} failed "
+                f"(exit {exc.returncode}): {exc.stderr.strip()}"
+            )
+
+    if not fasterq_ok:
+        # Fallback: fastq-dump is slower but handles older SRA formats
+        logger.info("  Falling back to fastq-dump --split-3 ...")
+        subprocess.run(
+            ['fastq-dump', '--split-3', '--outdir', str(fastq_dir),
+             str(sra_file)],
+            check=True,
+        )
 
     # Step 3: Align with minimap2
     # Preset selection
