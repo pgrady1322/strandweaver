@@ -56,3 +56,4 @@ test_output/
 test_archive/
 pipeline_run.log
 *.log
+trained_models/
