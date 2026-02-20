@@ -20,9 +20,9 @@ Designed for Colab with GPU instances.
 Run time: ~1-3 h depending on subsample size.
 
 Data sources (public):
-  - HiFi:     SRR19325710 (T2T CHM13 35× PacBio HiFi)
-  - ONT R10:  SRR23571061 (T2T CHM13 ONT R10.4.1)
-  - Illumina: SRR3189741  (CHM13 Illumina PCR-free 2×150 bp)
+  - HiFi:     SRR11292120 + SRR11292121 (T2T CHM13 PacBio HiFi, 2 parts)
+  - ONT UL:   SRR23365080 (T2T CHM13 ONT Guppy 6.3.7 HAC, via S3)
+  - Illumina: SRR1997411 (CHM13 Illumina PCR-free)
 
 Usage:
     # Full run with automatic download
@@ -77,13 +77,17 @@ logger = logging.getLogger("strandweaver.errorsmith_training")
 #  CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════
 
-# CHM13 public accessions (NCBI SRA) — these are the most widely-used
-# benchmark datasets for the T2T consortium
+# CHM13 public accessions (NCBI SRA)
 CHM13_ACCESSIONS = {
-    'hifi':     'SRR19325710',  # PacBio HiFi, CHM13, ~35×
-    'ont':      'SRR23571061',  # ONT R10.4.1, CHM13, ~50×
-    'illumina': 'SRR3189741',  # Illumina PCR-free, CHM13, ~40×
+    'hifi':     ['SRR11292120', 'SRR11292121'],  # PacBio HiFi, CHM13 (2 parts)
+    'illumina': ['SRR1997411'],                  # Illumina PCR-free, CHM13
 }
+
+# ONT ultra-long reads — hosted on S3, not SRA
+CHM13_ONT_S3 = (
+    's3://sra-pub-src-9/SRR23365080/'
+    'CHM13_T2T_ONT_fastq_guppy_6.3.7_hac_ac.fastq.gz.1'
+)
 
 # CHM13v2.0 reference (T2T consortium)
 CHM13_REF_URL = (
@@ -590,22 +594,13 @@ def _gc_content_of_read_window(seq: str, centre: int, window: int) -> float:
 #  DATA DOWNLOAD HELPERS
 # ═══════════════════════════════════════════════════════════════════════
 
-# ENA mirror URLs — direct HTTPS download, no SRA toolkit needed.
-# Pattern: https://ftp.sra.ebi.ac.uk/vol1/fastq/SRRxxx/0pp/SRRxxxxxxxxx/
-#   where xxx = first 6 digits after SRR, 0pp = zero-padded last 2 digits
-# (only for accessions with 10+ digit numbers).
-ENA_FASTQ_URLS = {
-    'SRR19325710': [  # HiFi — single-end
-        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR193/010/SRR19325710/SRR19325710.fastq.gz',
-    ],
-    'SRR23571061': [  # ONT — single-end
-        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR235/061/SRR23571061/SRR23571061.fastq.gz',
-    ],
-    'SRR3189741': [   # Illumina — paired-end
-        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR318/001/SRR3189741/SRR3189741_1.fastq.gz',
-        'https://ftp.sra.ebi.ac.uk/vol1/fastq/SRR318/001/SRR3189741/SRR3189741_2.fastq.gz',
-    ],
-}
+# NOTE: These CHM13 datasets are large and should be pre-downloaded
+# and aligned before training. The 'drive' mode expects sorted/indexed
+# BAMs uploaded to Google Drive. See TRAINING.md for download commands:
+#
+#   HiFi:     prefetch SRR11292120 SRR11292121 && fasterq-dump ...
+#   Illumina: prefetch SRR1997411 && fasterq-dump --split-3 ...
+#   ONT UL:   aws s3 cp --no-sign-request <CHM13_ONT_S3 URL> ...
 
 
 def _configure_sra_toolkit() -> None:
@@ -620,7 +615,6 @@ def _configure_sra_toolkit() -> None:
             '/libs/cloud/accept_gcp_charges = "true"\n'
             '/libs/cloud/report_instance_identity = "true"\n'
         )
-    # Also try the CLI flags (some versions need this)
     for cmd in [
         ['vdb-config', '--accept-gcp-charges', 'yes'],
         ['vdb-config', '--set', '/repository/user/cache-disabled=true'],
@@ -631,56 +625,94 @@ def _configure_sra_toolkit() -> None:
             pass
 
 
-def _download_from_ena(accession: str, fastq_dir: Path) -> List[Path]:
-    """Download FASTQ files directly from ENA mirror (no SRA toolkit)."""
-    urls = ENA_FASTQ_URLS.get(accession)
-    if not urls:
-        raise ValueError(
-            f"No ENA mirror URL configured for {accession}. "
-            f"Known accessions: {list(ENA_FASTQ_URLS.keys())}"
+def _download_ont_from_s3(output_dir: Path) -> Path:
+    """Download CHM13 ONT ultra-long reads from the public S3 bucket."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    gz_path = output_dir / 'fastq' / 'chm13_ont_ul.fastq.gz'
+    fq_path = output_dir / 'fastq' / 'chm13_ont_ul.fastq'
+
+    if fq_path.exists():
+        logger.info(f"  ONT FASTQ already exists: {fq_path}")
+        return fq_path
+
+    (output_dir / 'fastq').mkdir(exist_ok=True)
+
+    if not gz_path.exists():
+        logger.info("  Downloading ONT UL reads from S3...")
+        subprocess.run(
+            ['aws', 's3', 'cp', '--no-sign-request',
+             CHM13_ONT_S3, str(gz_path)],
+            check=True,
         )
 
-    downloaded = []
-    for url in urls:
-        fname = url.rsplit('/', 1)[-1]
-        gz_path = fastq_dir / fname
-        fq_path = fastq_dir / fname.replace('.fastq.gz', '.fastq')
+    logger.info("  Decompressing ONT FASTQ...")
+    subprocess.run(['gunzip', '-f', str(gz_path)], check=True)
+    return fq_path
 
-        # Already decompressed?
-        if fq_path.exists():
-            downloaded.append(fq_path)
-            continue
 
-        if not gz_path.exists():
-            logger.info(f"  Downloading {fname} from ENA...")
-            subprocess.run(
-                ['wget', '-q', '--show-progress', '-O', str(gz_path), url],
-                check=True,
-            )
+def _fasterq_dump_accession(
+    accession: str,
+    fastq_dir: Path,
+    temp_dir: Path,
+    threads: int,
+) -> bool:
+    """Try to dump a single SRA accession to FASTQ. Returns True on success."""
+    _configure_sra_toolkit()
 
-        # Decompress
-        logger.info(f"  Decompressing {fname}...")
-        subprocess.run(['gunzip', '-f', str(gz_path)], check=True)
-        downloaded.append(fq_path)
+    # Strategy 1: fasterq-dump directly from accession
+    try:
+        logger.info(f"  fasterq-dump {accession}...")
+        subprocess.run(
+            ['fasterq-dump',
+             '--outdir', str(fastq_dir),
+             '--temp', str(temp_dir),
+             '--threads', str(threads),
+             '--split-3',
+             accession],
+            check=True, capture_output=True, text=True,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        logger.warning(f"  fasterq-dump failed for {accession}: {exc}")
 
-    return downloaded
+    # Strategy 2: fastq-dump (slower fallback)
+    try:
+        logger.info(f"  fastq-dump --split-3 {accession}...")
+        subprocess.run(
+            ['fastq-dump', '--split-3',
+             '--outdir', str(fastq_dir),
+             accession],
+            check=True, capture_output=True, text=True,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        logger.warning(f"  fastq-dump failed for {accession}: {exc}")
+
+    return False
 
 
 def download_sra_and_align(
-    accession: str,
+    accessions: List[str],
     technology: str,
     reference_path: str,
     output_dir: Path,
     threads: int = 8,
 ) -> Path:
     """
-    Download SRA data, convert to FASTQ, align to reference, sort + index.
+    Download one or more SRA accessions, convert to FASTQ, align, sort + index.
 
-    Download strategy (in order of preference):
-      1. ``fasterq-dump`` directly from accession (no prefetch)
-      2. ``prefetch`` + ``fasterq-dump`` from local cache
-      3. ``fastq-dump --split-3`` (slower, more tolerant)
-      4. Direct HTTPS download from ENA mirror (no SRA toolkit at all)
+    For multi-part datasets (e.g. HiFi split across two accessions), all parts
+    are downloaded then merged before alignment.
+
+    Requires: sra-toolkit (fasterq-dump), minimap2, samtools.
+    For ONT: uses direct S3 download instead of SRA toolkit.
+
+    Args:
+        accessions: List of SRA accession IDs
+        technology: 'hifi', 'ont', or 'illumina'
+        reference_path: Path to reference FASTA
+        output_dir: Output directory for BAM
+        threads: Threads for alignment
 
     Returns:
         Path to sorted, indexed BAM file
@@ -688,112 +720,47 @@ def download_sra_and_align(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    bam_path = output_dir / f'{accession}_{technology}.sorted.bam'
-    if bam_path.exists() and (bam_path.with_suffix('.bam.bai')).exists():
+    bam_path = output_dir / f'{technology}_chm13.sorted.bam'
+    if bam_path.exists() and bam_path.with_suffix('.bam.bai').exists():
         logger.info(f"  BAM already exists: {bam_path}")
         return bam_path
-
-    logger.info(f"  Downloading {accession} ({technology})...")
-
-    # Configure SRA toolkit (idempotent)
-    _configure_sra_toolkit()
 
     fastq_dir = output_dir / 'fastq'
     fastq_dir.mkdir(exist_ok=True)
     temp_dir = output_dir / 'fasterq_tmp'
     temp_dir.mkdir(exist_ok=True)
 
-    fastq_obtained = False
+    # ── Handle ONT separately (S3 download) ─────────────────────────
+    if technology == 'ont':
+        _download_ont_from_s3(output_dir)
 
-    # ── Strategy 1: fasterq-dump directly from accession ────────────
-    #    (downloads on the fly, no prefetch needed)
-    if not fastq_obtained:
-        try:
-            logger.info("  Strategy 1: fasterq-dump from accession...")
-            subprocess.run(
-                ['fasterq-dump',
-                 '--outdir', str(fastq_dir),
-                 '--temp', str(temp_dir),
-                 '--threads', str(threads),
-                 '--split-3',
-                 accession],
-                check=True, capture_output=True, text=True,
-            )
-            fastq_obtained = True
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            logger.warning(f"  Strategy 1 failed: {exc}")
-
-    # ── Strategy 2: prefetch + fasterq-dump ─────────────────────────
-    if not fastq_obtained:
-        sra_dir = output_dir / 'sra_cache'
-        sra_dir.mkdir(exist_ok=True)
-        try:
-            logger.info("  Strategy 2: prefetch + fasterq-dump...")
-            subprocess.run(
-                ['prefetch', '--max-size', '50G',
-                 '--output-directory', str(sra_dir), accession],
-                check=True, capture_output=True, text=True,
-            )
-            # Find the prefetch output
-            sra_file = sra_dir / accession
-            if not sra_file.exists():
-                sra_file = sra_dir / accession / f'{accession}.sra'
-
-            subprocess.run(
-                ['fasterq-dump',
-                 '--outdir', str(fastq_dir),
-                 '--temp', str(temp_dir),
-                 '--threads', str(threads),
-                 '--split-3',
-                 str(sra_file)],
-                check=True, capture_output=True, text=True,
-            )
-            fastq_obtained = True
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            logger.warning(f"  Strategy 2 failed: {exc}")
-
-    # ── Strategy 3: fastq-dump (slower, more tolerant) ──────────────
-    if not fastq_obtained:
-        try:
-            logger.info("  Strategy 3: fastq-dump --split-3...")
-            subprocess.run(
-                ['fastq-dump', '--split-3',
-                 '--outdir', str(fastq_dir),
-                 accession],
-                check=True, capture_output=True, text=True,
-            )
-            fastq_obtained = True
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-            logger.warning(f"  Strategy 3 failed: {exc}")
-
-    # ── Strategy 4: Direct download from ENA ────────────────────────
-    if not fastq_obtained:
-        logger.info("  Strategy 4: Direct download from ENA mirror...")
-        _download_from_ena(accession, fastq_dir)
-        fastq_obtained = True
-
-    # Step 3: Align with minimap2
-    # Preset selection
-    if technology == 'hifi':
-        preset = 'map-hifi'
-    elif technology == 'ont':
-        preset = 'map-ont'
-    elif technology == 'illumina':
-        preset = 'sr'
+    # ── SRA download for HiFi / Illumina ────────────────────────────
     else:
-        preset = 'map-ont'
+        for acc in accessions:
+            ok = _fasterq_dump_accession(acc, fastq_dir, temp_dir, threads)
+            if not ok:
+                raise RuntimeError(
+                    f"Could not download {acc}. Please download manually:\n"
+                    f"  prefetch {acc} && fasterq-dump --split-3 {acc}\n"
+                    f"Then provide the BAM via --hifi-bam / --illumina-bam.\n"
+                    f"See TRAINING.md for full instructions."
+                )
 
-    # Find FASTQ files
-    fq_files = sorted(fastq_dir.glob(f'{accession}*.fastq'))
+    # ── Find all FASTQ files ────────────────────────────────────────
+    fq_files = sorted(fastq_dir.glob('*.fastq'))
     if not fq_files:
-        fq_files = sorted(fastq_dir.glob(f'{accession}*.fq'))
+        fq_files = sorted(fastq_dir.glob('*.fq'))
     if not fq_files:
-        raise FileNotFoundError(f"No FASTQ files found for {accession}")
+        raise FileNotFoundError(
+            f"No FASTQ files found in {fastq_dir} after download"
+        )
 
-    unsorted_bam = output_dir / f'{accession}_{technology}.unsorted.bam'
-    logger.info(f"  Aligning with minimap2 -x {preset}...")
+    # ── Align with minimap2 ─────────────────────────────────────────
+    preset = {'hifi': 'map-hifi', 'ont': 'map-ont', 'illumina': 'sr'}.get(
+        technology, 'map-ont'
+    )
+    logger.info(f"  Aligning {len(fq_files)} FASTQ(s) with minimap2 -x {preset}...")
 
-    # minimap2 → samtools sort
     minimap_cmd = [
         'minimap2', '-ax', preset,
         '-t', str(threads),
@@ -809,12 +776,11 @@ def download_sra_and_align(
     with subprocess.Popen(minimap_cmd, stdout=subprocess.PIPE) as mm_proc:
         subprocess.run(sort_cmd, stdin=mm_proc.stdout, check=True)
 
-    # Step 4: Index
-    subprocess.run(['samtools', 'index', '-@', str(threads), str(bam_path)], check=True)
-
-    # Clean up intermediate files
-    if unsorted_bam.exists():
-        unsorted_bam.unlink()
+    # Index
+    subprocess.run(
+        ['samtools', 'index', '-@', str(threads), str(bam_path)],
+        check=True,
+    )
 
     logger.info(f"  BAM ready: {bam_path}")
     return bam_path
@@ -896,12 +862,18 @@ def generate_errorsmith_training_data(
 
     if download:
         download_dir = output_dir / 'downloads'
-        for tech, accession in CHM13_ACCESSIONS.items():
+        for tech, accessions in CHM13_ACCESSIONS.items():
             if tech not in bam_map:
                 bam_path = download_sra_and_align(
-                    accession, tech, reference_path, download_dir, threads,
+                    accessions, tech, reference_path, download_dir, threads,
                 )
                 bam_map[tech] = str(bam_path)
+        # ONT handled separately (S3 download)
+        if 'ont' not in bam_map:
+            bam_path = download_sra_and_align(
+                [], 'ont', reference_path, download_dir, threads,
+            )
+            bam_map['ont'] = str(bam_path)
 
     if not bam_map:
         raise ValueError(
