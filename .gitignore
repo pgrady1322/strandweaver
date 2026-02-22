@@ -56,4 +56,17 @@ test_output/
 test_archive/
 pipeline_run.log
 *.log
-trained_models/
+# Ignore large data files in trained_models but track model PKLs and metadata
+trained_models/**/*.fastq
+trained_models/**/*.fastq.gz
+trained_models/**/*.fastq.gz.*
+trained_models/**/*.fa
+trained_models/**/*.fa.gz
+trained_models/**/*.fai
+trained_models/**/*.fasta
+trained_models/**/*.bam
+trained_models/**/*.bam.bai
+trained_models/**/*.csv
+trained_models/**/*.log
+trained_models/nohup_alignment.out
+trained_models/run_alignment.sh
