@@ -2756,17 +2756,70 @@ class PipelineOrchestrator:
         
         # Polishing (if enabled)
         if self.config['finishing']['polishing']['enabled']:
-            self.logger.warning(
-                "Polishing was requested but is not yet implemented. "
-                "Contigs will proceed unpolished."
+            from ..assembly_utils.iterative_polisher import IterativePolisher
+            polish_cfg = self.config['finishing']['polishing']
+            polish_k = (
+                self.state.get('preprocessing_stats', {}).get('polish_k_selected', 21)
+                if isinstance(self.state.get('preprocessing_stats'), dict)
+                else 21
             )
+            polisher = IterativePolisher(
+                max_rounds=polish_cfg.get('rounds', 2),
+                k=polish_k,
+            )
+            # Use original (uncorrected) reads if configured, else corrected
+            if polish_cfg.get('use_original_reads', True):
+                polish_reads = self.state.get('input_reads') or reads_for_qv
+            else:
+                polish_reads = self.state.get('corrected_reads') or reads_for_qv
+            if polish_reads:
+                contigs, polish_summary = polisher.polish(
+                    contigs, polish_reads, qv_estimator=qv_estimator,
+                )
+                self.state['polish_summary'] = polish_summary
+                self.logger.info(
+                    "Polishing: %d rounds, %d bases corrected, "
+                    "QV %.1f → %.1f (+%.2f)",
+                    polish_summary.total_rounds,
+                    polish_summary.total_bases_corrected,
+                    polish_summary.initial_qv,
+                    polish_summary.final_qv,
+                    polish_summary.qv_improvement,
+                )
+            else:
+                self.logger.warning(
+                    "Polishing enabled but no reads available — skipping"
+                )
         
         # Gap filling (if enabled)
         if self.config['finishing']['gap_filling']['enabled']:
-            self.logger.warning(
-                "Gap filling was requested but is not yet implemented. "
-                "Gaps will remain unfilled in the final assembly."
+            from ..assembly_utils.gap_filler import GapFiller
+            gap_cfg = self.config['finishing']['gap_filling']
+            gap_k = (
+                self.state.get('preprocessing_stats', {}).get('polish_k_selected', 21)
+                if isinstance(self.state.get('preprocessing_stats'), dict)
+                else 21
             )
+            filler = GapFiller(
+                max_gap_size=gap_cfg.get('max_gap_size', 10000),
+                min_overlap_to_gap=gap_cfg.get('min_overlap_to_gap', 100),
+                k=gap_k,
+            )
+            gap_reads = reads_for_qv
+            if gap_reads:
+                contigs, gap_summary = filler.fill(contigs, gap_reads)
+                self.state['gap_fill_summary'] = gap_summary
+                self.logger.info(
+                    "Gap filling: %d/%d gaps filled, %d N → %d bp",
+                    gap_summary.gaps_filled,
+                    gap_summary.total_gaps,
+                    gap_summary.bases_filled,
+                    gap_summary.bases_inserted,
+                )
+            else:
+                self.logger.warning(
+                    "Gap filling enabled but no reads available — skipping"
+                )
         
         # Apply minimum contig length filter
         min_len = self.config.get('runtime', {}).get('min_contig_length', 0)

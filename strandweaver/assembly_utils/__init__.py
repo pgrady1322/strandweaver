@@ -4,7 +4,8 @@
 StrandWeaver v0.3.0
 
 Assembly Utilities — graph cleanup, misassembly detection, chromosome
-classification, gene annotation, Hi-C graph alignment, and QV estimation.
+classification, gene annotation, Hi-C graph alignment, QV estimation,
+iterative polishing, and gap filling.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -29,6 +30,12 @@ from .hic_graph_aligner import (
 )
 from .qv_estimator import (
     QVEstimator, ContigQV, AssemblyQV, estimate_assembly_qv
+)
+from .iterative_polisher import (
+    IterativePolisher, PolishingStats, PolishingSummary
+)
+from .gap_filler import (
+    GapFiller, GapRegion, GapFillingSummary
 )
 
 __all__ = [
@@ -67,6 +74,14 @@ __all__ = [
     "ContigQV",
     "AssemblyQV",
     "estimate_assembly_qv",
+    # Iterative polishing
+    "IterativePolisher",
+    "PolishingStats",
+    "PolishingSummary",
+    # Gap filling
+    "GapFiller",
+    "GapRegion",
+    "GapFillingSummary",
 ]
 
 # StrandWeaver v0.3.0
