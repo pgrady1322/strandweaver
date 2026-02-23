@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Hi-C Graph Aligner — parse and align Hi-C reads to assembly graph nodes
 via k-mer matching or pre-aligned BAM/SAM.
@@ -537,5 +537,5 @@ __all__ = [
     'align_hic_reads_to_graph',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

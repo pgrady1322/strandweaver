@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 ErrorSmith — unified technology-specific error correction for ONT, PacBio,
 Illumina, and Ancient DNA with adapter trimming and visualization.
@@ -2243,5 +2243,5 @@ __all__ = [
     'correct_batch',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

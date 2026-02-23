@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 User Input — import BandageNG path corrections, manual breaks/joins,
 and exclusion lists.
@@ -970,6 +970,6 @@ def apply_manual_edits(
     logger.info("Manual edits applied successfully")
     return result
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
 

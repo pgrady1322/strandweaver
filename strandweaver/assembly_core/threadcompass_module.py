@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 ThreadCompass — ultra-long read integration and routing engine.
 Maps UL reads to the assembly graph, detects and scores joins, and
@@ -1555,5 +1555,5 @@ __all__ = [
     'map_reads_batch',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Chromosome Classifier — three-tier system for identifying microchromosomes
 and small chromosomal segments (pre-filter, gene content, advanced features).
@@ -767,5 +767,5 @@ __all__ = [
     'ChromosomeClassification',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

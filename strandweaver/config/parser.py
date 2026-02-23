@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Configuration parser — YAML config loading, merging, and validation.
 
@@ -263,5 +263,5 @@ class ConfigParser:
         """String representation."""
         return f"ConfigParser(config_file={self.config_file})"
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

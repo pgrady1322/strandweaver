@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Diploid Disentanglement — separates assembly graphs into haplotype paths
 using Hi-C, GNN, AI overlap, regional k-mer, and UL coherence signals.
@@ -1479,5 +1479,5 @@ def disentangle_diploid_graph(
         hic_edge_support, regional_k_map, ul_support_map
     )
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

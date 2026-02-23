@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Misassembly Detection — 12-method multi-signal detector with confidence scoring,
 breakpoint characterization, and correction strategy recommendations.
@@ -1950,5 +1950,5 @@ if __name__ == "__main__":
     print("=" * 60)
     print(detector.generate_report("tsv"))
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

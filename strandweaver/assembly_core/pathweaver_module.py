@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 PathWeaver — GNN-first path finding engine with classical algorithm fallback
 for assembly graph traversal. Integrates EdgeWarden, Hi-C, UL reads, and
@@ -3884,5 +3884,5 @@ __all__ = [
     'create_path_from_node_ids',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

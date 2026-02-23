@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Config-Based Training Workflow — fine-grained training data generation
 from user-specified genome and read parameters.
@@ -522,5 +522,5 @@ def generate_custom_training_data(config: UserTrainingConfig) -> Dict[str, Any]:
     generator = TrainingDataGenerator(config)
     return generator.generate_all()
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

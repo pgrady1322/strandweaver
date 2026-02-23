@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Master Pipeline Orchestrator — coordinates the complete assembly pipeline
 from preprocessing through assembly to finishing.
@@ -2720,7 +2720,7 @@ class PipelineOrchestrator:
     # ========================================================================
     
     def _step_finish(self):
-        """Finishing step (polishing, gap filling, etc.)."""
+        """Finishing step (polishing, gap filling, QV estimation)."""
         self.logger.info("Finishing assembly...")
         
         # Load contigs
@@ -2732,6 +2732,27 @@ class PipelineOrchestrator:
                 raise FileNotFoundError("No contigs found for finishing step")
         else:
             contigs = self.state['final_contigs']
+        
+        # ── Pre-polish QV estimate ──────────────────────────────────────
+        from ..assembly_utils.qv_estimator import QVEstimator
+        qv_estimator = QVEstimator(
+            k=self.state.get('preprocessing_stats', {}).get('polish_k_selected', 21)
+            if isinstance(self.state.get('preprocessing_stats'), dict)
+            else 21,
+            min_contig_length=self.config.get('runtime', {}).get('min_contig_length', 1000),
+        )
+        # Gather reads if available (for k-mer completeness)
+        reads_for_qv = self.state.get('corrected_reads') or self.state.get('input_reads')
+        pre_qv = qv_estimator.estimate(contigs, reads=reads_for_qv)
+        self.logger.info(
+            "Pre-polish QV: Q%.1f (kmer=Q%.1f, error_rate=Q%.1f)",
+            pre_qv.global_combined_qv,
+            pre_qv.global_kmer_qv,
+            pre_qv.global_error_rate_qv,
+        )
+        qv_estimator.save_report(
+            pre_qv, self.output_dir / "qv_report_pre_polish.json"
+        )
         
         # Polishing (if enabled)
         if self.config['finishing']['polishing']['enabled']:
@@ -2760,10 +2781,30 @@ class PipelineOrchestrator:
         final_path = self.output_dir / "final_assembly.fasta"
         self._save_reads(contigs, final_path)
         
+        # ── Post-finish QV estimate ─────────────────────────────────────
+        post_qv = qv_estimator.estimate(contigs, reads=reads_for_qv)
+        self.logger.info(
+            "Post-finish QV: Q%.1f (kmer=Q%.1f, error_rate=Q%.1f)",
+            post_qv.global_combined_qv,
+            post_qv.global_kmer_qv,
+            post_qv.global_error_rate_qv,
+        )
+        qv_estimator.save_report(
+            post_qv, self.output_dir / "qv_report_final.json"
+        )
+        
+        # Store QV metrics in pipeline state for summary reporting
+        self.state['qv_pre_polish'] = pre_qv
+        self.state['qv_final'] = post_qv
+        
         total_bp = sum(len(c.sequence) for c in contigs)
         self.logger.info(f"✓ Finishing complete")
         self.logger.info(f"  Final contigs: {len(contigs)} ({total_bp:,} bp)")
         self.logger.info(f"  Final assembly: {final_path}")
+        self.logger.info(
+            f"  Assembly QV: Q{post_qv.global_combined_qv:.1f}  "
+            f"N50: {post_qv.n50:,} bp"
+        )
     
     def _step_misassembly_report(self):
         """
@@ -3577,5 +3618,5 @@ class PipelineOrchestrator:
         self.logger.info(f"Model save report: {json.dumps(report, indent=2)}")
         return report
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

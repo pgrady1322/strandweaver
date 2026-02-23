@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Core I/O — read data structures, FASTQ/FASTA operations, and ReadCollection.
 
@@ -1007,5 +1007,5 @@ class ReadCollection:
             tech_counts[tech_value] = len(reads)
         return f"ReadCollection(total={self._total_reads}, by_tech={tech_counts})"
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

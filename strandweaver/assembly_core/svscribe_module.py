@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 SVScribe — ML-driven structural variant detection during graph traversal.
 Supports deletions, insertions, inversions, duplications, and translocations.
@@ -1789,5 +1789,5 @@ def export_vcf(svs: List[Dict[str, Any]], output_path: Path, reference_name: str
     
     logger.info(f"VCF export complete")
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

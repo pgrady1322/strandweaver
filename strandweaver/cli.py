@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Command-line interface — main CLI entry point and all subcommands.
 
@@ -1165,7 +1165,7 @@ def nf_merge(reads_files, technologies, output, weights):
         click.echo(f"Weights: {weights}")
     
     click.echo("\n⚠️ Multi-technology read merging:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
     click.echo("   Current workaround: Use standard UNIX cat or seqtk for simple merging")
 
 
@@ -1190,7 +1190,7 @@ def build_contigs(input, output, min_overlap, threads):
     click.echo(f"Output: {output}")
     
     click.echo("\n⚠️ Contig building from short reads:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
     click.echo("   Current workaround: Use flye/hifiasm/miniasm for short read assembly first")
 
 
@@ -1531,7 +1531,7 @@ def validate(assembly, reference, output, busco_lineage, threads):
         click.echo(f"Output report: {output}")
     
     click.echo("\n⚠️ Assembly validation:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
     click.echo("   Current workaround: Use QUAST or similar tools for assembly QC")
 
 
@@ -1552,7 +1552,7 @@ def checkpoints_list(checkpoint_dir):
     """List available checkpoints."""
     click.echo(f"Checkpoints in: {checkpoint_dir}")
     click.echo("\n⚠️ Checkpoint management:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
 
 
 @nf_checkpoints.command('remove')
@@ -1570,7 +1570,7 @@ def checkpoints_remove(checkpoint_dir, remove_all, before):
         click.echo(f"Removing checkpoints before: {before}")
     
     click.echo("\n⚠️ Checkpoint management:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
 
 
 @nf_checkpoints.command('export')
@@ -1583,7 +1583,7 @@ def checkpoints_export(checkpoint_dir, output):
     click.echo(f"Exporting checkpoints from: {checkpoint_dir}")
     click.echo(f"Output archive: {output}")
     click.echo("\n⚠️ Checkpoint management:")
-    click.echo("   This feature is planned for v0.2")
+    click.echo("   This feature is planned for a future release")
 
 
 # ============================================================================
@@ -3393,5 +3393,5 @@ def version():
 if __name__ == '__main__':
     sys.exit(main())
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

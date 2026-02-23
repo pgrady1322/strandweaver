@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Preprocessing Module — error correction, profiling, read classification,
 and adaptive k-mer selection.
@@ -162,5 +162,5 @@ __all__ = [
     'detect_from_fastq_headers',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Configuration schema — all parameters with defaults and validation.
 
@@ -418,5 +418,5 @@ def validate_config(config: Dict[str, Any]) -> List[str]:
     
     return errors
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

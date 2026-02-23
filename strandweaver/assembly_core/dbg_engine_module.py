@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 De Bruijn Graph (DBG) Engine — compacted DBG construction from long reads
 with ML-recommended regional k-mer values and GPU acceleration.
@@ -1422,5 +1422,5 @@ def build_dbg_from_long_reads(
         ai_annotations=ai_annotations
     )
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

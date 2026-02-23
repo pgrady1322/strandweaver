@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Unified GPU Acceleration — backend management (CUDA/MPS/CPU), k-mer ops,
 Hi-C contact matrices, spectral clustering, path finding, and UL mapping.
@@ -2935,5 +2935,5 @@ class DeviceManager:
     def __repr__(self) -> str:
         return f"DeviceManager(device='{self.device_str}', type='{self.device_type}')"
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

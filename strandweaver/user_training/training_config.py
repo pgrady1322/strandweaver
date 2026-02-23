@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 User Training Configuration — dataclasses for training data generation parameters.
 
@@ -365,5 +365,5 @@ class UserTrainingConfig:
             compress_output=config_dict.get('compress_output', True)
         )
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

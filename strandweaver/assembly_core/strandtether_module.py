@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 StrandTether — Hi-C contact matrix integration engine for haplotype phasing,
 edge support, path scoring, join detection, and orientation validation.
@@ -1522,5 +1522,5 @@ __all__ = [
     'align_reads_batch',
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

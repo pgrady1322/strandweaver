@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 Read Classification — technology detection, read type enums, metadata structures,
 and Nanopore-specific LongBow integration.
@@ -1127,5 +1127,5 @@ def has_low_quality_bases(quality_scores, threshold: int = 20, max_low_quality_f
     
     return low_quality_fraction > max_low_quality_fraction
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

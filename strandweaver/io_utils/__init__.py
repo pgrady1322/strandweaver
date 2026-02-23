@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
 I/O Module — core read structures, FASTQ/FASTA I/O, graph/contig export,
 and user corrections.
@@ -173,5 +173,5 @@ __all__ = [
     "apply_manual_edits",
 ]
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
