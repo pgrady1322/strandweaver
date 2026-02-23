@@ -30,7 +30,8 @@ class SectionedGroup(click.Group):
             'config', 'pipeline', 'train', 'version',
         ],
         'Individual Pipeline Steps': [
-            'assemble', 'correct', 'kweaver', 'profile', 'validate',
+            'assemble', 'correct', 'gap-fill', 'kweaver', 'polish',
+            'profile', 'qv', 'validate',
         ],
         'Helpers and Utilities': [
             'align-hic', 'classify', 'extract-kmers', 'map-ul',
@@ -1533,6 +1534,179 @@ def validate(assembly, reference, output, busco_lineage, threads):
     click.echo("\n⚠️ Assembly validation:")
     click.echo("   This feature is planned for a future release")
     click.echo("   Current workaround: Use QUAST or similar tools for assembly QC")
+
+
+# ============================================================================
+# Finishing Commands (QV, Polish, Gap-Fill)
+# ============================================================================
+
+@main.command('qv')
+@click.option('--assembly', '-a', required=True, type=click.Path(exists=True),
+              help='Assembly FASTA to evaluate')
+@click.option('--reads', '-r', type=click.Path(exists=True),
+              help='Read file for k-mer completeness (FASTA/FASTQ, optional)')
+@click.option('--output', '-o', type=click.Path(), default=None,
+              help='Output QV report JSON (default: stdout)')
+@click.option('--k', '-k', type=int, default=21,
+              help='K-mer size for completeness estimation (11-101, default: 21)')
+def qv_estimate(assembly, reads, output, k):
+    """
+    Estimate assembly quality value (QV).
+
+    Computes Merqury-style k-mer completeness QV and per-contig quality
+    metrics. Optionally includes read k-mer completeness when reads are
+    provided.
+
+    Examples:\b
+        # QV from assembly only (uses default error rate)
+        strandweaver qv -a assembly.fa
+
+        # QV with read k-mer completeness
+        strandweaver qv -a assembly.fa -r reads.fastq -o qv_report.json
+    """
+    import json as _json
+    from .io_utils import read_fasta, read_fastq
+    from .assembly_utils.qv_estimator import QVEstimator
+
+    click.echo(f"Estimating QV for: {assembly}")
+    contigs = list(read_fasta(assembly))
+    click.echo(f"  Loaded {len(contigs)} contigs")
+
+    read_list = None
+    if reads:
+        click.echo(f"  Loading reads: {reads}")
+        reads_path = Path(reads)
+        if reads_path.suffix in ('.fq', '.fastq', '.fq.gz', '.fastq.gz'):
+            read_list = list(read_fastq(reads_path))
+        else:
+            read_list = list(read_fasta(reads_path))
+        click.echo(f"  Loaded {len(read_list)} reads")
+
+    estimator = QVEstimator(k=k)
+    result = estimator.estimate(contigs, reads=read_list)
+
+    if output:
+        estimator.save_report(result, Path(output))
+        click.echo(f"  Report saved: {output}")
+    else:
+        click.echo(_json.dumps(result.to_dict(), indent=2))
+
+    click.echo(f"\n✓ Assembly QV: Q{result.global_combined_qv:.1f}  "
+               f"N50: {result.n50:,} bp  Contigs: {result.num_contigs}")
+
+
+@main.command('polish')
+@click.option('--assembly', '-a', required=True, type=click.Path(exists=True),
+              help='Assembly FASTA to polish')
+@click.option('--reads', '-r', required=True, type=click.Path(exists=True),
+              help='Read file for polishing (FASTA/FASTQ)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output polished assembly FASTA')
+@click.option('--rounds', type=int, default=2,
+              help='Maximum polishing rounds (default: 2)')
+@click.option('--k', '-k', type=int, default=21,
+              help='K-mer size for read anchoring (default: 21)')
+@click.option('--min-coverage', type=int, default=3,
+              help='Minimum pileup depth for consensus (default: 3)')
+def polish_assembly(assembly, reads, output, rounds, k, min_coverage):
+    """
+    Iteratively polish an assembly using read consensus.
+
+    Maps reads to contigs via k-mer anchors, builds per-position pileup,
+    and calls quality-weighted consensus. Repeats for multiple rounds
+    with QV-guided convergence detection.
+
+    Examples:\b
+        strandweaver polish -a draft.fa -r reads.fastq -o polished.fa
+
+        strandweaver polish -a draft.fa -r reads.fq -o polished.fa --rounds 3
+    """
+    from .io_utils import read_fasta, read_fastq, write_fasta
+    from .assembly_utils.iterative_polisher import IterativePolisher
+
+    click.echo(f"Polishing assembly: {assembly}")
+    contigs = list(read_fasta(assembly))
+    click.echo(f"  Loaded {len(contigs)} contigs")
+
+    reads_path = Path(reads)
+    click.echo(f"  Loading reads: {reads}")
+    if reads_path.suffix in ('.fq', '.fastq', '.fq.gz', '.fastq.gz'):
+        read_list = list(read_fastq(reads_path))
+    else:
+        read_list = list(read_fasta(reads_path))
+    click.echo(f"  Loaded {len(read_list)} reads")
+
+    polisher = IterativePolisher(
+        max_rounds=rounds, k=k, min_coverage=min_coverage,
+    )
+    polished, summary = polisher.polish(contigs, read_list)
+
+    write_fasta(polished, Path(output))
+
+    click.echo(f"\n✓ Polishing complete")
+    click.echo(f"  Rounds: {summary.total_rounds}")
+    click.echo(f"  Bases corrected: {summary.total_bases_corrected:,}")
+    click.echo(f"  QV: {summary.initial_qv:.1f} → {summary.final_qv:.1f} "
+               f"(+{summary.qv_improvement:.2f})")
+    click.echo(f"  Converged: {summary.converged}")
+    click.echo(f"  Output: {output}")
+
+
+@main.command('gap-fill')
+@click.option('--assembly', '-a', required=True, type=click.Path(exists=True),
+              help='Assembly FASTA with N-gaps')
+@click.option('--reads', '-r', required=True, type=click.Path(exists=True),
+              help='Read file for gap filling (FASTA/FASTQ)')
+@click.option('--output', '-o', required=True, type=click.Path(),
+              help='Output gap-filled assembly FASTA')
+@click.option('--max-gap-size', type=int, default=10000,
+              help='Maximum gap size to attempt filling (default: 10000)')
+@click.option('--k', '-k', type=int, default=21,
+              help='K-mer size for flank anchoring (default: 21)')
+@click.option('--min-spanning', type=int, default=3,
+              help='Minimum spanning reads required per gap (default: 3)')
+def gap_fill(assembly, reads, output, max_gap_size, k, min_spanning):
+    """
+    Fill N-gaps in an assembly using spanning reads.
+
+    Detects runs of N characters, finds reads that anchor on both flanks,
+    builds a consensus for the bridging region, and replaces the gap.
+
+    Examples:\b
+        strandweaver gap-fill -a scaffolds.fa -r reads.fastq -o filled.fa
+
+        strandweaver gap-fill -a scaffolds.fa -r reads.fq -o filled.fa --max-gap-size 5000
+    """
+    from .io_utils import read_fasta, read_fastq, write_fasta
+    from .assembly_utils.gap_filler import GapFiller
+
+    click.echo(f"Gap-filling assembly: {assembly}")
+    contigs = list(read_fasta(assembly))
+    click.echo(f"  Loaded {len(contigs)} contigs")
+
+    reads_path = Path(reads)
+    click.echo(f"  Loading reads: {reads}")
+    if reads_path.suffix in ('.fq', '.fastq', '.fq.gz', '.fastq.gz'):
+        read_list = list(read_fastq(reads_path))
+    else:
+        read_list = list(read_fasta(reads_path))
+    click.echo(f"  Loaded {len(read_list)} reads")
+
+    filler = GapFiller(
+        max_gap_size=max_gap_size, k=k, min_spanning_reads=min_spanning,
+    )
+    filled, summary = filler.fill(contigs, read_list)
+
+    write_fasta(filled, Path(output))
+
+    click.echo(f"\n✓ Gap filling complete")
+    click.echo(f"  Gaps found: {summary.total_gaps}")
+    click.echo(f"  Gaps filled: {summary.gaps_filled}")
+    click.echo(f"  Gaps unfilled: {summary.gaps_unfilled}")
+    click.echo(f"  Bases filled: {summary.bases_filled:,} N → {summary.bases_inserted:,} bp")
+    if summary.mean_fill_confidence > 0:
+        click.echo(f"  Mean confidence: {summary.mean_fill_confidence:.3f}")
+    click.echo(f"  Output: {output}")
 
 
 # ============================================================================
