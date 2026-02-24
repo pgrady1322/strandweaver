@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Core I/O — read data structures, FASTQ/FASTA operations, and ReadCollection.
+Core I/O — FASTQ/FASTA/BAM reading and sequence handling.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-User Training Configuration — dataclasses for training data generation parameters.
+Training configuration dataclasses and defaults.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

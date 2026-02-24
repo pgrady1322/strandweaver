@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-StrandTether — Hi-C contact matrix integration engine for haplotype phasing,
-edge support, path scoring, join detection, and orientation validation.
+StrandTether — ultra-long read anchoring and scaffold bridging.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

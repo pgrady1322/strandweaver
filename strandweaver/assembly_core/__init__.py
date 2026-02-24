@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Assembly Core module — graph construction, path finding, and scaffolding.
+Assembly core subpackage — graph engines and ML modules.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

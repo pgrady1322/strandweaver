@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Iterative Polisher and Gap Filler unit tests.
+Tests for iterative polisher and gap filler.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -367,3 +367,6 @@ class TestGapFillerInit:
         f = GapFiller(max_gap_size=5000, k=31, min_spanning_reads=5)
         assert f.max_gap_size == 5000
         assert f.min_spanning_reads == 5
+
+# StrandWeaver v0.3.0
+# Any usage is subject to this software's license.

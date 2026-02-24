@@ -3,9 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Assembly Utilities — graph cleanup, misassembly detection, chromosome
-classification, gene annotation, Hi-C graph alignment, QV estimation,
-iterative polishing, and gap filling.
+Assembly utilities subpackage — polishing, QV, classification.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

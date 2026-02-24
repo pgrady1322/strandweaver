@@ -1,32 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver — K-Weaver Training Data Generator
+StrandWeaver v0.3.0
 
-Generates training CSVs for the 4 K-Weaver XGBoost regressors by:
-  1. Synthesising diverse diploid genomes (varying size, GC, repeat density)
-  2. Simulating reads (HiFi, ONT, Illumina) per genome
-  3. Extracting the 19-dimensional ReadFeatures vector for each read set
-  4. Running assembly at a grid of k-mer values
-  5. Scoring each assembly against the known reference
-  6. Recording the best-performing k for each stage
-  7. Exporting a single CSV: 19 features + 4 targets
-
-Designed for Colab (free tier is fine).
-Run time: ~15-40 min on 50 genomes (500 Kb – 5 Mb) with 6 k-values.
-
-k-Sweep uses a fast k-mer spectrum proxy (~0.2 s per k) instead of
-full DBG construction (~45 s per k), giving ~200× speedup.
-
-Usage:
-    python scripts/generate_kweaver_training_data.py \\
-        --output training_output/kweaver \\
-        --num-genomes 200 \\
-        --max-genome-size 20000000 \\
-        --threads 8
+KWeaver training data generator.
 
 Author: StrandWeaver Development Team
-License: Dual License (Academic/Commercial)
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations
@@ -1219,5 +1200,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-# StrandWeaver v0.3.0-dev
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

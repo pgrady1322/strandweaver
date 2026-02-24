@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.3.0-dev
+StrandWeaver v0.3.0
 
-Train-models unit tests — MODEL_SPECS structure, ModelTrainingConfig defaults,
-CSV loading/writing, XGBoost parameter resolution, and resampling functions.
-
-Tests that require numpy/sklearn/xgboost are skipped gracefully if those
-packages are not installed.
+Tests for model training pipeline.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
-License: Dual License (Academic/Commercial)
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import csv
@@ -362,3 +358,6 @@ class TestComputeSampleWeights:
         y = np.array([0] * 10000 + [1] * 1)
         w = _compute_sample_weights(y, max_weight=50.0)
         assert w.max() <= 50.0
+
+# StrandWeaver v0.3.0
+# Any usage is subject to this software's license.

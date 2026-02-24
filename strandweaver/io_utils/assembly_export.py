@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Assembly Export — GFA graph export, coverage CSV, assembly FASTA,
-statistics JSON, and scaffold path TSV.
+Assembly export — FASTA, GFA, AGP output generation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -820,4 +819,3 @@ def export_paths_tsv(
 
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
-

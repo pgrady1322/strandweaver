@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Configuration schema — all parameters with defaults and validation.
+Configuration schema definitions and constraints.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

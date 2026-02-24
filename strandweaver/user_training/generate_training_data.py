@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-CLI for user-configurable training data generation — synthetic genomes and
-simulated reads for training or retraining StrandWeaver ML models.
+Training data generation from user assemblies.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.3.0-dev
+StrandWeaver v0.3.0
 
-Graph training data unit tests — sequence utilities, dataclasses, overlap
-detection, noise injection, graph construction, and CSV/GFA export.
-
-All tests use only the Python standard library and pytest (no numpy/sklearn).
+Tests for graph training data generation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
-License: Dual License (Academic/Commercial)
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import csv
@@ -596,3 +593,6 @@ class TestExportGFA:
         graph = _make_simple_graph()
         path = export_gfa(graph, tmp_path, genome_idx=3)
         assert path.name == "overlap_graph_g0003.gfa"
+
+# StrandWeaver v0.3.0
+# Any usage is subject to this software's license.

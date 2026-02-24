@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.3.0-dev
+StrandWeaver v0.3.0
 
-EdgeWarden unit tests.
+Tests for EdgeWarden ML edge scoring.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -113,5 +113,5 @@ class TestEdgeWardenScoreManager:
         # Weights differ, so weighted scores should differ
         assert hifi_score.weighted_score != ancient_score.weighted_score
 
-# StrandWeaver v0.3.0-dev
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

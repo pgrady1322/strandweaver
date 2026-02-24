@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Master Pipeline Orchestrator — coordinates the complete assembly pipeline
-from preprocessing through assembly to finishing.
+Pipeline orchestration and step management.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Graph Cleanup — multi-signal edge pruning, bubble resolution, and
-phasing-aware graph partitioning into haplotypes A/B.
+Graph cleanup — chimera detection and graph simplification.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

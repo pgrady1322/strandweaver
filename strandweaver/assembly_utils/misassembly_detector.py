@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Misassembly Detection — 12-method multi-signal detector with confidence scoring,
-breakpoint characterization, and correction strategy recommendations.
+Misassembly detector — breakpoint identification using multi-signal evidence.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

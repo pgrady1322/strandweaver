@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Chromosome Classifier — three-tier system for identifying microchromosomes
-and small chromosomal segments (pre-filter, gene content, advanced features).
+Chromosome classifier — autosome, sex, and organelle assignment.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

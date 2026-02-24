@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Unified GPU Acceleration — backend management (CUDA/MPS/CPU), k-mer ops,
-Hi-C contact matrices, spectral clustering, path finding, and UL mapping.
+GPU/CPU hardware detection and acceleration management.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

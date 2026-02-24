@@ -3,15 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Iterative Polisher — consensus-based contig polishing with QV-guided
-convergence detection.
-
-Each polishing round:
-  1. Maps reads to contigs via k-mer anchors.
-  2. Builds per-position pileup from overlapping reads.
-  3. Calls consensus at every position (majority vote weighted by quality).
-  4. Measures QV improvement via the QV estimator.
-  5. Stops early if QV converges (< 0.1 QV improvement between rounds).
+Iterative polisher — multi-round consensus sequence correction.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

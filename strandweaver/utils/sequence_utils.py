@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Sequence utility functions — k-mer extraction, GC content, reverse complement,
-and homopolymer counting.
+DNA sequence manipulation utilities.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

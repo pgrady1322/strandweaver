@@ -3,16 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Gap Filler — detects N-gap runs in contigs and attempts to fill them
-using spanning reads via local consensus.
-
-Algorithm:
-  1. Scan each contig for runs of N characters (gaps).
-  2. For each gap, collect reads whose k-mer anchors span both flanks.
-  3. Extract the read sub-sequences that bridge the gap region.
-  4. Build a quality-weighted consensus of the bridging segments.
-  5. Replace N-runs with consensus if coverage and confidence thresholds
-     are met; otherwise leave the gap unchanged.
+Gap filler — targeted closure of assembly gaps using long reads.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

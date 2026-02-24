@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.2.0
+StrandWeaver v0.3.0
 
-Synthetic Data Generator — pure-Python genome simulation and read generation
-for training StrandWeaver ML models.
-
-Produces diploid genomes with controlled repeats, SVs, SNPs, and indels,
-then simulates sequencing reads for Illumina, PacBio HiFi, ONT, Ultra-long,
-Hi-C, and ancient DNA technologies.
+Synthetic genome and read data generator for ML training.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -781,6 +776,5 @@ def write_paired_fastq(
     logger.info("Wrote %s read pairs to %s / %s",
                 f"{len(pairs):,}", r1_path, r2_path)
 
-
-# StrandWeaver v0.2.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
-Pytest configuration and shared fixtures.
+Pytest fixtures and shared test configuration.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -58,5 +58,5 @@ def diploid_sequences():
     hap_b = "ATCGATCGTTCGATCG"  # SNP at position 9 (A→T)
     return {"haplotype_a": hap_a, "haplotype_b": hap_b}
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Checkpoint management for resumable pipeline execution.
+Pipeline checkpoint save/restore utilities.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

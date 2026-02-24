@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Command-line interface — main CLI entry point and all subcommands.
+Click CLI — main entrypoint for all StrandWeaver commands.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

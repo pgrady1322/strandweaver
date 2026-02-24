@@ -3,9 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-ThreadCompass — ultra-long read integration and routing engine.
-Maps UL reads to the assembly graph, detects and scores joins, and
-produces normalized confidence scores.
+ThreadCompass — multi-signal contig orientation and ordering.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Configuration parser — YAML config loading, merging, and validation.
+YAML configuration parser with validation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

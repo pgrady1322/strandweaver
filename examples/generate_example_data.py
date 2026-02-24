@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
-Generate simplified example data — synthetic 5 Mb genome with multi-technology reads
-(HiFi, ONT, Illumina, Hi-C) for testing.
+Generate example data for documentation and tutorials.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -402,5 +401,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

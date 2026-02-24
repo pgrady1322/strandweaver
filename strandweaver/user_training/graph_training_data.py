@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.2.0
+StrandWeaver v0.3.0
 
-Graph Training Data Generator — builds synthetic overlap graphs from simulated
-reads and computes feature vectors and ground-truth labels for all ML models.
-
-Schema v2.0: Adds metadata columns, edge provenance, graph topology features,
-sequence complexity features, coverage distribution features, realistic
-placeholder replacement, improved label logic, and schema versioning.
+Graph-format training data for GNN models.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -1721,5 +1716,5 @@ def generate_graph_training_data(
 
     return summary
 
-# StrandWeaver v0.2.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

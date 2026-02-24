@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-ErrorSmith — unified technology-specific error correction for ONT, PacBio,
-Illumina, and Ancient DNA with adapter trimming and visualization.
+ErrorSmith — ML-based read error correction.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

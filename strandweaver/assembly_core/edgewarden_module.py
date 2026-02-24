@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-EdgeWarden — overlap classification and quality assessment with ML models,
-confidence scoring, and PathWeaver integration.
+EdgeWarden — ML-driven edge scoring and validation for assembly graphs.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

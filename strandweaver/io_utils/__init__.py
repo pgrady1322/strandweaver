@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-I/O Module — core read structures, FASTQ/FASTA I/O, graph/contig export,
-and user corrections.
+I/O utilities subpackage — file reading and writing.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

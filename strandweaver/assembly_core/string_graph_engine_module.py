@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-String Graph Engine — UL ONT read overlay on the DBG for bridging nodes
-and increasing contiguity with k-mer anchoring and ML scoring.
+String Graph Engine — overlap graph construction for long reads.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -743,4 +742,3 @@ class LongReadOverlay:
 
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
-

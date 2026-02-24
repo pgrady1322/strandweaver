@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Read Classification — technology detection, read type enums, metadata structures,
-and Nanopore-specific LongBow integration.
+Read classification — technology and quality tier assignment.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

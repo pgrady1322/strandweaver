@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
-UL Router / ThreadCompass unit tests.
+Tests for ultra-long read routing.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -209,6 +209,5 @@ class TestThreadCompassIntegration:
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
-

@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Configuration management.
+Configuration subpackage — schema and parser.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

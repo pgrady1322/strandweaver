@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.1.0
+StrandWeaver v0.3.0
 
-Generate 1 Mb test dataset — synthetic genome with HiFi reads for testing
-graph assembly and compaction.
+Generate 1 Mb synthetic test genome and reads.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -220,5 +219,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Hi-C Graph Aligner — parse and align Hi-C reads to assembly graph nodes
-via k-mer matching or pre-aligned BAM/SAM.
+Hi-C graph aligner — contact signal integration for scaffolding.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Config-Based Training Workflow — fine-grained training data generation
-from user-specified genome and read parameters.
+Config-driven training workflow orchestrator.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

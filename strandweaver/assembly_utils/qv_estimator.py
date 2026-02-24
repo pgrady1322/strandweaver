@@ -3,16 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-QV Estimation — Merqury-style k-mer completeness quality value (QV) scoring,
-per-contig error-rate QV, and assembly quality reporting.
-
-Provides three estimation modes:
-  1. K-mer completeness QV: Counts k-mers in reads vs assembly to estimate
-     consensus accuracy (Merqury approach: Rhie et al., 2020).
-  2. Per-contig QV from ErrorSmith error predictions: Aggregates per-base
-     error probabilities into per-contig and whole-assembly QV scores.
-  3. Combined report: JSON output with global QV, per-contig QV, and
-     k-mer completeness metrics.
+QV estimator — base-level quality value estimation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

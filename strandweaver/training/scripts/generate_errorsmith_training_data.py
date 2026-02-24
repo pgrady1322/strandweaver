@@ -1,47 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver — ErrorSmith Training Data Generator (CHM13-based)
+StrandWeaver v0.3.0
 
-Generates training CSVs for the ErrorSmith XGBoost error classifier by
-processing real sequencing data aligned to the T2T-CHM13 reference:
-
-  1. Downloads (or locates) public HiFi, ONT, and Illumina BAMs aligned
-     to CHM13v2.0
-  2. Parses CIGAR strings to identify per-base error positions and types
-  3. Extracts local features per base: k-mer context, quality, GC content,
-     homopolymer length, position in read, technology
-  4. Labels each base: correct / substitution / insertion / deletion /
-     homopolymer_error
-  5. Exports balanced training CSV (subsample correct class to avoid >99%
-     majority)
-
-Designed for Colab with GPU instances.
-Run time: ~1-3 h depending on subsample size.
-
-Data sources (public):
-  - HiFi:     SRR11292120 + SRR11292121 (T2T CHM13 PacBio HiFi, 2 parts)
-  - ONT UL:   SRR23365080 (T2T CHM13 ONT Guppy 6.3.7 HAC, via S3)
-  - Illumina: SRR1997411 (CHM13 Illumina PCR-free)
-
-Usage:
-    # Full run with automatic download
-    python scripts/generate_errorsmith_training_data.py \\
-        --output training_output/errorsmith \\
-        --reference /path/to/chm13v2.0.fa \\
-        --download \\
-        --subsample 5000000
-
-    # Local BAMs already downloaded
-    python scripts/generate_errorsmith_training_data.py \\
-        --output training_output/errorsmith \\
-        --reference /path/to/chm13v2.0.fa \\
-        --hifi-bam chm13_hifi.sorted.bam \\
-        --ont-bam  chm13_ont.sorted.bam \\
-        --illumina-bam chm13_illumina.sorted.bam
+ErrorSmith training data generator.
 
 Author: StrandWeaver Development Team
-License: Dual License (Academic/Commercial)
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 from __future__ import annotations
@@ -1104,5 +1070,5 @@ def main():
 if __name__ == '__main__':
     main()
 
-# StrandWeaver v0.3.0-dev
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

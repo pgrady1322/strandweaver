@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Preprocessing Module — error correction, profiling, read classification,
-and adaptive k-mer selection.
+Preprocessing subpackage — error correction and k-mer optimization.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

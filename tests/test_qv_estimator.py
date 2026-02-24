@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-QV Estimator unit tests.
+Tests for QV estimation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -307,3 +307,6 @@ class TestConvenienceFunction:
         result = estimate_assembly_qv(contigs, k=11, output_path=out)
         assert out.exists()
         assert result.num_contigs == 1
+
+# StrandWeaver v0.3.0
+# Any usage is subject to this software's license.

@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Read Error Profiling — k-mer based error analysis for technology-specific
-correction without a reference genome.
+Read error profiling — per-read error rate estimation.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

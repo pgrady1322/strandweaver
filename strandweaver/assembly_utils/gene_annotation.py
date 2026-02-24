@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Gene Annotation Utilities — BLAST, Augustus, and BUSCO wrappers for
-chromosome classification support.
+Gene annotation — BUSCO and gene model integration for QC.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

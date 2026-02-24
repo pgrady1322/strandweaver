@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-SVScribe — ML-driven structural variant detection during graph traversal.
-Supports deletions, insertions, inversions, duplications, and translocations.
+SVScribe — structural variant detection and annotation from assembly graphs.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

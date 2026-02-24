@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-StrandWeaver v0.3.0-dev
+StrandWeaver v0.3.0
 
-Training configuration unit tests — validates dataclass defaults, boundary
-checks, enum semantics, auto-fill logic, and to_dict / from_dict roundtrips.
+Tests for training configuration.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
-License: Dual License (Academic/Commercial)
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import copy
@@ -392,3 +391,6 @@ class TestUserTrainingConfig:
         assert rg.sv_types == ["deletion", "inversion"]
         assert rg.centromere_count == 3
         assert rg.random_seed == 12345
+
+# StrandWeaver v0.3.0
+# Any usage is subject to this software's license.

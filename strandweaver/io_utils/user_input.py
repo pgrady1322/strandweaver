@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-User Input — import BandageNG path corrections, manual breaks/joins,
-and exclusion lists.
+User input validation and interactive prompts.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
@@ -972,4 +971,3 @@ def apply_manual_edits(
 
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
-

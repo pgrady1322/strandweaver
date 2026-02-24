@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Utilities — pipeline orchestration, checkpoints, hardware management,
-and GPU acceleration.
+Utilities subpackage — hardware, checkpoints, sequences.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

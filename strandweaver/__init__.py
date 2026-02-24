@@ -3,7 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-AI-Powered Multi-Technology Genome Assembler.
+Package initialization and version metadata.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

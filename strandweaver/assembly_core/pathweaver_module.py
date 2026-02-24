@@ -3,9 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-PathWeaver — GNN-first path finding engine with classical algorithm fallback
-for assembly graph traversal. Integrates EdgeWarden, Hi-C, UL reads, and
-misassembly detection.
+PathWeaver — optimal path selection through assembly graphs.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

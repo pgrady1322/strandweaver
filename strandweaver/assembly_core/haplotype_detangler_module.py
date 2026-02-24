@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Diploid Disentanglement — separates assembly graphs into haplotype paths
-using Hi-C, GNN, AI overlap, regional k-mer, and UL coherence signals.
+Haplotype Detangler — Hi-C and UL-read phasing-aware haplotype resolution.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

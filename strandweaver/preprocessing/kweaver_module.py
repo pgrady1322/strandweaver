@@ -3,8 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-K-Weaver — AI-powered adaptive k-mer selector. Dynamically selects optimal
-k-mer sizes for each assembly stage based on read characteristics.
+KWeaver — ML-driven k-mer size optimization.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

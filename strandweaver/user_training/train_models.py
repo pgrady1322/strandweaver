@@ -3,9 +3,7 @@
 """
 StrandWeaver v0.3.0
 
-Training Runner — trains XGBoost models from CSV data, evaluates with
-k-fold cross-validation, and saves weights.  Supports 10 model types:
-5 graph models + 4 K-Weaver regressors + 1 ErrorSmith classifier.
+Model training pipeline — ErrorSmith + KWeaver.
 
 Author: StrandWeaver Development Team
 Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.

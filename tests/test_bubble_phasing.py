@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Tests for G2 bubble-aware diploid phasing and ploidy flag.
+StrandWeaver v0.3.0
 
-Covers:
-  - Ploidy enum and config propagation
-  - Haploid fast-path (ploidy=1 skips phasing)
-  - Bubble detection in assembly graphs
-  - Per-bubble Hi-C contact binning
-  - Phase chaining across linked bubbles
-  - Fallback to spectral clustering when no bubbles
-  - StrandTether ploidy-aware phasing
-  - HiCGraphAligner → bubble phasing integration
+Tests for phasing-aware bubble resolution.
+
+Author: StrandWeaver Development Team
+Anthropic Claude Opus 4.6 used for code formatting and cleanup assistance.
+License: Dual License (Academic/Commercial) - See LICENSE_ACADEMIC.md and LICENSE_COMMERCIAL.md
 """
 
 import math
@@ -480,6 +476,5 @@ class TestPloidyExport:
         from strandweaver.assembly_core import Ploidy as PloidyImport
         assert PloidyImport.DIPLOID == 2
 
-
-# StrandWeaver v0.1.0
+# StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
