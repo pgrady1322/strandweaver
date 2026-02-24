@@ -822,7 +822,7 @@ class PipelineOrchestrator:
         illumina_reads = []
         if illumina_files:
             for illumina_file in illumina_files:
-                illumina_reads.extend(self._read_file_streaming(Path(illumina_file)))
+                illumina_reads.extend(self._read_file_streaming(Path(illumina_file), technology='illumina'))
         
         olc_long_reads = self._run_olc(illumina_reads) if illumina_reads else []
         result.stats['olc_contigs'] = len(olc_long_reads)
@@ -865,7 +865,7 @@ class PipelineOrchestrator:
         if ul_read_files:
             self.logger.info("Step 5: Loading UL reads for string graph overlay")
             for ul_file in ul_read_files:
-                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+                ul_reads.extend(self._read_file_streaming(Path(ul_file), technology='ont_ultralong'))
             kmer_pred = self.state.get('kmer_prediction')
             if kmer_pred and not kmer_pred.ul_applicable:
                 self.logger.warning(
@@ -873,7 +873,7 @@ class PipelineOrchestrator:
                     f"string graph overlay will proceed with low confidence. "
                     f"Results may contain mis-joins."
                 )
-        
+
         if ul_reads:
             self.logger.info("Step 5: Building string graph with UL overlay")
             ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
@@ -1112,7 +1112,7 @@ class PipelineOrchestrator:
         if hifi_read_files:
             self.logger.info(f"Step 1: Loading HiFi reads from {len(hifi_read_files)} files")
             for hifi_file in hifi_read_files:
-                hifi_reads.extend(self._read_file_streaming(Path(hifi_file)))
+                hifi_reads.extend(self._read_file_streaming(Path(hifi_file), technology='pacbio'))
         
         self.logger.info(f"Step 1: Building DBG from {len(hifi_reads)} HiFi reads")
         # Use K-Weaver prediction for optimal k-mer size
@@ -1151,7 +1151,7 @@ class PipelineOrchestrator:
         if ul_read_files:
             self.logger.info("Step 4: Loading UL reads for string graph overlay")
             for ul_file in ul_read_files:
-                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+                ul_reads.extend(self._read_file_streaming(Path(ul_file), technology='ont_ultralong'))
             kmer_pred = self.state.get('kmer_prediction')
             if kmer_pred and not kmer_pred.ul_applicable:
                 self.logger.warning(
@@ -1159,7 +1159,7 @@ class PipelineOrchestrator:
                     f"string graph overlay will proceed with low confidence. "
                     f"Results may contain mis-joins."
                 )
-        
+
         if ul_reads:
             self.logger.info("Step 4: Building string graph with UL overlay")
             ul_anchors = self._generate_ul_anchors(result.dbg, ul_reads)
@@ -1379,7 +1379,7 @@ class PipelineOrchestrator:
         if ont_read_files:
             self.logger.info(f"Step 1: Loading ONT reads from {len(ont_read_files)} files")
             for ont_file in ont_read_files:
-                ont_reads.extend(self._read_file_streaming(Path(ont_file)))
+                ont_reads.extend(self._read_file_streaming(Path(ont_file), technology='ont'))
         
         self.logger.info(f"Step 1: Building DBG from {len(ont_reads)} ONT reads")
         # Use K-Weaver prediction for optimal k-mer size
@@ -1418,7 +1418,7 @@ class PipelineOrchestrator:
         if ul_read_files:
             self.logger.info("Step 4: Loading UL reads for string graph overlay (essential for ONT)")
             for ul_file in ul_read_files:
-                ul_reads.extend(self._read_file_streaming(Path(ul_file)))
+                ul_reads.extend(self._read_file_streaming(Path(ul_file), technology='ont_ultralong'))
             kmer_pred = self.state.get('kmer_prediction')
             if kmer_pred and not kmer_pred.ul_applicable:
                 self.logger.warning(
@@ -3159,8 +3159,20 @@ class PipelineOrchestrator:
         # If last step was completed, start from beginning
         return self.steps[0]
     
-    def _read_file_streaming(self, reads_path: Path):
-        """Stream reads from file without loading all into memory."""
+    def _read_file_streaming(self, reads_path: Path, technology: str = None):
+        """Stream reads from file without loading all into memory.
+        
+        If a subsample fraction is configured for this technology,
+        randomly keeps only that fraction of reads.
+        """
+        import random as _random
+        
+        # Determine subsample fraction for this technology
+        subsample_frac = None
+        subsample_cfg = self.config.get('runtime', {}).get('subsample', {})
+        if technology and subsample_cfg:
+            subsample_frac = subsample_cfg.get(technology)
+        
         # Strip .gz/.gzip suffix to inspect the real format extension
         # (read_fastq and read_fasta handle gzip decompression natively)
         effective_path = reads_path
@@ -3168,15 +3180,23 @@ class PipelineOrchestrator:
             effective_path = Path(reads_path.stem)  # e.g. reads.fastq.gz → reads.fastq
 
         if effective_path.suffix in ['.fq', '.fastq']:
-            yield from read_fastq(reads_path)
+            source = read_fastq(reads_path)
         elif effective_path.suffix in ['.fa', '.fasta']:
-            yield from read_fasta(reads_path)
+            source = read_fasta(reads_path)
         else:
             # Try FASTQ first, fall back to FASTA
             try:
-                yield from read_fastq(reads_path)
+                source = read_fastq(reads_path)
             except Exception:
-                yield from read_fasta(reads_path)
+                source = read_fasta(reads_path)
+        
+        # Apply subsampling if configured
+        if subsample_frac is not None and subsample_frac < 1.0:
+            for read in source:
+                if _random.random() < subsample_frac:
+                    yield read
+        else:
+            yield from source
     
     def _write_read_to_file(self, read: SeqRead, file_handle):
         """Write a single read to an open file handle (FASTQ format)."""

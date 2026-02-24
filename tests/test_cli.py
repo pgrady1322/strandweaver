@@ -255,5 +255,75 @@ class TestGapFillCommand:
             assert result.exit_code == 0
 
 
+# ---------------------------------------------------------------------------
+# nf-merge removal and subsample flags
+# ---------------------------------------------------------------------------
+class TestNfMergeRemoved:
+    """Verify nf-merge command no longer exists."""
+
+    def test_nf_merge_removed(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ['nf-merge', '--help'])
+        assert result.exit_code != 0
+
+
+class TestSubsampleFlags:
+    """Tests for --subsample-* flags on the pipeline command."""
+
+    def test_subsample_flags_in_help(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ['pipeline', '--help'])
+        assert result.exit_code == 0
+        assert '--subsample-hifi' in result.output
+        assert '--subsample-ont' in result.output
+        assert '--subsample-ont-ul' in result.output
+        assert '--subsample-illumina' in result.output
+        assert '--subsample-ancient' in result.output
+
+    def test_subsample_invalid_fraction(self):
+        """Subsample > 1.0 should fail."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--hifi-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--subsample-hifi', '1.5',
+                '--dry-run',
+            ])
+            assert result.exit_code != 0
+            assert 'must be between' in result.output or result.exit_code != 0
+
+    def test_subsample_valid_dryrun(self):
+        """Valid subsample fraction with --dry-run should succeed."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--hifi-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--subsample-hifi', '0.5',
+                '--dry-run',
+            ])
+            assert result.exit_code == 0
+            assert 'DRY RUN' in result.output
+
+    def test_subsample_zero_invalid(self):
+        """Subsample 0.0 should fail (no reads would remain)."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--subsample-ont', '0.0',
+                '--dry-run',
+            ])
+            assert result.exit_code != 0
+
+
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

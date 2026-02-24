@@ -876,8 +876,8 @@ Planned features and known integration gaps for upcoming releases.
 | 2 | **PacBio Flowcell / Chemistry Metadata** | Almost Complete | `--pacbio-platform`, `--pacbio-chemistry` flags for the `profile` command |
 | 3 | **Native ONT Metadata Detection** | Almost Complete | `--ont-detect` flag is wired but calls a placeholder. Replace with POD5 / FAST5 / Dorado header parsing |
 | 4 | **Standalone `assemble` / `nf-build-contigs`** | Stub only | Wire to the same assembly engine used by the `pipeline` command |
-| 5 | **Multi-Technology Read Merging (`nf-merge`)** | Stub only | Standalone merge utility for users working with external assemblers |
-| 6 | **QV Score Optimization & Gap Filling** | Planned | `_step_finish()` has stubs; partial T2T-Polish integration exists |
+| 5 | **Technology-Specific Read Subsampling** | ✅ Complete | `--subsample-hifi`, `--subsample-ont`, `--subsample-ont-ul`, `--subsample-illumina`, `--subsample-ancient` on `pipeline` command. `nf-merge` removed (redundant). |
+| 6 | **QV Score Optimization & Gap Filling** | ✅ Complete | `qv`, `polish`, `gap-fill` CLI commands + `QVEstimator`, `IterativePolisher`, `GapFiller` modules, fully wired into `_step_finish()` |
 | 7 | **Validate — Reference Comparison** | Planned | `--reference` flag accepted but comparison logic not implemented |
 | 8 | **BUSCO Integration** | Planned | `--busco-lineage` present on `validate` but not wired to BUSCO |
 | 9 | **Decontamination Screening** | Planned | `--decontaminate` present on `pipeline` but no screening step implemented |

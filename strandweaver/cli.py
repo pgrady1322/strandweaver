@@ -39,7 +39,7 @@ class SectionedGroup(click.Group):
         'Nextflow Sub-Commands': [
             'nf-build-contigs', 'nf-build-graph', 'nf-checkpoints',
             'nf-detect-svs', 'nf-edgewarden-filter', 'nf-export-assembly',
-            'nf-merge', 'nf-pathweaver-iter-general',
+            'nf-pathweaver-iter-general',
             'nf-pathweaver-iter-strict', 'nf-score-edges',
             'nf-strandtether-phase', 'nf-threadcompass-aggregate',
         ],
@@ -377,6 +377,19 @@ def config_show(config_file, format):
 @click.option('--sample-size-hic', type=int, default=None,
               help='Number of read pairs to sample for Hi-C coverage')
 # ============================================================================
+# Technology-Specific Read Subsampling
+# ============================================================================
+@click.option('--subsample-hifi', type=float, default=None,
+              help='Subsample fraction for PacBio HiFi reads (0.0-1.0, e.g. 0.5 keeps 50%%)')
+@click.option('--subsample-ont', type=float, default=None,
+              help='Subsample fraction for ONT reads (0.0-1.0, e.g. 0.5 keeps 50%%)')
+@click.option('--subsample-ont-ul', type=float, default=None,
+              help='Subsample fraction for ONT ultra-long reads (0.0-1.0)')
+@click.option('--subsample-illumina', type=float, default=None,
+              help='Subsample fraction for Illumina reads (0.0-1.0)')
+@click.option('--subsample-ancient', type=float, default=None,
+              help='Subsample fraction for ancient DNA reads (0.0-1.0)')
+# ============================================================================
 # Output Options
 # ============================================================================
 @click.option('--output-format',
@@ -412,6 +425,8 @@ def pipeline(ctx,
              ploidy, edge_filter_mode, min_sv_size, export_intermediate_graphs,
              max_correction_iterations,
              sample_size_graph, sample_size_ul, sample_size_hic,
+             subsample_hifi, subsample_ont, subsample_ont_ul,
+             subsample_illumina, subsample_ancient,
              output_format, log_level,
              decontaminate):
     """
@@ -668,6 +683,26 @@ def pipeline(ctx,
         pipeline_config['profiling']['sample_size_hic'] = sample_size_hic
         if verbose:
             click.echo(f"ℹ️  Hi-C coverage sample size: {sample_size_hic:,} read pairs")
+    
+    # Technology-specific subsampling
+    subsample_map = {
+        'pacbio': subsample_hifi,
+        'ont': subsample_ont,
+        'ont_ultralong': subsample_ont_ul,
+        'illumina': subsample_illumina,
+        'ancient': subsample_ancient,
+    }
+    active_subsamples = {k: v for k, v in subsample_map.items() if v is not None}
+    
+    for tech_name, frac in active_subsamples.items():
+        if not (0.0 < frac <= 1.0):
+            click.echo(f"❌ Error: --subsample-{tech_name.replace('_', '-')} must be between 0.0 and 1.0 "
+                       f"(got {frac})", err=True)
+            ctx.exit(1)
+    
+    if active_subsamples and verbose:
+        for tech_name, frac in active_subsamples.items():
+            click.echo(f"ℹ️  Subsampling {tech_name}: {frac:.0%} of reads")
     
     # Memory limit
     if memory_limit is not None:
@@ -931,6 +966,7 @@ def pipeline(ctx,
         'verbose': verbose,
         'min_contig_length': min_contig_length,
         'illumina_paired_indices': illumina_paired_indices,  # (R1_idx, R2_idx) or None
+        'subsample': active_subsamples,  # {tech_name: fraction} e.g. {'ont': 0.5}
     }
     
     # Initialize and run orchestrator
@@ -1117,57 +1153,6 @@ def profile(input, technology, output, sample_size, min_quality, threads,
         traceback.print_exc()
         from sys import exit
         exit(1)
-
-
-@main.command('nf-merge')
-@click.option('--reads', '-r', 'reads_files', multiple=True, required=True,
-              type=click.Path(exists=True),
-              help='Input corrected reads files (specify multiple times)')
-@click.option('--technology', '-tech', 'technologies', multiple=True,
-              type=click.Choice(['illumina', 'ancient', 'ont', 'ont_ultralong', 'pacbio']),
-              help='Technology for each reads file (must match order)')
-@click.option('--output', '-o', required=True, type=click.Path(),
-              help='Output merged reads file (FASTQ)')
-@click.option('--weights', type=str,
-              help='Comma-separated coverage weights (e.g., "1.0,0.8,1.2")')
-def nf_merge(reads_files, technologies, output, weights):
-    """
-    Merge corrected reads from multiple technologies.
-    
-    Combines error-corrected reads from different sequencing platforms
-    into a unified dataset for assembly. Optionally applies technology-specific
-    weighting to balance coverage contributions.
-    
-    Examples:
-        # Merge two technologies with equal weight
-        strandweaver merge -r illumina.fq -r ont.fq \\
-            --technology illumina --technology ont -o merged.fq
-        
-        # Merge with custom weights (Illumina 100%, ONT 80%, HiFi 120%)
-        strandweaver merge -r illumina.fq -r ont.fq -r hifi.fq \\
-            --technology illumina --technology ont --technology pacbio \\
-            --weights "1.0,0.8,1.2" -o merged.fq
-    """
-    # Validate technology specifications
-    if technologies and len(technologies) != len(reads_files):
-        click.echo(f"❌ Error: Number of --technology flags ({len(technologies)}) must match "
-                   f"number of --reads files ({len(reads_files)})", err=True)
-        from sys import exit
-        exit(1)
-    
-    click.echo(f"Merging {len(reads_files)} input file(s):")
-    for i, reads in enumerate(reads_files, 1):
-        tech = technologies[i-1] if technologies else 'auto'
-        click.echo(f"  {i}. {reads} ({tech})")
-    
-    click.echo(f"Output: {output}")
-    
-    if weights:
-        click.echo(f"Weights: {weights}")
-    
-    click.echo("\n⚠️ Multi-technology read merging:")
-    click.echo("   This feature is planned for a future release")
-    click.echo("   Current workaround: Use standard UNIX cat or seqtk for simple merging")
 
 
 @main.command('nf-build-contigs')
