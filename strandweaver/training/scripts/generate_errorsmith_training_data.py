@@ -43,10 +43,40 @@ logger = logging.getLogger("strandweaver.errorsmith_training")
 #  CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════
 
+# ── Chemistry / flow-cell taxonomy ────────────────────────────────
+# 6 chemistry-specific categories (flow cell + machine + chemistry)
+CHEMISTRY_CODES = {
+    'pacbio_hifi_sequel2':  0,
+    'ont_lsk110_r941':      1,
+    'ont_ulk001_r941':      2,
+    'ont_lsk114_r1041':     3,
+    'ont_ulk114_r1041':     4,
+    'illumina_hiseq2500':   5,
+}
+
+CHEMISTRY_NAMES = {v: k for k, v in CHEMISTRY_CODES.items()}
+
+# Minimap2 presets per chemistry
+CHEMISTRY_PRESETS = {
+    'pacbio_hifi_sequel2':  'map-hifi',
+    'ont_lsk110_r941':      'map-ont',
+    'ont_ulk001_r941':      'map-ont',
+    'ont_lsk114_r1041':     'map-ont',
+    'ont_ulk114_r1041':     'map-ont',
+    'illumina_hiseq2500':   'sr',
+}
+
+# Legacy aliases for backward compat
+LEGACY_TECH_MAP = {
+    'hifi':     'pacbio_hifi_sequel2',
+    'ont':      'ont_ulk001_r941',
+    'illumina': 'illumina_hiseq2500',
+}
+
 # CHM13 public accessions (NCBI SRA)
 CHM13_ACCESSIONS = {
-    'hifi':     ['SRR11292120', 'SRR11292121'],  # PacBio HiFi, CHM13 (2 parts)
-    'illumina': ['SRR1997411'],                  # Illumina PCR-free, CHM13
+    'pacbio_hifi_sequel2': ['SRR11292120', 'SRR11292121'],
+    'illumina_hiseq2500':  ['SRR1997411'],
 }
 
 # ONT ultra-long reads — hosted on S3, not SRA
@@ -81,8 +111,8 @@ ERROR_FEATURES = [
     'trinucleotide_context',     # Encoded trinucleotide (64 categories → integer)
     'pentanucleotide_context',   # Encoded pentanucleotide (1024 categories → integer)
 
-    # Sequencing technology
-    'technology_encoded',        # 0=HiFi, 1=ONT, 2=Illumina
+    # Sequencing chemistry (flow cell / machine / chemistry)
+    'technology_encoded',        # See CHEMISTRY_CODES: 0=pacbio_hifi_sequel2, 1=ont_lsk110_r941, etc.
 
     # Reference context
     'ref_gc_window_50',          # GC content of ±50 bp reference window
@@ -392,7 +422,9 @@ def process_bam(
     import pysam
 
     rng = random.Random(seed)
-    tech_code = {'hifi': 0, 'ont': 1, 'illumina': 2}.get(technology, 3)
+    # Resolve legacy technology names → chemistry codes
+    resolved = LEGACY_TECH_MAP.get(technology, technology)
+    tech_code = CHEMISTRY_CODES.get(resolved, len(CHEMISTRY_CODES))
 
     bam = pysam.AlignmentFile(bam_path, 'rb')
     target_chroms = chroms or [c for c in bam.references if c in reference]
@@ -780,6 +812,7 @@ def download_reference(output_dir: Path) -> Path:
 def generate_errorsmith_training_data(
     output_dir: Path,
     reference_path: str,
+    bam_map: Optional[Dict[str, str]] = None,
     hifi_bam: Optional[str] = None,
     ont_bam: Optional[str] = None,
     illumina_bam: Optional[str] = None,
@@ -795,11 +828,14 @@ def generate_errorsmith_training_data(
     Args:
         output_dir: Output directory
         reference_path: Path to CHM13v2.0 FASTA
-        hifi_bam: Path to HiFi BAM (optional)
-        ont_bam: Path to ONT BAM (optional)
-        illumina_bam: Path to Illumina BAM (optional)
+        bam_map: Dict mapping chemistry names to BAM paths
+                 (e.g. {'pacbio_hifi_sequel2': '/path/to.bam', ...})
+                 Keys should match CHEMISTRY_CODES.
+        hifi_bam: (legacy) Path to HiFi BAM — mapped to pacbio_hifi_sequel2
+        ont_bam: (legacy) Path to ONT BAM — mapped to ont_ulk001_r941
+        illumina_bam: (legacy) Path to Illumina BAM — mapped to illumina_hiseq2500
         download: Auto-download SRA data if BAMs not provided
-        subsample: Max bases per technology
+        subsample: Max bases per chemistry
         chroms: Chromosomes to process (default: chr1-chr5 for speed)
         threads: Threads for alignment
         seed: Random seed
@@ -817,29 +853,35 @@ def generate_errorsmith_training_data(
     if chroms is None:
         chroms = [f'chr{i}' for i in range(1, 6)]
 
-    # Resolve BAMs
-    bam_map: Dict[str, str] = {}
+    # Build chemistry → BAM path mapping
+    resolved_bam_map: Dict[str, str] = {}
+    if bam_map:
+        resolved_bam_map.update(bam_map)
+
+    # Legacy single-BAM args are mapped to their chemistry equivalents
     if hifi_bam:
-        bam_map['hifi'] = hifi_bam
+        resolved_bam_map['pacbio_hifi_sequel2'] = hifi_bam
     if ont_bam:
-        bam_map['ont'] = ont_bam
+        resolved_bam_map['ont_ulk001_r941'] = ont_bam
     if illumina_bam:
-        bam_map['illumina'] = illumina_bam
+        resolved_bam_map['illumina_hiseq2500'] = illumina_bam
+
+    bam_map = resolved_bam_map
 
     if download:
         download_dir = output_dir / 'downloads'
-        for tech, accessions in CHM13_ACCESSIONS.items():
-            if tech not in bam_map:
+        for chem, accessions in CHM13_ACCESSIONS.items():
+            if chem not in bam_map:
                 bam_path = download_sra_and_align(
-                    accessions, tech, reference_path, download_dir, threads,
+                    accessions, chem, reference_path, download_dir, threads,
                 )
-                bam_map[tech] = str(bam_path)
+                bam_map[chem] = str(bam_path)
         # ONT handled separately (S3 download)
-        if 'ont' not in bam_map:
+        if 'ont_ulk001_r941' not in bam_map:
             bam_path = download_sra_and_align(
-                [], 'ont', reference_path, download_dir, threads,
+                [], 'ont_ulk001_r941', reference_path, download_dir, threads,
             )
-            bam_map['ont'] = str(bam_path)
+            bam_map['ont_ulk001_r941'] = str(bam_path)
 
     if not bam_map:
         raise ValueError(
@@ -859,9 +901,9 @@ def generate_errorsmith_training_data(
     t_start = time.time()
 
     logger.info(f"\nErrorSmith training data generation")
-    logger.info(f"  Technologies: {list(bam_map.keys())}")
-    logger.info(f"  Chromosomes:  {chroms}")
-    logger.info(f"  Subsample:    {subsample:,} bases/technology")
+    logger.info(f"  Chemistries: {list(bam_map.keys())}")
+    logger.info(f"  Chromosomes: {chroms}")
+    logger.info(f"  Subsample:   {subsample:,} bases/chemistry")
     logger.info(f"  Output:       {csv_path}")
 
     with open(csv_path, 'w', newline='') as f:
@@ -905,11 +947,11 @@ def generate_errorsmith_training_data(
     config_path = output_dir / 'errorsmith_generation_config.json'
     with open(config_path, 'w') as f:
         json.dump({
-            'technologies': list(bam_map.keys()),
+            'chemistries': list(bam_map.keys()),
             'bam_files': bam_map,
             'reference': reference_path,
             'chroms': chroms,
-            'subsample_per_tech': subsample,
+            'subsample_per_chemistry': subsample,
             'seed': seed,
             'total_rows': total_rows,
             'class_distribution': dict(class_counts),
@@ -930,13 +972,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             examples:
-              # Auto-download CHM13 reads, align, and extract errors
+              # Chemistry-specific BAMs (recommended)
               python scripts/generate_errorsmith_training_data.py \\
                   --output training_output/errorsmith \\
                   --reference chm13v2.0.fa \\
-                  --download --subsample 5000000
+                  --bam pacbio_hifi_sequel2 chm13_hifi.sorted.bam \\
+                  --bam ont_ulk001_r941     chm13_ont_ul.sorted.bam \\
+                  --bam illumina_hiseq2500  chm13_illumina.sorted.bam
 
-              # Use pre-aligned BAMs
+              # All 6 chemistries
+              python scripts/generate_errorsmith_training_data.py \\
+                  --output training_output/errorsmith \\
+                  --reference chm13v2.0.fa \\
+                  --bam pacbio_hifi_sequel2 hifi.bam \\
+                  --bam ont_lsk110_r941     lsk110.bam \\
+                  --bam ont_ulk001_r941     ulk001.bam \\
+                  --bam ont_lsk114_r1041    lsk114.bam \\
+                  --bam ont_ulk114_r1041    ulk114.bam \\
+                  --bam illumina_hiseq2500  illumina.bam
+
+              # Legacy flags (still work)
               python scripts/generate_errorsmith_training_data.py \\
                   --output training_output/errorsmith \\
                   --reference chm13v2.0.fa \\
@@ -948,14 +1003,8 @@ def main():
               python scripts/generate_errorsmith_training_data.py \\
                   --output training_output/errorsmith_test \\
                   --reference chm13v2.0.fa \\
-                  --hifi-bam chm13_hifi.sorted.bam \\
+                  --bam pacbio_hifi_sequel2 chm13_hifi.sorted.bam \\
                   --chroms chr1 --subsample 500000
-
-              # After generation, train ErrorSmith:
-              python -m strandweaver.user_training.train_models \\
-                  --data-dir training_output/errorsmith \\
-                  --output-dir trained_models/ \\
-                  --models errorsmith
         """),
     )
 
@@ -967,17 +1016,25 @@ def main():
         '--reference', '-r', required=True,
         help='Path to CHM13v2.0 reference FASTA (or .fa.gz)',
     )
+    # ── Chemistry-specific BAM flags ──────────────────────────────
+    parser.add_argument(
+        '--bam', nargs=2, metavar=('CHEMISTRY', 'BAM'),
+        action='append', default=[],
+        help='Chemistry name + BAM path pair (repeatable). '
+             'Valid chemistries: ' + ', '.join(sorted(CHEMISTRY_CODES)),
+    )
+    # Legacy single-technology flags (still supported)
     parser.add_argument(
         '--hifi-bam', default=None,
-        help='Path to HiFi BAM aligned to CHM13',
+        help='(legacy) HiFi BAM → pacbio_hifi_sequel2',
     )
     parser.add_argument(
         '--ont-bam', default=None,
-        help='Path to ONT BAM aligned to CHM13',
+        help='(legacy) ONT BAM → ont_ulk001_r941',
     )
     parser.add_argument(
         '--illumina-bam', default=None,
-        help='Path to Illumina BAM aligned to CHM13',
+        help='(legacy) Illumina BAM → illumina_hiseq2500',
     )
     parser.add_argument(
         '--download', action='store_true',
@@ -989,7 +1046,7 @@ def main():
     )
     parser.add_argument(
         '--subsample', type=int, default=5_000_000,
-        help='Max bases per technology (default: 5000000)',
+        help='Max bases per chemistry (default: 5000000)',
     )
     parser.add_argument(
         '--chroms', nargs='+', default=None,
@@ -1026,21 +1083,30 @@ def main():
     print()
     print("╔══════════════════════════════════════════════════════════════╗")
     print("║     StrandWeaver · ErrorSmith Training Data Generator      ║")
-    print("║                   (CHM13 Real Data)                        ║")
+    print("║          Chemistry-Specific CHM13 Real Data                ║")
     print("╠══════════════════════════════════════════════════════════════╣")
     print(f"║  Reference       : {Path(ref_path).name}")
-    print(f"║  Technologies    : ", end='')
-    techs = []
+
+    # Build bam_map from --bam pairs
+    cli_bam_map: Dict[str, str] = {}
+    for chem_name, bam_path_val in args.bam:
+        if chem_name not in CHEMISTRY_CODES and chem_name not in LEGACY_TECH_MAP:
+            parser.error(f"Unknown chemistry '{chem_name}'. "
+                         f"Valid: {', '.join(sorted(CHEMISTRY_CODES))}")
+        resolved = LEGACY_TECH_MAP.get(chem_name, chem_name)
+        cli_bam_map[resolved] = bam_path_val
+
+    chems = list(cli_bam_map.keys())
     if args.hifi_bam:
-        techs.append('HiFi')
+        chems.append('pacbio_hifi_sequel2')
     if args.ont_bam:
-        techs.append('ONT')
+        chems.append('ont_ulk001_r941')
     if args.illumina_bam:
-        techs.append('Illumina')
+        chems.append('illumina_hiseq2500')
     if args.download:
-        techs = ['HiFi', 'ONT', 'Illumina']
-    print(', '.join(techs) or 'TBD (from BAMs)')
-    print(f"║  Subsample       : {args.subsample:,} bases/tech")
+        chems = list(CHEMISTRY_CODES.keys())
+    print(f"║  Chemistries     : {', '.join(chems) or 'TBD (from BAMs)'}")
+    print(f"║  Subsample       : {args.subsample:,} bases/chem")
     print(f"║  Chromosomes     : {args.chroms or 'chr1-chr5'}")
     print(f"║  Output          : {args.output}")
     print("╚══════════════════════════════════════════════════════════════╝")
@@ -1049,6 +1115,7 @@ def main():
     csv_path = generate_errorsmith_training_data(
         output_dir=Path(args.output),
         reference_path=ref_path,
+        bam_map=cli_bam_map if cli_bam_map else None,
         hifi_bam=args.hifi_bam,
         ont_bam=args.ont_bam,
         illumina_bam=args.illumina_bam,
