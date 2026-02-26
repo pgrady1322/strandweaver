@@ -12879,6 +12879,56 @@
       },
       "num_samples": 15857,
       "num_features": 19
+    },
+    "errorsmith": {
+      "val_accuracy": 0.8661,
+      "val_f1_weighted": null,
+      "val_f1_macro": 0.8651,
+      "per_class_f1": {
+        "0": null,
+        "1": null,
+        "2": null,
+        "3": null,
+        "4": null
+      },
+      "train_size": 500000,
+      "val_size": null,
+      "rebalance_strategy": "stratified_undersample_100k_per_class",
+      "sweep_best_params": {
+        "max_depth": 11,
+        "learning_rate": 0.029053,
+        "n_estimators": 954,
+        "subsample": 0.66728,
+        "colsample_bytree": 0.70434,
+        "min_child_weight": 11,
+        "gamma": 0.74816,
+        "reg_alpha": 1.92619,
+        "reg_lambda": 0.00114
+      },
+      "cv_accuracy_mean": 0.8661,
+      "cv_accuracy_std": 0.001011,
+      "cv_f1_macro_mean": 0.8651,
+      "cv_f1_macro_std": 0.000899,
+      "cv_fold_scores": null,
+      "label_distribution": {
+        "correct": 100000,
+        "substitution": 100000,
+        "insertion": 100000,
+        "deletion": 100000,
+        "homopolymer_error": 100000
+      },
+      "raw_samples": 25001189,
+      "num_samples": 500000,
+      "num_features": 16,
+      "chemistries_used": [
+        "pacbio_hifi_sequel2",
+        "ont_ulk001_r941",
+        "ont_lsk114_r1041",
+        "illumina_hiseq2500"
+      ],
+      "model_file": "errorsmith_models/error_classifier.pkl",
+      "training_data_source": "CHM13 T2T reference BAM alignments",
+      "hp_search": "optuna"
     }
   }
 }

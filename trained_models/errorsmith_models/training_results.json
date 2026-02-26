@@ -1,0 +1,39 @@
+{
+  "best_params": {
+    "max_depth": 11,
+    "learning_rate": 0.02913985488622048,
+    "n_estimators": 954,
+    "subsample": 0.6668893081767483,
+    "colsample_bytree": 0.7042416874008635,
+    "min_child_weight": 11,
+    "reg_alpha": 1.92564153612734,
+    "reg_lambda": 0.0010352691416101205,
+    "gamma": 0.7475765326645017,
+    "tree_method": "hist",
+    "device": "cuda",
+    "objective": "multi:softprob",
+    "num_class": 5,
+    "eval_metric": "mlogloss",
+    "random_state": 42
+  },
+  "cv_accuracy_mean": 0.8661059999999999,
+  "cv_accuracy_std": 0.001011090500400436,
+  "cv_f1_macro_mean": 0.8650566283595085,
+  "cv_f1_macro_std": 0.0008988553310551512,
+  "n_samples_raw": 25001189,
+  "n_samples_balanced": 500000,
+  "class_distribution": {
+    "0": 100000,
+    "1": 100000,
+    "2": 100000,
+    "3": 100000,
+    "4": 100000
+  },
+  "chemistries_used": [
+    "pacbio_hifi_sequel2",
+    "ont_ulk001_r941",
+    "ont_lsk114_r1041",
+    "illumina_hiseq2500",
+    "6"
+  ]
+}

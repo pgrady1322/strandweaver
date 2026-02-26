@@ -2,12 +2,12 @@
 
 **Custom Model Training & Retraining Guide for StrandWeaver**
 
-[![Models](https://img.shields.io/badge/models-7%20AI%20modules-green.svg)](#model-architecture)
+[![Models](https://img.shields.io/badge/models-8%20AI%20modules-green.svg)](#model-architecture)
 [![Training Data](https://img.shields.io/badge/training%20data-200%20genomes-blue.svg)](#training-data-generation)
-[![XGBoost](https://img.shields.io/badge/XGBoost-9%20models-orange.svg)](#xgboost-models)
+[![XGBoost](https://img.shields.io/badge/XGBoost-10%20models-orange.svg)](#xgboost-models)
 [![GNN](https://img.shields.io/badge/GNN-GATv2Conv-purple.svg)](#pathgnn-graph-neural-network)
 
-StrandWeaver ships with pre-trained models for all 7 AI modules. This guide covers how the models were trained, how to generate custom training data for your organism or sequencing technology, and how to retrain from scratch.
+StrandWeaver ships with pre-trained models for all 8 AI modules. This guide covers how the models were trained, how to generate custom training data for your organism or sequencing technology, and how to retrain from scratch.
 
 > **Note**: Pre-trained models are included with the v0.2+ release. You only need this guide if you want to train custom models for organism-specific optimization.
 
@@ -31,7 +31,7 @@ StrandWeaver uses a **two-tier ML architecture**:
 
 | Tier | Framework | Models | Purpose |
 |------|-----------|--------|---------|
-| **Tabular** | XGBoost | 9 models | Classification & regression on extracted graph/read features |
+| **Tabular** | XGBoost | 10 models | Classification & regression on extracted graph/read features |
 | **Graph** | PyTorch Geometric | 1 GNN | Graph-aware edge classification using GATv2Conv attention |
 
 The XGBoost models handle structured feature analysis (edge scoring, haplotype phasing, SV detection, ultra-long routing), while the GNN propagates information across assembly graph neighborhoods to capture structural patterns that tabular features miss.
@@ -61,8 +61,9 @@ All pre-trained models are stored in `trained_models/` and managed via Git LFS:
 | Module | Model | File(s) | Task |
 |--------|-------|---------|------|
 | 🛡️ **EdgeWarden** | XGBoost (×5) | `edgewarden/edgewarden_{tech}.pkl` | Edge quality scoring (per-technology) |
-| � **K-Weaver** | XGBoost (×4) | `kweaver/{dbg,ul_overlap,extension,polish}_model.pkl` | Optimal k-mer size prediction |
-| �🧬 **PathGNN** | GATv2Conv GNN | `pathgnn/pathgnn_model.pt` | Graph-aware edge classification |
+| 🔧 **ErrorSmith** | XGBoost | `errorsmith_models/error_classifier.pkl` | Per-base error classification (5-class, chemistry-aware) |
+| 🧠 **K-Weaver** | XGBoost (×4) | `kweaver/{dbg,ul_overlap,extension,polish}_model.pkl` | Optimal k-mer size prediction |
+| 🧬 **PathGNN** | GATv2Conv GNN | `pathgnn/pathgnn_model.pt` | Graph-aware edge classification |
 | 🔀 **DiploidAI** | XGBoost | `diploid/diploid_model.pkl` | Haplotype phasing (26 features) |
 | 🔍 **SVScribe** | XGBoost | `sv_detector/sv_detector_model.pkl` | Structural variant detection |
 | 🧵 **ThreadCompass** | XGBoost | `ul_routing/ul_routing_model.pkl` | Ultra-long read routing |
@@ -200,11 +201,13 @@ For large-scale hyperparameter sweeps, we recommend Google Colab with a T4 GPU.
 
 1. **Open** `strandweaver/training/notebooks/ErrorSmith_Training_Colab.ipynb`
 
-2. **Upload** CHM13 BAMs or use automatic SRA download
+2. **Upload** CHM13 BAMs or use automatic SRA download (PacBio HiFi, ONT R9/R10, Illumina)
 
-3. **Run all cells** — minimap2 alignment + error profiling + model training
+3. **Run all cells** — minimap2 alignment → per-base error extraction (25M raw labels) → balanced undersampling (500K) → Optuna XGBoost sweep → 5-fold CV
 
-4. **Download** trained model to `trained_models/errorsmith/`
+4. **Download** `error_classifier.pkl` + `training_results.json` to `trained_models/errorsmith_models/`
+
+> **Pre-trained model included**: The shipped ErrorSmith model achieves 86.6% accuracy / 0.865 F1-macro across 5 error classes and 6 sequencing chemistries. Retraining is only needed if you add unsupported chemistry types.
 
 ### Phase 1: XGBoost Sweep
 
@@ -269,6 +272,7 @@ For large-scale hyperparameter sweeps, we recommend Google Colab with a T4 GPU.
 | Model | Accuracy | F1 (weighted) | F1 (macro) | CV (5-fold) |
 |-------|----------|----------------|------------|-------------|
 | 🛡️ EdgeWarden | 0.881 | 0.880 | 0.896 | 0.878 ± 0.002 |
+| 🔧 ErrorSmith | 0.866 | — | 0.865 | 0.866 ± 0.001 |
 | 🧬 PathGNN | 0.897 | 0.897 | 0.897 | 0.897 ± 0.001 |
 | 🔀 DiploidAI | 0.862 | 0.862 | 0.862 | 0.858 ± 0.001 |
 | 🔍 SVScribe | 0.823 | 0.828 | 0.557 | 0.817 ± 0.005 |
@@ -284,6 +288,20 @@ Trained on 300 synthetic assembly benchmarks using Optuna (20 trials) + 5-fold C
 | 🧠 UL Overlap | Best UL overlap k | 0.982 | 9.36 | 0.982 ± 0.020 |
 | 🧠 Extension | Best extension k | 0.849 | 1.20 | 0.849 ± 0.074 |
 | 🧠 Polish | Best polish k | 0.881 | 1.51 | 0.881 ± 0.067 |
+
+### ErrorSmith Per-Class Performance
+
+Trained on 25M per-base error labels from CHM13 T2T reference alignments across 4 chemistries (PacBio HiFi Sequel II, ONT ULK001 R9.4.1, ONT LSK114 R10.4.1, Illumina HiSeq 2500). Balanced to 500K samples (100K per class) via stratified undersampling. Optuna hyperparameter search (954 estimators, max_depth=11).
+
+| Error Class | Samples | Description |
+|-------------|---------|-------------|
+| Correct | 100,000 | No error at position |
+| Substitution | 100,000 | Base mismatch |
+| Insertion | 100,000 | Extra base inserted |
+| Deletion | 100,000 | Base missing |
+| Homopolymer Error | 100,000 | Error in homopolymer run |
+
+**16 features**: `base_quality`, `mean_quality_window_5`, `mean_quality_window_20`, `position_in_read`, `read_length`, `gc_content_local`, `gc_content_read`, `homopolymer_length`, `homopolymer_base`, `distance_to_hp`, `trinucleotide_context`, `pentanucleotide_context`, `technology_encoded`, `ref_gc_window_50`, `ref_repeat_flag`, `ref_homopolymer_length`
 
 ### EdgeWarden Per-Class Performance
 
