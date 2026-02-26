@@ -155,6 +155,15 @@ except ImportError:
         # v2.0: coverage distribution
         'coverage_cv', 'coverage_skewness', 'coverage_kurtosis',
         'coverage_p10', 'coverage_p90',
+        # v2.1: SV-specific features (S4 improvement plan)
+        'depth_ratio_flank',
+        'split_read_count',
+        'clip_fraction',
+        'bubble_size',
+        'path_divergence',
+        'ul_spanning',
+        'coverage_drop_magnitude',
+        'orientation_switch_rate',
     ]
 
 # Columns that are NOT training features (metadata + provenance).
@@ -227,7 +236,40 @@ MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         'task': 'multiclass',
         'save_subdir': 'sv_detector',
         'xgb_defaults': {'max_depth': 7, 'learning_rate': 0.05, 'n_estimators': 150},
+        'focal_loss': True,             # S3: use focal loss for SV class imbalance
+        'focal_alpha': 0.25,
+        'focal_gamma': 2.0,
         'desc': 'SV type detection     (del / ins / inv / dup / trans / none)',
+    },
+
+    # ── SVScribe Two-Stage (S2): binary SV detector + SV-type classifier ──
+    'sv_ai_binary': {
+        'csv_glob': '**/sv_detect_training_g*.csv',
+        'features': SV_DETECT_FEATURES,
+        'label_col': 'sv_type',
+        'task': 'binary',
+        'label_transform': lambda lbl: 0 if lbl == 'none' else 1,  # SV vs. no SV
+        'save_subdir': 'sv_detector',
+        'save_name': 'sv_binary_model.pkl',
+        'xgb_defaults': {'max_depth': 7, 'learning_rate': 0.05, 'n_estimators': 200},
+        'desc': 'SV binary detector    (SV vs. no SV — two-stage step 1)',
+    },
+    'sv_ai_subtype': {
+        'csv_glob': '**/sv_detect_training_g*.csv',
+        'features': SV_DETECT_FEATURES,
+        'label_col': 'sv_type',
+        'task': 'multiclass',
+        'label_filter': lambda lbl: lbl != 'none',  # train only on SV-positive rows
+        'save_subdir': 'sv_detector',
+        'save_name': 'sv_subtype_model.pkl',
+        'focal_loss': True,
+        'focal_alpha': 0.25,
+        'focal_gamma': 2.0,
+        'xgb_defaults': {
+            'max_depth': 8, 'learning_rate': 0.03, 'n_estimators': 300,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
+        },
+        'desc': 'SV subtype classifier (del / ins / inv / dup — two-stage step 2)',
     },
 
     # ── K-Weaver: 4 regression models for optimal k-mer prediction ────
@@ -575,6 +617,92 @@ def _hybrid_resample(
     return _oversample(X_us, y_us, rng=rng)
 
 
+# ── Focal loss for class-imbalanced classification ─────────────────────
+
+def _focal_loss_objective(
+    alpha: float = 0.25,
+    gamma: float = 2.0,
+    n_classes: int = 5,
+):
+    """Return a focal loss (obj, eval_metric) pair for XGBoost multi:softprob.
+
+    Focal loss down-weights easy examples and up-weights hard minority
+    examples, which helps with extreme class imbalance like SVScribe's
+    none >> SV classes.
+
+    Parameters
+    ----------
+    alpha : float
+        Balancing factor (0–1). Lower values reduce the loss contribution
+        of well-classified examples. Default 0.25.
+    gamma : float
+        Focusing parameter. Higher gamma increases focus on hard examples.
+        gamma=0 is equivalent to standard cross-entropy. Default 2.0.
+    n_classes : int
+        Number of classes for multi:softprob reshaping. Default 5.
+
+    Returns
+    -------
+    (objective_fn, eval_metric_fn) : tuple
+        Functions compatible with XGBoost's ``obj`` and ``custom_metric``
+        parameters.
+
+    Reference
+    ---------
+    Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017.
+    """
+
+    def _softmax(x: "np.ndarray") -> "np.ndarray":
+        """Row-wise softmax for (n_samples, n_classes) matrix."""
+        e_x = np.exp(x - np.max(x, axis=1, keepdims=True))
+        return e_x / np.sum(e_x, axis=1, keepdims=True)
+
+    def focal_obj(predt: "np.ndarray", dtrain: "xgb.DMatrix"):
+        """Focal loss gradient and hessian for multi:softprob."""
+        labels = dtrain.get_label().astype(np.int32)
+        n_samples = len(labels)
+
+        # Reshape from flat (n_samples * n_classes,) to (n_samples, n_classes)
+        predt = predt.reshape(n_samples, n_classes)
+        p = _softmax(predt)
+
+        # One-hot encode labels
+        y_onehot = np.zeros_like(p)
+        y_onehot[np.arange(n_samples), labels] = 1.0
+
+        # Focal loss gradient:
+        #   grad = alpha * (1 - p_t)^gamma * (p - y) * (gamma * p_t * log(p_t) + p_t - 1)
+        # Simplified practical form:
+        #   grad_i = alpha * (1-p_t)^(gamma-1) * (gamma * p_t * log(p_t + eps) * (p - y) + (1-p_t) * (p - y))
+        p_t = np.sum(p * y_onehot, axis=1, keepdims=True)  # (n,1)
+        p_t = np.clip(p_t, 1e-8, 1.0 - 1e-8)
+
+        # Simple focal scaling factor per sample
+        focal_weight = alpha * np.power(1.0 - p_t, gamma)  # (n,1)
+
+        # Standard softmax cross-entropy gradient, scaled by focal weight
+        grad = focal_weight * (p - y_onehot)
+        hess = focal_weight * p * (1.0 - p)
+        # Ensure hessian is positive
+        hess = np.maximum(hess, 1e-6)
+
+        return grad.ravel(), hess.ravel()
+
+    def focal_eval(predt: "np.ndarray", dtrain: "xgb.DMatrix"):
+        """Focal loss evaluation metric (for early stopping)."""
+        labels = dtrain.get_label().astype(np.int32)
+        n_samples = len(labels)
+        predt = predt.reshape(n_samples, n_classes)
+        p = _softmax(predt)
+        p_t = p[np.arange(n_samples), labels]
+        p_t = np.clip(p_t, 1e-8, 1.0)
+        focal_weight = alpha * np.power(1.0 - p_t, gamma)
+        loss = -focal_weight * np.log(p_t)
+        return 'focal_loss', float(np.mean(loss))
+
+    return focal_obj, focal_eval
+
+
 def _train_classifier(
     X: "np.ndarray",
     y: "np.ndarray",
@@ -583,11 +711,16 @@ def _train_classifier(
     *,
     is_binary: bool = False,
     sample_weight: Optional["np.ndarray"] = None,
+    focal_loss_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Any, Dict[str, Any]]:
     """Train an XGBoost classifier with train/val split.
 
     If *sample_weight* is provided, it is passed to ``model.fit()`` to
     handle class imbalance via inverse-frequency weighting.
+
+    If *focal_loss_config* is provided (dict with 'alpha', 'gamma',
+    'n_classes'), the model uses a custom focal loss objective instead
+    of the standard multi:softprob loss.
 
     Returns ``(model, metrics_dict)``.
     """
@@ -619,7 +752,23 @@ def _train_classifier(
         'verbosity': 0,
         'early_stopping_rounds': config.early_stopping_rounds,
     })
-    if is_binary:
+
+    # Focal loss: use custom objective for imbalanced multiclass
+    use_focal = focal_loss_config is not None and not is_binary
+    if use_focal:
+        n_classes = int(len(set(y.tolist())))
+        focal_obj, focal_eval = _focal_loss_objective(
+            alpha=focal_loss_config.get('alpha', 0.25),
+            gamma=focal_loss_config.get('gamma', 2.0),
+            n_classes=n_classes,
+        )
+        params['objective'] = focal_obj
+        params['disable_default_eval_metric'] = True
+        params['num_class'] = n_classes
+        logger.info("  🎯 Using focal loss (α=%.2f, γ=%.1f) for %d classes",
+                     focal_loss_config.get('alpha', 0.25),
+                     focal_loss_config.get('gamma', 2.0), n_classes)
+    elif is_binary:
         params['objective'] = 'binary:logistic'
         params['eval_metric'] = 'logloss'
     else:
@@ -632,6 +781,8 @@ def _train_classifier(
         'eval_set': [(X_va, y_va)],
         'verbose': False,
     }
+    if use_focal:
+        fit_kwargs['eval_metric'] = focal_eval
     if w_tr is not None:
         fit_kwargs['sample_weight'] = w_tr
         fit_kwargs['sample_weight_eval_set'] = [w_va]
@@ -658,7 +809,11 @@ def _train_classifier(
         'val_size': int(len(X_va)),
         'best_iteration': int(getattr(model, 'best_iteration', xgb_params['n_estimators'])),
         'class_weighted': sample_weight is not None,
+        'focal_loss': use_focal,
     }
+    if use_focal:
+        metrics['focal_alpha'] = focal_loss_config.get('alpha', 0.25)
+        metrics['focal_gamma'] = focal_loss_config.get('gamma', 2.0)
     return model, metrics
 
 
@@ -1007,6 +1162,8 @@ _SAVE_FILENAMES: Dict[str, Tuple[str, str]] = {
     'diploid_ai': ('diploid', 'diploid_model.pkl'),
     'ul_routing':  ('ul_routing', 'ul_routing_model.pkl'),
     'sv_ai':       ('sv_detector', 'sv_detector_model.pkl'),
+    'sv_ai_binary':  ('sv_detector', 'sv_binary_model.pkl'),
+    'sv_ai_subtype': ('sv_detector', 'sv_subtype_model.pkl'),
 }
 
 
@@ -1053,6 +1210,14 @@ def train_all_models(config: ModelTrainingConfig) -> Dict[str, Any]:
             spec['features'], spec['label_col'],
             label_transform=label_transform,
         )
+
+        # S2: Apply label_filter (e.g. sv_ai_subtype excludes 'none' rows)
+        label_filter = spec.get('label_filter')
+        if label_filter and features:
+            keep_mask = [label_filter(lbl) for lbl in labels]
+            features = [f for f, k in zip(features, keep_mask) if k]
+            labels = [l for l, k in zip(labels, keep_mask) if k]
+            logger.info("  Filtered to %d rows (label_filter applied)", len(features))
 
         if len(features) < config.min_samples:
             reason = f"insufficient data ({len(features)} rows, need {config.min_samples})"
@@ -1138,9 +1303,18 @@ def train_all_models(config: ModelTrainingConfig) -> Dict[str, Any]:
             logger.info("  CV R² : %.4f ± %.4f",
                         cv_metrics['cv_r2_mean'], cv_metrics['cv_r2_std'])
         else:
+            # S3: Build focal loss config if model spec requests it
+            focal_loss_cfg = None
+            if spec.get('focal_loss'):
+                focal_loss_cfg = {
+                    'alpha': spec.get('focal_alpha', 0.25),
+                    'gamma': spec.get('focal_gamma', 2.0),
+                }
+
             model, metrics = _train_classifier(
                 X_train, y_train, xgb_params, config,
                 is_binary=is_binary,
+                focal_loss_config=focal_loss_cfg,
             )
             cv_metrics = _cv_classifier(
                 X_train_raw, y_train, xgb_params, config,
@@ -1167,7 +1341,10 @@ def train_all_models(config: ModelTrainingConfig) -> Dict[str, Any]:
         elif model_name == 'path_gnn':
             saved = _save_pathgnn(model, scaler, feature_cols, output_dir, metrics)
         else:
-            subdir, fname = _SAVE_FILENAMES.get(model_name, (model_name, f'{model_name}_model.pkl'))
+            subdir = spec.get('save_subdir', model_name)
+            fname = spec.get('save_name', None)
+            if fname is None:
+                _, fname = _SAVE_FILENAMES.get(model_name, (model_name, f'{model_name}_model.pkl'))
             saved = _save_pickle_model(
                 model, scaler, label_encoder, feature_cols,
                 output_dir, subdir, fname, metrics,

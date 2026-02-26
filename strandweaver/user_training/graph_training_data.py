@@ -1008,6 +1008,77 @@ def compute_sv_region_features(graph: SyntheticGraph, sv_truth_table: List[Any],
             right = statistics.mean(hic_scores[mid_idx:])
             hic_disruption = abs(left - right) / max(left + right, 1)
 
+        # ── v2.1 SV-specific features (S4) ──────────────────────────────
+
+        # Depth ratio: left flank coverage / right flank coverage
+        # Deletions and duplications cause asymmetric coverage drops/gains
+        flank_size = max(window // 4, 200)
+        left_flank_reads = [r for r in chrom_reads.get(
+            sorted_reads[0].chrom if sorted_reads else 'chr1', [])
+            if r.end_pos >= region_start - flank_size and r.start_pos < region_start]
+        right_flank_reads = [r for r in chrom_reads.get(
+            sorted_reads[0].chrom if sorted_reads else 'chr1', [])
+            if r.start_pos <= region_end + flank_size and r.end_pos > region_end]
+        left_cov = len(left_flank_reads) if left_flank_reads else 0
+        right_cov = len(right_flank_reads) if right_flank_reads else 0
+        depth_ratio_flank = left_cov / max(right_cov, 1) if right_cov > 0 else (
+            2.0 if left_cov > 0 else 1.0)
+
+        # Split-read count: reads that start or end very close to breakpoint
+        # (simulates soft-clipped / split-aligned reads)
+        bp_tolerance = max(50, window // 20)
+        split_read_count = sum(
+            1 for r in region_reads
+            if (abs(r.end_pos - region_start) < bp_tolerance or
+                abs(r.start_pos - region_end) < bp_tolerance or
+                abs(r.start_pos - region_start) < bp_tolerance or
+                abs(r.end_pos - region_end) < bp_tolerance)
+        )
+
+        # Clip fraction: fraction of reads that partially overlap breakpoint
+        # (proxy for soft-clipping signal)
+        partial_reads = sum(
+            1 for r in region_reads
+            if (r.start_pos < region_start and r.end_pos < region_end) or
+               (r.start_pos > region_start and r.end_pos > region_end)
+        )
+        clip_fraction = partial_reads / max(len(region_reads), 1)
+
+        # Bubble size: assembly graph branching topology at region
+        region_node_ids = [r.read_id for r in region_reads if r.read_id in graph.nodes]
+        branch_nodes = sum(
+            1 for nid in region_node_ids
+            if (graph.nodes[nid].in_degree + graph.nodes[nid].out_degree) > 2
+        )
+        bubble_size = branch_nodes / max(len(region_node_ids), 1)
+
+        # Path divergence: how many distinct in/out paths exist at region
+        total_in = sum(graph.nodes[nid].in_degree for nid in region_node_ids
+                       if nid in graph.nodes)
+        total_out = sum(graph.nodes[nid].out_degree for nid in region_node_ids
+                        if nid in graph.nodes)
+        path_divergence = abs(total_in - total_out) / max(total_in + total_out, 1)
+
+        # UL spanning: does any ultra-long read fully span the SV region?
+        ul_spanning = 1.0 if any(
+            r.start_pos <= region_start and r.end_pos >= region_end
+            for r in region_reads if r.technology in ('ultra_long', 'ul')
+        ) else 0.0
+
+        # Coverage drop magnitude: (flank_avg - region_cov) / flank_avg
+        flank_avg = (left_cov + right_cov) / 2.0 if (left_cov + right_cov) > 0 else cov_mean
+        coverage_drop_magnitude = (flank_avg - cov_mean) / max(flank_avg, 1)
+
+        # Orientation switch rate: strand changes across the region
+        if len(sorted_reads) >= 2:
+            strand_switches = sum(
+                1 for i in range(len(sorted_reads) - 1)
+                if sorted_reads[i].strand != sorted_reads[i + 1].strand
+            )
+            orientation_switch_rate = strand_switches / max(len(sorted_reads) - 1, 1)
+        else:
+            orientation_switch_rate = 0.0
+
         row = {
             'coverage_mean': cov_mean, 'coverage_std': cov_std, 'coverage_median': cov_median,
             'gc_content': _gc_content(combined_seq) if combined_seq else 0.42,
@@ -1026,6 +1097,15 @@ def compute_sv_region_features(graph: SyntheticGraph, sv_truth_table: List[Any],
             # v2.0: coverage distribution features
             'coverage_cv': cov_cv, 'coverage_skewness': cov_skew,
             'coverage_kurtosis': cov_kurt, 'coverage_p10': cov_p10, 'coverage_p90': cov_p90,
+            # v2.1: SV-specific features (S4)
+            'depth_ratio_flank': depth_ratio_flank,
+            'split_read_count': float(split_read_count),
+            'clip_fraction': clip_fraction,
+            'bubble_size': bubble_size,
+            'path_divergence': path_divergence,
+            'ul_spanning': ul_spanning,
+            'coverage_drop_magnitude': coverage_drop_magnitude,
+            'orientation_switch_rate': orientation_switch_rate,
             'sv_type': sv_type,
         }
         for col, val in zip(METADATA_COLUMNS, metadata.as_row()):
@@ -1318,6 +1398,15 @@ SV_DETECT_FEATURES = [
     # v2.0: coverage distribution
     'coverage_cv', 'coverage_skewness', 'coverage_kurtosis',
     'coverage_p10', 'coverage_p90',
+    # v2.1: SV-specific features (S4 improvement plan)
+    'depth_ratio_flank',          # left_flank_cov / right_flank_cov
+    'split_read_count',           # reads with partial alignment at breakpoint
+    'clip_fraction',              # fraction of reads with soft-clipping
+    'bubble_size',                # graph topology: bubble/branch size at region
+    'path_divergence',            # graph topology: path count divergence
+    'ul_spanning',                # binary: any UL read spans entire SV event
+    'coverage_drop_magnitude',    # (flank_cov - region_cov) / flank_cov
+    'orientation_switch_rate',    # strand orientation changes across region
 ]
 
 
