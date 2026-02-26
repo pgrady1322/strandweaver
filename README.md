@@ -275,7 +275,7 @@ combination is not listed, pick the closest available model.**
 |------|---------|---------|
 | `--hifi-chemistry` | `pacbio_hifi_sequel2` | `pacbio_hifi_sequel2` |
 | `--ont-chemistry` | `ont_lsk110_r941`, `ont_lsk114_r1041` | `ont_lsk114_r1041` |
-| `--ont-ul-chemistry` | `ont_ulk001_r941`, `ont_ulk114_r1041` | `ont_ulk114_r1041` |
+| `--ont-ul-chemistry` | `ont_ulk001_r941`, `ont_ulk114_r1041` | `ont_ulk001_r941` |
 | `--illumina-chemistry` | `illumina_hiseq2500` | `illumina_hiseq2500` |
 
 ```bash

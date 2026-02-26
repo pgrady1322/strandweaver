@@ -83,7 +83,7 @@ DEFAULT_CHEMISTRY: Dict[str, str] = {
     'hifi':          'pacbio_hifi_sequel2',
     'ont':           'ont_lsk114_r1041',
     'ont_regular':   'ont_lsk114_r1041',
-    'ont_ultralong': 'ont_ulk114_r1041',
+    'ont_ultralong': 'ont_ulk001_r941',
     'nanopore':      'ont_lsk114_r1041',
     'illumina':      'illumina_hiseq2500',
     'paired_end':    'illumina_hiseq2500',

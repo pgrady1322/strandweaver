@@ -266,7 +266,7 @@ def config_show(config_file, format):
               ], case_sensitive=False),
               default=None,
               help='ONT ultra-long kit chemistry for ErrorSmith model '
-                   '(default: ont_ulk114_r1041). '
+                   '(default: ont_ulk001_r941). '
                    'Pick the closest flow cell model if no exact match.')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
@@ -2443,7 +2443,7 @@ def batch():
               ], case_sensitive=False),
               default=None,
               help='ONT ultra-long kit chemistry for ErrorSmith model '
-                   '(default: ont_ulk114_r1041). '
+                   '(default: ont_ulk001_r941). '
                    'Pick the closest flow cell model if no exact match.')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
