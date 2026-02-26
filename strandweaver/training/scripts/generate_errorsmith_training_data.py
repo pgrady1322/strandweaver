@@ -69,24 +69,24 @@ CHEMISTRY_NAMES = {v: k for k, v in CHEMISTRY_CODES.items()}
 CHEMISTRY_FEATURE_NAMES = [
     'is_ont', 'is_pacbio_hifi', 'is_pacbio_onso', 'is_illumina',
     'is_element', 'is_long_read', 'is_short_read', 'is_r10',
-    'is_ultralong', 'is_duplex',
+    'is_ultralong', 'is_duplex', 'is_hiacc',
 ]
 # fmt: off
 CHEMISTRY_FEATURES = {
-    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup
-    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_sequel2
-    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0],   # ont_lsk110_r941
-    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0],   # ont_ulk001_r941
-    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0],   # ont_lsk114_r1041
-    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041
-    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0],   # illumina_hiseq2500
-    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0],   # pacbio_onso
-    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_aviti
-    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_ultraq
-    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_revio
-    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1],   # ont_r1041_duplex
-    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_hiacc
-    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_dorado
+    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup  hiac
+    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # pacbio_hifi_sequel2
+    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # ont_lsk110_r941
+    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0,   0],   # ont_ulk001_r941
+    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # ont_lsk114_r1041
+    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   0],   # ont_ulk114_r1041
+    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0,   0],   # illumina_hiseq2500
+    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_onso
+    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0],   # element_aviti
+    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0],   # element_ultraq
+    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # pacbio_hifi_revio
+    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1,   0],   # ont_r1041_duplex
+    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   1],   # ont_ulk114_r1041_hiacc
+    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   0],   # ont_ulk114_r1041_dorado
 }
 # fmt: on
 
@@ -170,6 +170,7 @@ ERROR_FEATURES = [
     'is_r10',                    # 1 if ONT R10.4.1 flow cell
     'is_ultralong',              # 1 if ONT ultra-long kit
     'is_duplex',                 # 1 if ONT Duplex basecalling
+    'is_hiacc',                  # 1 if ONT High-Accuracy experimental (~Q28)
 
     # Reference context
     'ref_gc_window_50',          # GC content of ±50 bp reference window

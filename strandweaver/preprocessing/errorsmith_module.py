@@ -101,25 +101,26 @@ CHEMISTRY_FEATURE_NAMES: List[str] = [
     'is_r10',           # ONT R10.4.1 flow cell
     'is_ultralong',     # ONT ultra-long kit
     'is_duplex',        # ONT Duplex basecalling
+    'is_hiacc',         # ONT High-Accuracy experimental (~Q28)
 ]
 
 # Per-chemistry binary vectors (order matches CHEMISTRY_FEATURE_NAMES)
 # fmt: off
 CHEMISTRY_FEATURES: Dict[int, List[int]] = {
-    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup
-    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_sequel2
-    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0],   # ont_lsk110_r941
-    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0],   # ont_ulk001_r941
-    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0],   # ont_lsk114_r1041
-    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041
-    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0],   # illumina_hiseq2500
-    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0],   # pacbio_onso
-    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_aviti
-    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_ultraq
-    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_revio
-    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1],   # ont_r1041_duplex
-    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_hiacc
-    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_dorado
+    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup  hiac
+    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # pacbio_hifi_sequel2
+    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # ont_lsk110_r941
+    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0,   0],   # ont_ulk001_r941
+    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # ont_lsk114_r1041
+    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   0],   # ont_ulk114_r1041
+    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0,   0],   # illumina_hiseq2500
+    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_onso
+    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0],   # element_aviti
+    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0,   0],   # element_ultraq
+    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0,   0],   # pacbio_hifi_revio
+    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1,   0],   # ont_r1041_duplex
+    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   1],   # ont_ulk114_r1041_hiacc
+    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0,   0],   # ont_ulk114_r1041_dorado
 }
 # fmt: on
 

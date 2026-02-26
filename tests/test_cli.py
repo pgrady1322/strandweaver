@@ -592,6 +592,20 @@ class TestChemistryModule:
         assert feats['is_long_read'] == 0
         assert feats['is_ont'] == 0
 
+    def test_hiacc_flag(self):
+        """is_hiacc should only be set for ont_ulk114_r1041_hiacc (code 11)."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_FEATURES
+        )
+        for code in CHEMISTRY_FEATURES:
+            feats = get_chemistry_features(code)
+            if code == 11:
+                assert feats['is_hiacc'] == 1
+                assert feats['is_ont'] == 1      # still ONT family
+                assert feats['is_ultralong'] == 1 # still ultra-long
+            else:
+                assert feats['is_hiacc'] == 0, f"code {code} should not be hiacc"
+
     def test_illumina_is_short_read(self):
         """Illumina should be is_illumina=1, is_short_read=1."""
         from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
@@ -630,7 +644,7 @@ class TestChemistryModule:
         from strandweaver.preprocessing.errorsmith_module import (
             get_chemistry_features, CHEMISTRY_FEATURES
         )
-        for code, vec in CHEMISTRY_FEATURES.items():
+        for code in CHEMISTRY_FEATURES:
             feats = get_chemistry_features(code)
             if code == 10:
                 assert feats['is_duplex'] == 1
