@@ -249,23 +249,31 @@ def config_show(config_file, format):
 @click.option('--hifi-chemistry',
               type=click.Choice(['pacbio_hifi_sequel2'], case_sensitive=False),
               default=None,
-              help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
+              help='PacBio chemistry for ErrorSmith model '
+                   '(default: pacbio_hifi_sequel2). '
+                   'Pick the closest model if no exact match.')
 @click.option('--ont-chemistry',
               type=click.Choice([
                   'ont_lsk110_r941', 'ont_lsk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT ligation-kit chemistry for ErrorSmith model (default: ont_lsk110_r941)')
+              help='ONT ligation-kit chemistry for ErrorSmith model '
+                   '(default: ont_lsk114_r1041). '
+                   'Pick the closest flow cell model if no exact match.')
 @click.option('--ont-ul-chemistry',
               type=click.Choice([
                   'ont_ulk001_r941', 'ont_ulk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT ultra-long kit chemistry for ErrorSmith model (default: ont_ulk001_r941)')
+              help='ONT ultra-long kit chemistry for ErrorSmith model '
+                   '(default: ont_ulk114_r1041). '
+                   'Pick the closest flow cell model if no exact match.')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
               default=None,
-              help='Illumina chemistry for ErrorSmith model (default: illumina_hiseq2500)')
+              help='Illumina chemistry for ErrorSmith model '
+                   '(default: illumina_hiseq2500). '
+                   'Pick the closest model if no exact match.')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for assembly')
 @click.option('--config', '-c', type=click.Path(exists=True),
@@ -1079,7 +1087,8 @@ def pipeline(ctx,
                   'ont_lsk114_r1041', 'ont_ulk114_r1041',
                   'illumina_hiseq2500',
               ], case_sensitive=False), default=None,
-              help='Sequencing chemistry for ErrorSmith model feature encoding')
+              help='Sequencing chemistry for ErrorSmith model feature encoding. '
+                   'Pick the closest flow cell / kit model if no exact match.')
 def profile(input, technology, output, sample_size, min_quality, threads,
             ont_flowcell, ont_basecaller, ont_accuracy, ont_detect, chemistry):
     """
@@ -2417,23 +2426,31 @@ def batch():
 @click.option('--hifi-chemistry',
               type=click.Choice(['pacbio_hifi_sequel2'], case_sensitive=False),
               default=None,
-              help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
+              help='PacBio chemistry for ErrorSmith model '
+                   '(default: pacbio_hifi_sequel2). '
+                   'Pick the closest model if no exact match.')
 @click.option('--ont-chemistry',
               type=click.Choice([
                   'ont_lsk110_r941', 'ont_lsk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT ligation-kit chemistry for ErrorSmith model (default: ont_lsk110_r941)')
+              help='ONT ligation-kit chemistry for ErrorSmith model '
+                   '(default: ont_lsk114_r1041). '
+                   'Pick the closest flow cell model if no exact match.')
 @click.option('--ont-ul-chemistry',
               type=click.Choice([
                   'ont_ulk001_r941', 'ont_ulk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT ultra-long kit chemistry for ErrorSmith model (default: ont_ulk001_r941)')
+              help='ONT ultra-long kit chemistry for ErrorSmith model '
+                   '(default: ont_ulk114_r1041). '
+                   'Pick the closest flow cell model if no exact match.')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
               default=None,
-              help='Illumina chemistry for ErrorSmith model (default: illumina_hiseq2500)')
+              help='Illumina chemistry for ErrorSmith model '
+                   '(default: illumina_hiseq2500). '
+                   'Pick the closest model if no exact match.')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for corrected reads')
 @click.option('--threads', '-t', type=int, default=8,
@@ -2913,7 +2930,8 @@ def batch_profile_errors(hifi, ont, output, threads):
                   'ont_lsk114_r1041', 'ont_ulk114_r1041',
                   'illumina_hiseq2500',
               ], case_sensitive=False), default=None,
-              help='Sequencing chemistry for ErrorSmith model feature encoding')
+              help='Sequencing chemistry for ErrorSmith model feature encoding. '
+                   'Pick the closest flow cell / kit model if no exact match.')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output corrected reads (FASTQ)')
 @click.option('--threads', '-t', type=int, default=4,

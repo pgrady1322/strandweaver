@@ -265,6 +265,30 @@ strandweaver correct --hifi reads.fq.gz -o corrected/ \
   --nextflow --nf-profile slurm --correction-batch-size 100000
 ```
 
+##### ErrorSmith Chemistry Designation
+
+ErrorSmith uses chemistry-aware models trained on specific sequencing platforms.
+You can specify a chemistry to match your data; **if your exact kit / flow cell
+combination is not listed, pick the closest available model.**
+
+| Flag | Choices | Default |
+|------|---------|---------|
+| `--hifi-chemistry` | `pacbio_hifi_sequel2` | `pacbio_hifi_sequel2` |
+| `--ont-chemistry` | `ont_lsk110_r941`, `ont_lsk114_r1041` | `ont_lsk114_r1041` |
+| `--ont-ul-chemistry` | `ont_ulk001_r941`, `ont_ulk114_r1041` | `ont_ulk114_r1041` |
+| `--illumina-chemistry` | `illumina_hiseq2500` | `illumina_hiseq2500` |
+
+```bash
+# Example: ONT R10.4.1 ligation + ultra-long with separate chemistries
+strandweaver pipeline \
+  --ont-long-reads ligation.bam --ont-chemistry ont_lsk114_r1041 \
+  --ont-ul ultralong.bam --ont-ul-chemistry ont_ulk114_r1041 \
+  -o assembly_output/ -t 16
+```
+
+The `profile` and `batch-correct` commands accept a single `--chemistry` flag
+with any of the six values above.
+
 #### K-mer Extraction
 ```bash
 # Direct mode

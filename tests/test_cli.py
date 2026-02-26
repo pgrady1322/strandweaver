@@ -481,15 +481,15 @@ class TestChemistryModule:
         """Default ONT chemistry should be a ligation kit, not ultra-long."""
         from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
         name, code = resolve_chemistry('ont')
-        assert name == 'ont_lsk110_r941'
-        assert code == 1
+        assert name == 'ont_lsk114_r1041'
+        assert code == 3
 
     def test_resolve_chemistry_ont_ul_default_is_ultralong(self):
         """Default ONT ultra-long chemistry should be an ultra-long kit."""
         from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
         name, code = resolve_chemistry('ont_ultralong')
-        assert name == 'ont_ulk001_r941'
-        assert code == 2
+        assert name == 'ont_ulk114_r1041'
+        assert code == 4
 
     def test_resolve_chemistry_invalid(self):
         """Invalid chemistry should raise ValueError."""
