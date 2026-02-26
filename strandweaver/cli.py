@@ -243,6 +243,24 @@ def config_show(config_file, format):
               help='ONT long reads (convenience alias for -r# --technology# ont)')
 @click.option('--ont-ul', type=click.Path(exists=True),
               help='ONT ultra-long reads (convenience alias for -r# --technology# ont_ultralong)')
+# ============================================================================
+# Chemistry Designation (ErrorSmith)
+# ============================================================================
+@click.option('--hifi-chemistry',
+              type=click.Choice(['pacbio_hifi_sequel2'], case_sensitive=False),
+              default=None,
+              help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
+@click.option('--ont-chemistry',
+              type=click.Choice([
+                  'ont_lsk110_r941', 'ont_ulk001_r941',
+                  'ont_lsk114_r1041', 'ont_ulk114_r1041'
+              ], case_sensitive=False),
+              default=None,
+              help='ONT chemistry/flow-cell for ErrorSmith model (default: ont_ulk001_r941)')
+@click.option('--illumina-chemistry',
+              type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
+              default=None,
+              help='Illumina chemistry for ErrorSmith model (default: illumina_hiseq2500)')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for assembly')
 @click.option('--config', '-c', type=click.Path(exists=True),
@@ -411,6 +429,7 @@ def pipeline(ctx,
              reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
              hifi_long_reads, ont_long_reads, ont_ul,
+             hifi_chemistry, ont_chemistry, illumina_chemistry,
              output, config,
              use_ai, disable_correction_ai, disable_assembly_ai, model_dir,
              use_gpu, gpu_backend, gpu_device, threads, memory_limit,
@@ -670,6 +689,22 @@ def pipeline(ctx,
         if verbose:
             click.echo(f"ℹ️  Max correction iterations: {max_correction_iterations}")
     
+    # Chemistry designation (ErrorSmith)
+    chemistry_map = {}
+    if hifi_chemistry:
+        chemistry_map['pacbio'] = hifi_chemistry
+        chemistry_map['hifi'] = hifi_chemistry
+    if ont_chemistry:
+        chemistry_map['ont'] = ont_chemistry
+        chemistry_map['ont_ultralong'] = ont_chemistry
+    if illumina_chemistry:
+        chemistry_map['illumina'] = illumina_chemistry
+    if chemistry_map:
+        pipeline_config.setdefault('correction', {})['chemistry_map'] = chemistry_map
+        if verbose:
+            for tech_name, chem in chemistry_map.items():
+                click.echo(f"ℹ️  Chemistry ({tech_name}): {chem}")
+    
     # Coverage sampling
     if sample_size_graph is not None:
         pipeline_config['profiling']['sample_size_graph'] = sample_size_graph
@@ -796,6 +831,17 @@ def pipeline(ctx,
     errorsmith_status = '✓ ErrorSmith AI' if 'ErrorSmith' in correction_ai_modules else '○ Classical'
     click.echo(f"  2. Error Correction ({', '.join(techs_to_correct)}) [{errorsmith_status}]")
     click.echo(f"     └─ Profile errors → Correct reads")
+    
+    # Display chemistry designations if any were specified
+    chem_parts = []
+    if hifi_chemistry:
+        chem_parts.append(f"HiFi={hifi_chemistry}")
+    if ont_chemistry:
+        chem_parts.append(f"ONT={ont_chemistry}")
+    if illumina_chemistry:
+        chem_parts.append(f"Illumina={illumina_chemistry}")
+    if chem_parts:
+        click.echo(f"     └─ Chemistry: {', '.join(chem_parts)}")
     
     # Step 3: Illumina contigger (if applicable)
     if has_illumina:
@@ -1019,8 +1065,15 @@ def pipeline(ctx,
               help='ONT basecaller accuracy mode (sup, hac, fast)')
 @click.option('--ont-detect', is_flag=True, default=False,
               help='Auto-detect ONT metadata using LongBow (requires installation)')
+@click.option('--chemistry', type=click.Choice([
+                  'pacbio_hifi_sequel2',
+                  'ont_lsk110_r941', 'ont_ulk001_r941',
+                  'ont_lsk114_r1041', 'ont_ulk114_r1041',
+                  'illumina_hiseq2500',
+              ], case_sensitive=False), default=None,
+              help='Sequencing chemistry for ErrorSmith model feature encoding')
 def profile(input, technology, output, sample_size, min_quality, threads,
-            ont_flowcell, ont_basecaller, ont_accuracy, ont_detect):
+            ont_flowcell, ont_basecaller, ont_accuracy, ont_detect, chemistry):
     """
     Profile sequencing errors in reads.
     
@@ -2352,6 +2405,22 @@ def batch():
               help='Illumina reads for error correction')
 @click.option('--ancient', type=click.Path(exists=True),
               help='Ancient DNA reads for error correction (damage-aware)')
+# Chemistry designation (ErrorSmith)
+@click.option('--hifi-chemistry',
+              type=click.Choice(['pacbio_hifi_sequel2'], case_sensitive=False),
+              default=None,
+              help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
+@click.option('--ont-chemistry',
+              type=click.Choice([
+                  'ont_lsk110_r941', 'ont_ulk001_r941',
+                  'ont_lsk114_r1041', 'ont_ulk114_r1041'
+              ], case_sensitive=False),
+              default=None,
+              help='ONT chemistry/flow-cell for ErrorSmith model (default: ont_ulk001_r941)')
+@click.option('--illumina-chemistry',
+              type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
+              default=None,
+              help='Illumina chemistry for ErrorSmith model (default: illumina_hiseq2500)')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output directory for corrected reads')
 @click.option('--threads', '-t', type=int, default=8,
@@ -2370,6 +2439,7 @@ def batch():
 @click.option('--max-correction-jobs', type=int, default=20,
               help='Max parallel correction jobs (Nextflow mode)')
 def correct_reads(hifi, ont, illumina, ancient, output, threads, max_iterations,
+                  hifi_chemistry, ont_chemistry, illumina_chemistry,
                   nextflow, nf_profile, nf_resume,
                   correction_batch_size, max_correction_jobs):
     """
@@ -2424,17 +2494,17 @@ def correct_reads(hifi, ont, illumina, ancient, output, threads, max_iterations,
         click.echo("Step 1/2: Profiling errors...")
         profiles = {}
         if hifi:
-            click.echo(f"  • HiFi: {hifi}")
-            profiles['hifi'] = profile_technology(hifi, technology='hifi', threads=threads)
+            click.echo(f"  • HiFi: {hifi}" + (f" [chemistry: {hifi_chemistry}]" if hifi_chemistry else ""))
+            profiles['hifi'] = profile_technology(hifi, technology='hifi', threads=threads, chemistry=hifi_chemistry)
         if ont:
-            click.echo(f"  • ONT: {ont}")
-            profiles['ont'] = profile_technology(ont, technology='ont', threads=threads)
+            click.echo(f"  • ONT: {ont}" + (f" [chemistry: {ont_chemistry}]" if ont_chemistry else ""))
+            profiles['ont'] = profile_technology(ont, technology='ont', threads=threads, chemistry=ont_chemistry)
         if illumina:
-            click.echo(f"  • Illumina: {illumina}")
-            profiles['illumina'] = profile_technology(illumina, technology='illumina', threads=threads)
+            click.echo(f"  • Illumina: {illumina}" + (f" [chemistry: {illumina_chemistry}]" if illumina_chemistry else ""))
+            profiles['illumina'] = profile_technology(illumina, technology='illumina', threads=threads, chemistry=illumina_chemistry)
         if ancient:
             click.echo(f"  • Ancient DNA: {ancient}")
-            profiles['ancient'] = profile_technology(ancient, technology='ancient', threads=threads)
+            profiles['ancient'] = profile_technology(ancient, technology='ancient', threads=threads, chemistry=illumina_chemistry)
         
         # Correct reads
         click.echo("Step 2/2: Correcting reads...")
@@ -2443,22 +2513,22 @@ def correct_reads(hifi, ont, illumina, ancient, output, threads, max_iterations,
         
         if hifi:
             output_file = output_dir / 'corrected_hifi.fastq.gz'
-            correct_batch(hifi, 'hifi', profiles['hifi'], str(output_file), threads)
+            correct_batch(hifi, 'hifi', profiles['hifi'], str(output_file), threads, chemistry=hifi_chemistry)
             click.echo(f"  ✓ HiFi corrected: {output_file}")
         
         if ont:
             output_file = output_dir / 'corrected_ont.fastq.gz'
-            correct_batch(ont, 'ont', profiles['ont'], str(output_file), threads)
+            correct_batch(ont, 'ont', profiles['ont'], str(output_file), threads, chemistry=ont_chemistry)
             click.echo(f"  ✓ ONT corrected: {output_file}")
         
         if illumina:
             output_file = output_dir / 'corrected_illumina.fastq.gz'
-            correct_batch(illumina, 'illumina', profiles['illumina'], str(output_file), threads)
+            correct_batch(illumina, 'illumina', profiles['illumina'], str(output_file), threads, chemistry=illumina_chemistry)
             click.echo(f"  ✓ Illumina corrected: {output_file}")
         
         if ancient:
             output_file = output_dir / 'corrected_ancient.fastq.gz'
-            correct_batch(ancient, 'ancient', profiles['ancient'], str(output_file), threads)
+            correct_batch(ancient, 'ancient', profiles['ancient'], str(output_file), threads, chemistry=illumina_chemistry)
             click.echo(f"  ✓ Ancient DNA corrected (damage-aware): {output_file}")
         
         click.echo(f"✓ Error correction complete: {output}")
@@ -2824,11 +2894,18 @@ def batch_profile_errors(hifi, ont, output, threads):
 @click.option('--technology', '-tech', required=True,
               type=click.Choice(['hifi', 'ont', 'illumina']),
               help='Sequencing technology')
+@click.option('--chemistry', type=click.Choice([
+                  'pacbio_hifi_sequel2',
+                  'ont_lsk110_r941', 'ont_ulk001_r941',
+                  'ont_lsk114_r1041', 'ont_ulk114_r1041',
+                  'illumina_hiseq2500',
+              ], case_sensitive=False), default=None,
+              help='Sequencing chemistry for ErrorSmith model feature encoding')
 @click.option('--output', '-o', required=True, type=click.Path(),
               help='Output corrected reads (FASTQ)')
 @click.option('--threads', '-t', type=int, default=4,
               help='Number of threads')
-def batch_correct_reads(input, profiles, technology, output, threads):
+def batch_correct_reads(input, profiles, technology, chemistry, output, threads):
     """
     Correct errors in a batch of reads.
     
@@ -2850,7 +2927,8 @@ def batch_correct_reads(input, profiles, technology, output, threads):
         technology=technology,
         error_profile=error_profiles.get(technology, {}),
         output_file=output,
-        threads=threads
+        threads=threads,
+        chemistry=chemistry
     )
     
     click.echo(f"✓ Corrected batch saved: {output}")

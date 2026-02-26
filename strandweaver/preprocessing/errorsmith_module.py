@@ -57,6 +57,90 @@ if VISUALIZATION_AVAILABLE:
 
 
 # ============================================================================
+# CHEMISTRY TAXONOMY (mirrors training/scripts/generate_errorsmith_training_data.py)
+# ============================================================================
+# 6 chemistry-specific categories (flow cell + machine + chemistry).
+# These integer codes are used as the ``technology_encoded`` feature in the
+# ErrorSmith XGBoost model.  When performing inference the correct code must
+# be supplied so that the model can leverage chemistry-specific error patterns.
+
+CHEMISTRY_CODES: Dict[str, int] = {
+    'pacbio_hifi_sequel2':  0,
+    'ont_lsk110_r941':      1,
+    'ont_ulk001_r941':      2,
+    'ont_lsk114_r1041':     3,
+    'ont_ulk114_r1041':     4,
+    'illumina_hiseq2500':   5,
+}
+
+CHEMISTRY_NAMES: Dict[int, str] = {v: k for k, v in CHEMISTRY_CODES.items()}
+
+# Map broad technology strings to a sensible default chemistry.
+# Users can override via ``--chemistry`` CLI flags.
+DEFAULT_CHEMISTRY: Dict[str, str] = {
+    'pacbio':        'pacbio_hifi_sequel2',
+    'pacbio_hifi':   'pacbio_hifi_sequel2',
+    'hifi':          'pacbio_hifi_sequel2',
+    'ont':           'ont_ulk001_r941',
+    'ont_regular':   'ont_lsk110_r941',
+    'ont_ultralong': 'ont_ulk001_r941',
+    'nanopore':      'ont_ulk001_r941',
+    'illumina':      'illumina_hiseq2500',
+    'paired_end':    'illumina_hiseq2500',
+    'single_end':    'illumina_hiseq2500',
+    'ancient_dna':   'illumina_hiseq2500',
+    'ancient':       'illumina_hiseq2500',
+    'adna':          'illumina_hiseq2500',
+}
+
+# Human-readable labels for CLI help text
+CHEMISTRY_LABELS: Dict[str, str] = {
+    'pacbio_hifi_sequel2': 'PacBio HiFi (Sequel II/IIe)',
+    'ont_lsk110_r941':     'ONT Ligation Kit 110 / R9.4.1',
+    'ont_ulk001_r941':     'ONT Ultra-Long Kit 001 / R9.4.1',
+    'ont_lsk114_r1041':    'ONT Ligation Kit 114 / R10.4.1',
+    'ont_ulk114_r1041':    'ONT Ultra-Long Kit 114 / R10.4.1',
+    'illumina_hiseq2500':  'Illumina HiSeq 2500',
+}
+
+
+def resolve_chemistry(technology: str, chemistry: Optional[str] = None) -> Tuple[str, int]:
+    """
+    Resolve a chemistry name and integer code for the ErrorSmith model.
+
+    If *chemistry* is explicitly provided it is validated against
+    ``CHEMISTRY_CODES``.  Otherwise a sensible default is chosen from
+    ``DEFAULT_CHEMISTRY`` based on the broad *technology* string.
+
+    Args:
+        technology: Broad technology string (e.g. "ont", "hifi").
+        chemistry:  Optional explicit chemistry key.
+
+    Returns:
+        Tuple of (chemistry_name, chemistry_code).
+
+    Raises:
+        ValueError: If *chemistry* is not a recognised key.
+    """
+    if chemistry is not None:
+        chem_lower = chemistry.lower()
+        if chem_lower not in CHEMISTRY_CODES:
+            valid = ', '.join(sorted(CHEMISTRY_CODES))
+            raise ValueError(
+                f"Unknown chemistry '{chemistry}'. "
+                f"Valid chemistries: {valid}"
+            )
+        return chem_lower, CHEMISTRY_CODES[chem_lower]
+
+    tech_lower = technology.lower()
+    chem_name = DEFAULT_CHEMISTRY.get(tech_lower)
+    if chem_name is None:
+        # Fallback — unknown technology, code = len(CHEMISTRY_CODES)
+        return 'unknown', len(CHEMISTRY_CODES)
+    return chem_name, CHEMISTRY_CODES[chem_name]
+
+
+# ============================================================================
 # SECTION 1: BASE CORRECTOR INFRASTRUCTURE
 # ============================================================================
 # Core abstract base class for all correctors and factory function
@@ -73,7 +157,8 @@ class BaseCorrector(ABC):
     def __init__(
         self,
         error_profile: Optional[Dict[str, Any]] = None,
-        collect_viz_data: bool = False
+        collect_viz_data: bool = False,
+        chemistry: Optional[str] = None
     ):
         """
         Initialize base corrector.
@@ -81,9 +166,14 @@ class BaseCorrector(ABC):
         Args:
             error_profile: Optional error profile for guided correction
             collect_viz_data: Whether to collect visualization data
+            chemistry: Explicit chemistry key (e.g. 'ont_lsk114_r1041').
+                       When ``None``, a default is chosen based on the
+                       technology type.
         """
         self.error_profile = error_profile
         self.collect_viz_data = collect_viz_data
+        self.chemistry = chemistry          # raw key or None
+        self.chemistry_code: Optional[int] = None  # set by get_corrector()
         self.stats = CorrectionStats()
         
         # Visualization data collection
@@ -207,6 +297,7 @@ class BaseCorrector(ABC):
 def get_corrector(
     technology: str,
     error_profile: Optional[Dict[str, Any]] = None,
+    chemistry: Optional[str] = None,
     **kwargs
 ) -> BaseCorrector:
     """
@@ -215,34 +306,47 @@ def get_corrector(
     Args:
         technology: Technology type ("ont", "pacbio", "illumina", "ancient_dna")
         error_profile: Optional error profile for guided correction
+        chemistry: Optional explicit chemistry key (e.g. 'ont_lsk114_r1041').
+                   When ``None``, a sensible default is chosen from
+                   :data:`DEFAULT_CHEMISTRY` based on *technology*.
         **kwargs: Additional arguments passed to corrector constructor
         
     Returns:
-        Technology-specific corrector instance
+        Technology-specific corrector instance with ``chemistry`` and
+        ``chemistry_code`` attributes set.
         
     Raises:
-        ValueError: If technology not recognized
+        ValueError: If technology not recognized or chemistry invalid
     """
     tech_lower = technology.lower()
     
+    # Resolve chemistry name + integer code
+    chem_name, chem_code = resolve_chemistry(tech_lower, chemistry)
+    
     # Map technology strings to corrector classes
     if tech_lower in ["ont", "ont_regular", "ont_ultralong", "nanopore"]:
-        return ONTCorrector(error_profile=error_profile, **kwargs)
+        corrector = ONTCorrector(error_profile=error_profile, **kwargs)
     
     elif tech_lower in ["pacbio", "pacbio_hifi", "hifi"]:
-        return PacBioCorrector(error_profile=error_profile, **kwargs)
+        corrector = PacBioCorrector(error_profile=error_profile, **kwargs)
     
     elif tech_lower in ["illumina", "paired_end", "single_end"]:
-        return IlluminaCorrector(error_profile=error_profile, **kwargs)
+        corrector = IlluminaCorrector(error_profile=error_profile, **kwargs)
     
     elif tech_lower in ["ancient_dna", "ancient", "adna"]:
-        return AncientDNACorrector(error_profile=error_profile, **kwargs)
+        corrector = AncientDNACorrector(error_profile=error_profile, **kwargs)
     
     else:
         raise ValueError(
             f"Unknown technology: {technology}. "
             f"Supported: ont, pacbio, illumina, ancient_dna"
         )
+    
+    # Stamp resolved chemistry onto the corrector
+    corrector.chemistry = chem_name
+    corrector.chemistry_code = chem_code
+    logger.info(f"Corrector: {type(corrector).__name__} | chemistry={chem_name} (code={chem_code})")
+    return corrector
 
 
 # ============================================================================
@@ -2065,7 +2169,8 @@ def profile_technology(
     technology: str,
     k_size: int = 21,
     sample_size: int = 100000,
-    threads: int = 1
+    threads: int = 1,
+    chemistry: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Profile sequencing errors for a specific technology.
@@ -2080,11 +2185,15 @@ def profile_technology(
         k_size: K-mer size for spectrum analysis
         sample_size: Number of reads to sample for profiling
         threads: Number of threads to use
+        chemistry: Optional explicit chemistry key (e.g. 'ont_lsk114_r1041').
+                   Stored in the returned profile dict for downstream use.
     
     Returns:
         Dict with error profile:
         {
             'technology': str,
+            'chemistry': str,
+            'chemistry_code': int,
             'k_size': int,
             'kmer_spectrum': dict,
             'error_rate': float,
@@ -2139,8 +2248,13 @@ def profile_technology(
     frequency_dist = Counter(kmer_counts.values())
     kmer_spectrum = {str(k): v for k, v in sorted(frequency_dist.items())}
     
+    # Resolve chemistry
+    chem_name, chem_code = resolve_chemistry(technology, chemistry)
+    
     profile = {
         'technology': technology,
+        'chemistry': chem_name,
+        'chemistry_code': chem_code,
         'k_size': k_size,
         'kmer_spectrum': kmer_spectrum,
         'error_rate': float(error_rate),
@@ -2161,7 +2275,8 @@ def correct_batch(
     technology: str,
     error_profile: Dict[str, Any],
     output_file: str,
-    threads: int = 1
+    threads: int = 1,
+    chemistry: Optional[str] = None
 ) -> None:
     """
     Correct errors in a batch of reads.
@@ -2176,15 +2291,23 @@ def correct_batch(
         error_profile: Pre-computed error profile from profile_technology()
         output_file: Output corrected FASTQ
         threads: Number of threads to use
+        chemistry: Optional explicit chemistry key (e.g. 'ont_lsk114_r1041').
+                   If not provided, uses chemistry stored in *error_profile*
+                   (from profile_technology()) or falls back to the default
+                   for *technology*.
     """
     from ..io_utils import read_fastq, write_fastq
     
     logger.info(f"Correcting {technology} reads batch: {Path(reads_file).name}")
     
+    # Resolve chemistry — prefer explicit arg, then profile, then default
+    resolved_chemistry = chemistry or error_profile.get('chemistry')
+    
     # Create corrector for technology
     corrector = get_corrector(
         technology=technology,
         error_profile=error_profile,
+        chemistry=resolved_chemistry,
         k_size=error_profile.get('k_size', 21)
     )
     
@@ -2205,6 +2328,13 @@ def correct_batch(
 # ============================================================================
 
 __all__ = [
+    # Chemistry Taxonomy
+    'CHEMISTRY_CODES',
+    'CHEMISTRY_NAMES',
+    'CHEMISTRY_LABELS',
+    'DEFAULT_CHEMISTRY',
+    'resolve_chemistry',
+    
     # Section 1: Base Corrector Infrastructure
     'BaseCorrector',
     'get_corrector',

@@ -324,5 +324,137 @@ class TestSubsampleFlags:
             ])
             assert result.exit_code != 0
 
+
+class TestChemistryFlags:
+    """Tests for ErrorSmith chemistry designation flags."""
+
+    def test_chemistry_flags_in_pipeline_help(self):
+        """Chemistry flags should appear in pipeline --help."""
+        runner = CliRunner()
+        result = runner.invoke(main, ['pipeline', '--help'])
+        assert result.exit_code == 0
+        assert '--hifi-chemistry' in result.output
+        assert '--ont-chemistry' in result.output
+        assert '--illumina-chemistry' in result.output
+
+    def test_chemistry_flags_in_correct_help(self):
+        """Chemistry flags should appear in correct --help."""
+        runner = CliRunner()
+        result = runner.invoke(main, ['correct', '--help'])
+        assert result.exit_code == 0
+        assert '--hifi-chemistry' in result.output
+        assert '--ont-chemistry' in result.output
+        assert '--illumina-chemistry' in result.output
+
+    def test_invalid_ont_chemistry(self):
+        """Invalid ONT chemistry should be rejected."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--ont-chemistry', 'ont_fake_chemistry',
+                '--dry-run',
+            ])
+            assert result.exit_code != 0
+
+    def test_valid_ont_chemistry_dryrun(self):
+        """Valid ONT chemistry with --dry-run should succeed."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--ont-chemistry', 'ont_lsk114_r1041',
+                '--dry-run',
+            ])
+            assert result.exit_code == 0
+            assert 'ont_lsk114_r1041' in result.output
+
+    def test_valid_hifi_chemistry_dryrun(self):
+        """Valid HiFi chemistry with --dry-run should succeed."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--hifi-long-reads', 'reads.fa',
+                '-o', 'out',
+                '--hifi-chemistry', 'pacbio_hifi_sequel2',
+                '--dry-run',
+            ])
+            assert result.exit_code == 0
+            assert 'pacbio_hifi_sequel2' in result.output
+
+
+class TestChemistryModule:
+    """Tests for ErrorSmith chemistry resolution in errorsmith_module."""
+
+    def test_chemistry_codes_defined(self):
+        """CHEMISTRY_CODES should have 6 entries."""
+        from strandweaver.preprocessing.errorsmith_module import CHEMISTRY_CODES
+        assert len(CHEMISTRY_CODES) == 6
+        assert 'pacbio_hifi_sequel2' in CHEMISTRY_CODES
+        assert 'ont_lsk110_r941' in CHEMISTRY_CODES
+        assert 'ont_ulk001_r941' in CHEMISTRY_CODES
+        assert 'ont_lsk114_r1041' in CHEMISTRY_CODES
+        assert 'ont_ulk114_r1041' in CHEMISTRY_CODES
+        assert 'illumina_hiseq2500' in CHEMISTRY_CODES
+
+    def test_chemistry_names_reverse_map(self):
+        """CHEMISTRY_NAMES should be correct reverse map."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            CHEMISTRY_CODES, CHEMISTRY_NAMES
+        )
+        for name, code in CHEMISTRY_CODES.items():
+            assert CHEMISTRY_NAMES[code] == name
+
+    def test_resolve_chemistry_explicit(self):
+        """Explicit chemistry should resolve correctly."""
+        from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
+        name, code = resolve_chemistry('ont', chemistry='ont_lsk114_r1041')
+        assert name == 'ont_lsk114_r1041'
+        assert code == 3
+
+    def test_resolve_chemistry_default(self):
+        """Default chemistry should be chosen for known technology."""
+        from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
+        name, code = resolve_chemistry('hifi')
+        assert name == 'pacbio_hifi_sequel2'
+        assert code == 0
+
+    def test_resolve_chemistry_invalid(self):
+        """Invalid chemistry should raise ValueError."""
+        from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
+        with pytest.raises(ValueError, match='Unknown chemistry'):
+            resolve_chemistry('ont', chemistry='ont_fake_v99')
+
+    def test_get_corrector_stamps_chemistry(self):
+        """get_corrector() should stamp chemistry and chemistry_code."""
+        from strandweaver.preprocessing.errorsmith_module import get_corrector
+        c = get_corrector('ont', chemistry='ont_lsk114_r1041')
+        assert c.chemistry == 'ont_lsk114_r1041'
+        assert c.chemistry_code == 3
+
+    def test_get_corrector_default_chemistry(self):
+        """get_corrector() without explicit chemistry should use default."""
+        from strandweaver.preprocessing.errorsmith_module import get_corrector
+        c = get_corrector('illumina')
+        assert c.chemistry == 'illumina_hiseq2500'
+        assert c.chemistry_code == 5
+
+    def test_get_corrector_all_technologies(self):
+        """get_corrector() should work for all 4 technology families."""
+        from strandweaver.preprocessing.errorsmith_module import get_corrector
+        for tech in ['ont', 'pacbio', 'illumina', 'ancient_dna']:
+            c = get_corrector(tech)
+            assert c.chemistry is not None
+            assert c.chemistry_code is not None
+
+
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.
