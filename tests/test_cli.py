@@ -335,6 +335,7 @@ class TestChemistryFlags:
         assert result.exit_code == 0
         assert '--hifi-chemistry' in result.output
         assert '--ont-chemistry' in result.output
+        assert '--ont-ul-chemistry' in result.output
         assert '--illumina-chemistry' in result.output
 
     def test_chemistry_flags_in_correct_help(self):
@@ -344,6 +345,7 @@ class TestChemistryFlags:
         assert result.exit_code == 0
         assert '--hifi-chemistry' in result.output
         assert '--ont-chemistry' in result.output
+        assert '--ont-ul-chemistry' in result.output
         assert '--illumina-chemistry' in result.output
 
     def test_invalid_ont_chemistry(self):
@@ -390,6 +392,54 @@ class TestChemistryFlags:
             assert result.exit_code == 0
             assert 'pacbio_hifi_sequel2' in result.output
 
+    def test_ont_ul_chemistry_separate_flag(self):
+        """ONT-UL chemistry flag should be separate from ONT chemistry."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-ul', 'reads.fa',
+                '--ont-ul-chemistry', 'ont_ulk114_r1041',
+                '-o', 'out',
+                '--dry-run',
+            ])
+            assert result.exit_code == 0
+            assert 'ONT-UL=ont_ulk114_r1041' in result.output
+
+    def test_ont_and_ul_separate_chemistries(self):
+        """ONT and ONT-UL can have different chemistries in same run."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('ont.fa', TINY_READS)
+            _write('ul.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-long-reads', 'ont.fa',
+                '--ont-ul', 'ul.fa',
+                '--ont-chemistry', 'ont_lsk114_r1041',
+                '--ont-ul-chemistry', 'ont_ulk114_r1041',
+                '-o', 'out',
+                '--dry-run',
+            ])
+            assert result.exit_code == 0
+            assert 'ONT=ont_lsk114_r1041' in result.output
+            assert 'ONT-UL=ont_ulk114_r1041' in result.output
+
+    def test_ligation_kit_rejected_for_ul(self):
+        """Ligation kit chemistry should be rejected for --ont-ul-chemistry."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write('reads.fa', TINY_READS)
+            result = runner.invoke(main, [
+                'pipeline',
+                '--ont-ul', 'reads.fa',
+                '--ont-ul-chemistry', 'ont_lsk114_r1041',
+                '-o', 'out',
+                '--dry-run',
+            ])
+            assert result.exit_code != 0
+
 
 class TestChemistryModule:
     """Tests for ErrorSmith chemistry resolution in errorsmith_module."""
@@ -426,6 +476,20 @@ class TestChemistryModule:
         name, code = resolve_chemistry('hifi')
         assert name == 'pacbio_hifi_sequel2'
         assert code == 0
+
+    def test_resolve_chemistry_ont_default_is_ligation(self):
+        """Default ONT chemistry should be a ligation kit, not ultra-long."""
+        from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
+        name, code = resolve_chemistry('ont')
+        assert name == 'ont_lsk110_r941'
+        assert code == 1
+
+    def test_resolve_chemistry_ont_ul_default_is_ultralong(self):
+        """Default ONT ultra-long chemistry should be an ultra-long kit."""
+        from strandweaver.preprocessing.errorsmith_module import resolve_chemistry
+        name, code = resolve_chemistry('ont_ultralong')
+        assert name == 'ont_ulk001_r941'
+        assert code == 2
 
     def test_resolve_chemistry_invalid(self):
         """Invalid chemistry should raise ValueError."""

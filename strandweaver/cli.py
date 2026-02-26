@@ -252,11 +252,16 @@ def config_show(config_file, format):
               help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
 @click.option('--ont-chemistry',
               type=click.Choice([
-                  'ont_lsk110_r941', 'ont_ulk001_r941',
-                  'ont_lsk114_r1041', 'ont_ulk114_r1041'
+                  'ont_lsk110_r941', 'ont_lsk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT chemistry/flow-cell for ErrorSmith model (default: ont_ulk001_r941)')
+              help='ONT ligation-kit chemistry for ErrorSmith model (default: ont_lsk110_r941)')
+@click.option('--ont-ul-chemistry',
+              type=click.Choice([
+                  'ont_ulk001_r941', 'ont_ulk114_r1041'
+              ], case_sensitive=False),
+              default=None,
+              help='ONT ultra-long kit chemistry for ErrorSmith model (default: ont_ulk001_r941)')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
               default=None,
@@ -429,7 +434,7 @@ def pipeline(ctx,
              reads1, reads2, reads3, reads4, reads5,
              technology1, technology2, technology3, technology4, technology5,
              hifi_long_reads, ont_long_reads, ont_ul,
-             hifi_chemistry, ont_chemistry, illumina_chemistry,
+             hifi_chemistry, ont_chemistry, ont_ul_chemistry, illumina_chemistry,
              output, config,
              use_ai, disable_correction_ai, disable_assembly_ai, model_dir,
              use_gpu, gpu_backend, gpu_device, threads, memory_limit,
@@ -696,7 +701,8 @@ def pipeline(ctx,
         chemistry_map['hifi'] = hifi_chemistry
     if ont_chemistry:
         chemistry_map['ont'] = ont_chemistry
-        chemistry_map['ont_ultralong'] = ont_chemistry
+    if ont_ul_chemistry:
+        chemistry_map['ont_ultralong'] = ont_ul_chemistry
     if illumina_chemistry:
         chemistry_map['illumina'] = illumina_chemistry
     if chemistry_map:
@@ -838,6 +844,8 @@ def pipeline(ctx,
         chem_parts.append(f"HiFi={hifi_chemistry}")
     if ont_chemistry:
         chem_parts.append(f"ONT={ont_chemistry}")
+    if ont_ul_chemistry:
+        chem_parts.append(f"ONT-UL={ont_ul_chemistry}")
     if illumina_chemistry:
         chem_parts.append(f"Illumina={illumina_chemistry}")
     if chem_parts:
@@ -2412,11 +2420,16 @@ def batch():
               help='PacBio chemistry for ErrorSmith model (default: pacbio_hifi_sequel2)')
 @click.option('--ont-chemistry',
               type=click.Choice([
-                  'ont_lsk110_r941', 'ont_ulk001_r941',
-                  'ont_lsk114_r1041', 'ont_ulk114_r1041'
+                  'ont_lsk110_r941', 'ont_lsk114_r1041'
               ], case_sensitive=False),
               default=None,
-              help='ONT chemistry/flow-cell for ErrorSmith model (default: ont_ulk001_r941)')
+              help='ONT ligation-kit chemistry for ErrorSmith model (default: ont_lsk110_r941)')
+@click.option('--ont-ul-chemistry',
+              type=click.Choice([
+                  'ont_ulk001_r941', 'ont_ulk114_r1041'
+              ], case_sensitive=False),
+              default=None,
+              help='ONT ultra-long kit chemistry for ErrorSmith model (default: ont_ulk001_r941)')
 @click.option('--illumina-chemistry',
               type=click.Choice(['illumina_hiseq2500'], case_sensitive=False),
               default=None,
@@ -2439,7 +2452,7 @@ def batch():
 @click.option('--max-correction-jobs', type=int, default=20,
               help='Max parallel correction jobs (Nextflow mode)')
 def correct_reads(hifi, ont, illumina, ancient, output, threads, max_iterations,
-                  hifi_chemistry, ont_chemistry, illumina_chemistry,
+                  hifi_chemistry, ont_chemistry, ont_ul_chemistry, illumina_chemistry,
                   nextflow, nf_profile, nf_resume,
                   correction_batch_size, max_correction_jobs):
     """
