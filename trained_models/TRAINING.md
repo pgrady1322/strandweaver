@@ -11,6 +11,21 @@ StrandWeaver ships with pre-trained models for all 8 AI modules. This guide cove
 
 > **Note**: Pre-trained models are included with the v0.2+ release. You only need this guide if you want to train custom models for organism-specific optimization.
 
+### Model Performance at a Glance
+
+| Module | Type | Accuracy / R² | F1-macro | CV (5-fold) |
+|--------|------|---------------|----------|-------------|
+| 🛡️ EdgeWarden | XGBoost (×5) | 0.881 | 0.896 | 0.878 ± 0.002 |
+| 🔧 ErrorSmith | XGBoost | 0.866 | 0.865 | 0.866 ± 0.001 |
+| 🧬 PathGNN | GATv2Conv GNN | 0.897 | 0.897 | 0.897 ± 0.001 |
+| 🔀 DiploidAI | XGBoost | 0.862 | 0.862 | 0.858 ± 0.001 |
+| 🧵 ThreadCompass | XGBoost | R²=0.997 | — | R²=0.997 ± 0.0003 |
+| 🔍 SVScribe | XGBoost | 0.823 | 0.557 | 0.817 ± 0.005 |
+| 🧠 K-Weaver (DBG) | XGBoost | R²=0.863 | — | 0.863 ± 0.064 |
+| 🧠 K-Weaver (UL Overlap) | XGBoost | R²=0.982 | — | 0.982 ± 0.020 |
+| 🧠 K-Weaver (Extension) | XGBoost | R²=0.849 | — | 0.849 ± 0.074 |
+| 🧠 K-Weaver (Polish) | XGBoost | R²=0.881 | — | 0.881 ± 0.067 |
+
 ---
 
 ## 📋 Table of Contents
@@ -61,7 +76,7 @@ All pre-trained models are stored in `trained_models/` and managed via Git LFS:
 | Module | Model | File(s) | Task |
 |--------|-------|---------|------|
 | 🛡️ **EdgeWarden** | XGBoost (×5) | `edgewarden/edgewarden_{tech}.pkl` | Edge quality scoring (per-technology) |
-| 🔧 **ErrorSmith** | XGBoost | `errorsmith_models/error_classifier.pkl` | Per-base error classification (5-class, chemistry-aware) |
+| 🔧 **ErrorSmith** | XGBoost | `errorsmith/error_classifier.pkl` | Per-base error classification (5-class, chemistry-aware) |
 | 🧠 **K-Weaver** | XGBoost (×4) | `kweaver/{dbg,ul_overlap,extension,polish}_model.pkl` | Optimal k-mer size prediction |
 | 🧬 **PathGNN** | GATv2Conv GNN | `pathgnn/pathgnn_model.pt` | Graph-aware edge classification |
 | 🔀 **DiploidAI** | XGBoost | `diploid/diploid_model.pkl` | Haplotype phasing (26 features) |
@@ -205,7 +220,7 @@ For large-scale hyperparameter sweeps, we recommend Google Colab with a T4 GPU.
 
 3. **Run all cells** — minimap2 alignment → per-base error extraction (25M raw labels) → balanced undersampling (500K) → Optuna XGBoost sweep → 5-fold CV
 
-4. **Download** `error_classifier.pkl` + `training_results.json` to `trained_models/errorsmith_models/`
+4. **Download** `error_classifier.pkl` + `training_results.json` to `trained_models/errorsmith/`
 
 > **Pre-trained model included**: The shipped ErrorSmith model achieves 86.6% accuracy / 0.865 F1-macro across 5 error classes and 6 sequencing chemistries. Retraining is only needed if you add unsupported chemistry types.
 

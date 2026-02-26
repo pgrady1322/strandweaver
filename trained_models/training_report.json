@@ -12926,7 +12926,7 @@
         "ont_lsk114_r1041",
         "illumina_hiseq2500"
       ],
-      "model_file": "errorsmith_models/error_classifier.pkl",
+      "model_file": "errorsmith/error_classifier.pkl",
       "training_data_source": "CHM13 T2T reference BAM alignments",
       "hp_search": "optuna"
     }

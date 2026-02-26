@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Status](https://img.shields.io/badge/status-v0.2_Beta-green.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
-[![Models](https://img.shields.io/badge/trained%20models-5%20XGBoost%20%2B%201%20GNN-orange.svg)](trained_models/TRAINING.md)
+[![Models](https://img.shields.io/badge/trained%20models-6%20XGBoost%20%2B%201%20GNN-orange.svg)](trained_models/TRAINING.md)
 [![License](https://img.shields.io/badge/license-Dual%20License%20(Academic/Commercial)-blue.svg)](LICENSE_ACADEMIC.md)
 
 **StrandWeaver** is a next-generation genome assembly pipeline combining machine-learning optimized technology-aware error correction, graph-based assembly with haplotype-aware graph neural network path resolution, and expanded features including comprehensive structural variant detection for ancient DNA, Illumina, ONT, ultra-long ONT, and PacBio sequencing data. Its goal is to relieve manual curation bottlenecks in traditional high-contiguity genome assembly by applying AI/ML to genome graph paths and other complex regions. It uses these technologies to improve accuracy and contiguity, but also to provide functional annotations, such as structural variants, during the assembly process.
@@ -21,9 +21,26 @@ StrandWeaver is inspired by the brilliant work of the authors of MaSuRCA *(1)*, 
 
 The pipeline can be custom trained using provided scripts for any data type (new sequencing technology) or organism-specific scenario (genomes with extreme repeat content, high heterozygosity, or complex structural variation). **Pre-trained models ship with v0.2+ and are used automatically.** See the [AI Model Training Guide](trained_models/TRAINING.md) for custom training.
 
-> **🚀 v0.2.0 Beta (February 2026):** Trained ML models now ship for 5 of 7 AI modules (EdgeWarden, PathGNN, DiploidAI, ThreadCompass, SVScribe). All models retrained on 200 synthetic diploid genomes via Colab GPU sweeps. Pre-trained weights load automatically — no user setup required. See [v0.2 Release Notes](#v02-release-notes) below.
+> **🚀 v0.2.0 Beta (February 2026):** Trained ML models now ship for 6 of 8 AI modules (EdgeWarden, ErrorSmith, PathGNN, DiploidAI, ThreadCompass, SVScribe). All models retrained on 200 synthetic diploid genomes via Colab GPU sweeps. Pre-trained weights load automatically — no user setup required. See [v0.2 Release Notes](#v02-release-notes) below.
 >
-> **v0.3+:** K-Weaver & ErrorSmith trained models. Standalone `assemble` command. Polyploid assembly support. BUSCO integration.
+> **v0.3+:** K-Weaver trained models. Standalone `assemble` command. Polyploid assembly support. BUSCO integration.
+
+### 🎯 Model Performance at a Glance
+
+| Module | Type | Accuracy / R² | F1-macro | CV (5-fold) |
+|--------|------|---------------|----------|-------------|
+| 🛡️ EdgeWarden | XGBoost (×5) | 0.881 | 0.896 | 0.878 ± 0.002 |
+| 🔧 ErrorSmith | XGBoost | 0.866 | 0.865 | 0.866 ± 0.001 |
+| 🧬 PathGNN | GATv2Conv GNN | 0.897 | 0.897 | 0.897 ± 0.001 |
+| 🔀 DiploidAI | XGBoost | 0.862 | 0.862 | 0.858 ± 0.001 |
+| 🧵 ThreadCompass | XGBoost | R²=0.997 | — | R²=0.997 ± 0.0003 |
+| 🔍 SVScribe | XGBoost | 0.823 | 0.557 | 0.817 ± 0.005 |
+| 🧠 K-Weaver (DBG) | XGBoost | R²=0.863 | — | 0.863 ± 0.064 |
+| 🧠 K-Weaver (UL Overlap) | XGBoost | R²=0.982 | — | 0.982 ± 0.020 |
+| 🧠 K-Weaver (Extension) | XGBoost | R²=0.849 | — | 0.849 ± 0.074 |
+| 🧠 K-Weaver (Polish) | XGBoost | R²=0.881 | — | 0.881 ± 0.067 |
+
+> See the [AI Model Training Guide](trained_models/TRAINING.md) for full per-class breakdowns and training details.
 
 ---
 
@@ -73,9 +90,9 @@ The pipeline can be custom trained using provided scripts for any data type (new
 - 🔌 **Modular Architecture**: All AI features can be selectively disabled for classical heuristics
 
 ### AI/ML Features (v0.2 — Trained Models)
-- **7-Module AI Subsystem** — 5 ship with trained XGBoost/GNN weights, 2 use optimized heuristics:
+- **8-Module AI Subsystem** — 6 ship with trained XGBoost/GNN weights, 2 use optimized heuristics:
   1. ⚙️ **K-Weaver**: K-mer optimization with rule-based selection *(trained models in v0.3)*
-  2. ⚙️ **ErrorSmith**: Technology-specific error profiling *(trained models in v0.3)*
+  2. 🧠 **ErrorSmith**: Per-base error classification with trained XGBoost — 5 error classes across 6 chemistries (acc: 0.87, F1-macro: 0.87)
   3. 🧠 **EdgeWarden**: 80-feature edge filtering with trained XGBoost — 5 technology-specific models (acc: 0.88, F1-macro: 0.90)
   4. 🧠 **PathGNN**: Graph neural network edge classification with GATv2Conv attention (acc: 0.90, F1-macro: 0.90)
   5. 🧠 **DiploidAI**: XGBoost haplotype phasing with 26-feature node classification (acc: 0.86, F1-macro: 0.86)
