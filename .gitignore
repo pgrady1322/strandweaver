@@ -48,6 +48,7 @@ nextflow/.nextflow*
 
 # ── Internal dev files (not for GitHub) ────────────────────────────────
 Non_Main_Commit_Files/
+Non_Main_Commit_Files/TRAINING.md
 
 # ── Misc ──────────────────────────────────────────────────────────────
 archive/
