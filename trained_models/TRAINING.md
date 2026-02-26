@@ -13,18 +13,18 @@ StrandWeaver ships with pre-trained models for all 8 AI modules. This guide cove
 
 ### Model Performance at a Glance
 
-| Module | Type | Accuracy / R² | F1-macro | CV (5-fold) |
+| Module | Task | Accuracy / R² | F1-macro | CV (5-fold) |
 |--------|------|---------------|----------|-------------|
-| 🛡️ EdgeWarden | XGBoost (×5) | 0.881 | 0.896 | 0.878 ± 0.002 |
-| 🔧 ErrorSmith | XGBoost | 0.866 | 0.865 | 0.866 ± 0.001 |
-| 🧬 PathGNN | GATv2Conv GNN | 0.897 | 0.897 | 0.897 ± 0.001 |
-| 🔀 DiploidAI | XGBoost | 0.862 | 0.862 | 0.858 ± 0.001 |
-| 🧵 ThreadCompass | XGBoost | R²=0.997 | — | R²=0.997 ± 0.0003 |
-| 🔍 SVScribe | XGBoost | 0.823 | 0.557 | 0.817 ± 0.005 |
-| 🧠 K-Weaver (DBG) | XGBoost | R²=0.863 | — | 0.863 ± 0.064 |
-| 🧠 K-Weaver (UL Overlap) | XGBoost | R²=0.982 | — | 0.982 ± 0.020 |
-| 🧠 K-Weaver (Extension) | XGBoost | R²=0.849 | — | 0.849 ± 0.074 |
-| 🧠 K-Weaver (Polish) | XGBoost | R²=0.881 | — | 0.881 ± 0.067 |
+| 🛡️ EdgeWarden | Edge quality scoring (per-technology) | 0.881 | 0.896 | 0.878 ± 0.002 |
+| 🔧 ErrorSmith | Per-base error classification (5-class) | 0.866 | 0.865 | 0.866 ± 0.001 |
+| 🧬 PathGNN | Graph-aware edge classification | 0.897 | 0.897 | 0.897 ± 0.001 |
+| 🔀 DiploidAI | Haplotype phasing (26 features) | 0.862 | 0.862 | 0.858 ± 0.001 |
+| 🧵 ThreadCompass | Ultra-long read routing | R²=0.997 | — | R²=0.997 ± 0.0003 |
+| 🔍 SVScribe | Structural variant detection | 0.823 | 0.557 | 0.817 ± 0.005 |
+| 🧠 K-Weaver (DBG) | De Bruijn graph k-mer selection | R²=0.863 | — | 0.863 ± 0.064 |
+| 🧠 K-Weaver (UL Overlap) | Ultra-long overlap k-mer selection | R²=0.982 | — | 0.982 ± 0.020 |
+| 🧠 K-Weaver (Extension) | Contig extension k-mer selection | R²=0.849 | — | 0.849 ± 0.074 |
+| 🧠 K-Weaver (Polish) | Polishing k-mer selection | R²=0.881 | — | 0.881 ± 0.067 |
 
 ---
 
