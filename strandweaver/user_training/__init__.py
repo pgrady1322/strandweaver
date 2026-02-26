@@ -19,8 +19,8 @@ from .training_config import (
     Ploidy
 )
 
-# config_based_workflow depends on the 'training' backend (strandweaver-dev
-# only).  The module itself is now safely importable thanks to guarded
+# config_based_workflow depends on the 'training' backend (strandweaver
+# dev branch only).  The module itself is now safely importable thanks to guarded
 # imports, but we still wrap re-export here for extra resilience.
 try:
     from .config_based_workflow import (
