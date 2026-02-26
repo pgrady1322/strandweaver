@@ -44,7 +44,7 @@ logger = logging.getLogger("strandweaver.errorsmith_training")
 # ═══════════════════════════════════════════════════════════════════════
 
 # ── Chemistry / flow-cell taxonomy ────────────────────────────────
-# 6 chemistry-specific categories (flow cell + machine + chemistry)
+# 9 chemistry-specific categories (flow cell + machine + chemistry)
 CHEMISTRY_CODES = {
     'pacbio_hifi_sequel2':  0,
     'ont_lsk110_r941':      1,
@@ -52,6 +52,9 @@ CHEMISTRY_CODES = {
     'ont_lsk114_r1041':     3,
     'ont_ulk114_r1041':     4,
     'illumina_hiseq2500':   5,
+    'pacbio_onso':          6,
+    'element_aviti':        7,
+    'element_ultraq':       8,
 }
 
 CHEMISTRY_NAMES = {v: k for k, v in CHEMISTRY_CODES.items()}
@@ -64,6 +67,9 @@ CHEMISTRY_PRESETS = {
     'ont_lsk114_r1041':     'map-ont',
     'ont_ulk114_r1041':     'map-ont',
     'illumina_hiseq2500':   'sr',
+    'pacbio_onso':          'sr',
+    'element_aviti':        'sr',
+    'element_ultraq':       'sr',
 }
 
 # Legacy aliases for backward compat

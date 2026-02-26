@@ -59,7 +59,7 @@ if VISUALIZATION_AVAILABLE:
 # ============================================================================
 # CHEMISTRY TAXONOMY (mirrors training/scripts/generate_errorsmith_training_data.py)
 # ============================================================================
-# 6 chemistry-specific categories (flow cell + machine + chemistry).
+# 9 chemistry-specific categories (flow cell + machine + chemistry).
 # These integer codes are used as the ``technology_encoded`` feature in the
 # ErrorSmith XGBoost model.  When performing inference the correct code must
 # be supplied so that the model can leverage chemistry-specific error patterns.
@@ -71,6 +71,9 @@ CHEMISTRY_CODES: Dict[str, int] = {
     'ont_lsk114_r1041':     3,
     'ont_ulk114_r1041':     4,
     'illumina_hiseq2500':   5,
+    'pacbio_onso':          6,
+    'element_aviti':        7,
+    'element_ultraq':       8,
 }
 
 CHEMISTRY_NAMES: Dict[int, str] = {v: k for k, v in CHEMISTRY_CODES.items()}
@@ -81,6 +84,8 @@ DEFAULT_CHEMISTRY: Dict[str, str] = {
     'pacbio':        'pacbio_hifi_sequel2',
     'pacbio_hifi':   'pacbio_hifi_sequel2',
     'hifi':          'pacbio_hifi_sequel2',
+    'onso':          'pacbio_onso',
+    'pacbio_onso':   'pacbio_onso',
     'ont':           'ont_lsk114_r1041',
     'ont_regular':   'ont_lsk114_r1041',
     'ont_ultralong': 'ont_ulk001_r941',
@@ -91,6 +96,11 @@ DEFAULT_CHEMISTRY: Dict[str, str] = {
     'ancient_dna':   'illumina_hiseq2500',
     'ancient':       'illumina_hiseq2500',
     'adna':          'illumina_hiseq2500',
+    'element':       'element_aviti',
+    'element_aviti': 'element_aviti',
+    'element_ultraq':'element_ultraq',
+    'aviti':         'element_aviti',
+    'ultraq':        'element_ultraq',
 }
 
 # Human-readable labels for CLI help text
@@ -101,6 +111,9 @@ CHEMISTRY_LABELS: Dict[str, str] = {
     'ont_lsk114_r1041':    'ONT Ligation Kit 114 / R10.4.1',
     'ont_ulk114_r1041':    'ONT Ultra-Long Kit 114 / R10.4.1',
     'illumina_hiseq2500':  'Illumina HiSeq 2500',
+    'pacbio_onso':         'PacBio Onso (short-read SBB)',
+    'element_aviti':       'Element Aviti (standard / long)',
+    'element_ultraq':      'Element UltraQ',
 }
 
 
@@ -330,7 +343,19 @@ def get_corrector(
     elif tech_lower in ["pacbio", "pacbio_hifi", "hifi"]:
         corrector = PacBioCorrector(error_profile=error_profile, **kwargs)
     
+    elif tech_lower in ["onso", "pacbio_onso"]:
+        # Onso is a PacBio short-read platform (SBB chemistry) —
+        # entirely different error profile from HiFi.  We route it
+        # through IlluminaCorrector since it is short-read, but stamp
+        # the correct chemistry code so the model distinguishes it.
+        corrector = IlluminaCorrector(error_profile=error_profile, **kwargs)
+    
     elif tech_lower in ["illumina", "paired_end", "single_end"]:
+        corrector = IlluminaCorrector(error_profile=error_profile, **kwargs)
+    
+    elif tech_lower in ["element", "element_aviti", "aviti",
+                         "element_ultraq", "ultraq"]:
+        # Element Biosciences short-read platforms
         corrector = IlluminaCorrector(error_profile=error_profile, **kwargs)
     
     elif tech_lower in ["ancient_dna", "ancient", "adna"]:
@@ -339,7 +364,8 @@ def get_corrector(
     else:
         raise ValueError(
             f"Unknown technology: {technology}. "
-            f"Supported: ont, pacbio, illumina, ancient_dna"
+            f"Supported: ont, pacbio, illumina, ancient_dna, "
+            f"onso, element, element_aviti, element_ultraq"
         )
     
     # Stamp resolved chemistry onto the corrector
