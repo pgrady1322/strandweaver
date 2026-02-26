@@ -445,14 +445,18 @@ class TestChemistryModule:
     """Tests for ErrorSmith chemistry resolution in errorsmith_module."""
 
     def test_chemistry_codes_defined(self):
-        """CHEMISTRY_CODES should have 9 entries."""
+        """CHEMISTRY_CODES should have 13 entries."""
         from strandweaver.preprocessing.errorsmith_module import CHEMISTRY_CODES
-        assert len(CHEMISTRY_CODES) == 9
+        assert len(CHEMISTRY_CODES) == 13
         assert 'pacbio_hifi_sequel2' in CHEMISTRY_CODES
+        assert 'pacbio_hifi_revio' in CHEMISTRY_CODES
         assert 'ont_lsk110_r941' in CHEMISTRY_CODES
         assert 'ont_ulk001_r941' in CHEMISTRY_CODES
         assert 'ont_lsk114_r1041' in CHEMISTRY_CODES
+        assert 'ont_r1041_duplex' in CHEMISTRY_CODES
         assert 'ont_ulk114_r1041' in CHEMISTRY_CODES
+        assert 'ont_ulk114_r1041_hiacc' in CHEMISTRY_CODES
+        assert 'ont_ulk114_r1041_dorado' in CHEMISTRY_CODES
         assert 'illumina_hiseq2500' in CHEMISTRY_CODES
         assert 'pacbio_onso' in CHEMISTRY_CODES
         assert 'element_aviti' in CHEMISTRY_CODES
@@ -515,10 +519,11 @@ class TestChemistryModule:
         assert c.chemistry_code == 5
 
     def test_get_corrector_all_technologies(self):
-        """get_corrector() should work for all 7 technology families."""
+        """get_corrector() should work for all 11 technology families."""
         from strandweaver.preprocessing.errorsmith_module import get_corrector
         for tech in ['ont', 'pacbio', 'illumina', 'ancient_dna',
-                     'onso', 'element', 'ultraq']:
+                     'onso', 'element', 'ultraq', 'revio',
+                     'duplex', 'dorado', 'ont_hiacc']:
             c = get_corrector(tech)
             assert c.chemistry is not None
             assert c.chemistry_code is not None

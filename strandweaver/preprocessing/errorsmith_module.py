@@ -59,21 +59,25 @@ if VISUALIZATION_AVAILABLE:
 # ============================================================================
 # CHEMISTRY TAXONOMY (mirrors training/scripts/generate_errorsmith_training_data.py)
 # ============================================================================
-# 9 chemistry-specific categories (flow cell + machine + chemistry).
+# 13 chemistry-specific categories (flow cell + machine + chemistry).
 # These integer codes are used as the ``technology_encoded`` feature in the
 # ErrorSmith XGBoost model.  When performing inference the correct code must
 # be supplied so that the model can leverage chemistry-specific error patterns.
 
 CHEMISTRY_CODES: Dict[str, int] = {
-    'pacbio_hifi_sequel2':  0,
-    'ont_lsk110_r941':      1,
-    'ont_ulk001_r941':      2,
-    'ont_lsk114_r1041':     3,
-    'ont_ulk114_r1041':     4,
-    'illumina_hiseq2500':   5,
-    'pacbio_onso':          6,
-    'element_aviti':        7,
-    'element_ultraq':       8,
+    'pacbio_hifi_sequel2':       0,
+    'ont_lsk110_r941':           1,
+    'ont_ulk001_r941':           2,
+    'ont_lsk114_r1041':          3,
+    'ont_ulk114_r1041':          4,
+    'illumina_hiseq2500':        5,
+    'pacbio_onso':               6,
+    'element_aviti':             7,
+    'element_ultraq':            8,
+    'pacbio_hifi_revio':         9,   # Revio HiFi — distinct from Sequel II
+    'ont_r1041_duplex':         10,   # R10.4.1 Duplex basecalling
+    'ont_ulk114_r1041_hiacc':   11,   # UL R10.4.1 experimental high-accuracy
+    'ont_ulk114_r1041_dorado':  12,   # UL R10.4.1 Dorado basecaller
 }
 
 CHEMISTRY_NAMES: Dict[int, str] = {v: k for k, v in CHEMISTRY_CODES.items()}
@@ -84,11 +88,18 @@ DEFAULT_CHEMISTRY: Dict[str, str] = {
     'pacbio':        'pacbio_hifi_sequel2',
     'pacbio_hifi':   'pacbio_hifi_sequel2',
     'hifi':          'pacbio_hifi_sequel2',
+    'revio':         'pacbio_hifi_revio',
+    'pacbio_revio':  'pacbio_hifi_revio',
     'onso':          'pacbio_onso',
     'pacbio_onso':   'pacbio_onso',
     'ont':           'ont_lsk114_r1041',
     'ont_regular':   'ont_lsk114_r1041',
     'ont_ultralong': 'ont_ulk001_r941',
+    'ont_duplex':    'ont_r1041_duplex',
+    'duplex':        'ont_r1041_duplex',
+    'ont_hiacc':     'ont_ulk114_r1041_hiacc',
+    'ont_dorado':    'ont_ulk114_r1041_dorado',
+    'dorado':        'ont_ulk114_r1041_dorado',
     'nanopore':      'ont_lsk114_r1041',
     'illumina':      'illumina_hiseq2500',
     'paired_end':    'illumina_hiseq2500',
@@ -105,15 +116,19 @@ DEFAULT_CHEMISTRY: Dict[str, str] = {
 
 # Human-readable labels for CLI help text
 CHEMISTRY_LABELS: Dict[str, str] = {
-    'pacbio_hifi_sequel2': 'PacBio HiFi (Sequel II/IIe)',
-    'ont_lsk110_r941':     'ONT Ligation Kit 110 / R9.4.1',
-    'ont_ulk001_r941':     'ONT Ultra-Long Kit 001 / R9.4.1',
-    'ont_lsk114_r1041':    'ONT Ligation Kit 114 / R10.4.1',
-    'ont_ulk114_r1041':    'ONT Ultra-Long Kit 114 / R10.4.1',
-    'illumina_hiseq2500':  'Illumina HiSeq 2500',
-    'pacbio_onso':         'PacBio Onso (short-read SBB)',
-    'element_aviti':       'Element Aviti (standard / long)',
-    'element_ultraq':      'Element UltraQ',
+    'pacbio_hifi_sequel2':       'PacBio HiFi (Sequel II/IIe)',
+    'pacbio_hifi_revio':         'PacBio HiFi (Revio)',
+    'ont_lsk110_r941':           'ONT Ligation Kit 110 / R9.4.1',
+    'ont_ulk001_r941':           'ONT Ultra-Long Kit 001 / R9.4.1',
+    'ont_lsk114_r1041':          'ONT Ligation Kit 114 / R10.4.1',
+    'ont_r1041_duplex':          'ONT R10.4.1 Duplex',
+    'ont_ulk114_r1041':          'ONT Ultra-Long Kit 114 / R10.4.1',
+    'ont_ulk114_r1041_hiacc':    'ONT UL R10.4.1 High-Accuracy (experimental)',
+    'ont_ulk114_r1041_dorado':   'ONT UL R10.4.1 Dorado',
+    'illumina_hiseq2500':        'Illumina HiSeq 2500',
+    'pacbio_onso':               'PacBio Onso (short-read SBB)',
+    'element_aviti':             'Element Aviti (standard / long)',
+    'element_ultraq':            'Element UltraQ',
 }
 
 
@@ -337,10 +352,13 @@ def get_corrector(
     chem_name, chem_code = resolve_chemistry(tech_lower, chemistry)
     
     # Map technology strings to corrector classes
-    if tech_lower in ["ont", "ont_regular", "ont_ultralong", "nanopore"]:
+    if tech_lower in ["ont", "ont_regular", "ont_ultralong", "nanopore",
+                       "ont_duplex", "duplex", "ont_hiacc", "ont_dorado",
+                       "dorado"]:
         corrector = ONTCorrector(error_profile=error_profile, **kwargs)
     
-    elif tech_lower in ["pacbio", "pacbio_hifi", "hifi"]:
+    elif tech_lower in ["pacbio", "pacbio_hifi", "hifi",
+                         "revio", "pacbio_revio"]:
         corrector = PacBioCorrector(error_profile=error_profile, **kwargs)
     
     elif tech_lower in ["onso", "pacbio_onso"]:
@@ -365,7 +383,8 @@ def get_corrector(
         raise ValueError(
             f"Unknown technology: {technology}. "
             f"Supported: ont, pacbio, illumina, ancient_dna, "
-            f"onso, element, element_aviti, element_ultraq"
+            f"onso, revio, duplex, dorado, ont_hiacc, "
+            f"element, element_aviti, element_ultraq"
         )
     
     # Stamp resolved chemistry onto the corrector
