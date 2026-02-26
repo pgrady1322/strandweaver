@@ -3,7 +3,7 @@
 # ═══════════════════════════════════════════════════════════════════════
 # Training data and tarballs stay LOCAL ONLY — never pushed to GitHub.
 # Trained model weights ARE tracked (small, needed for releases).
-
+.DS_Store
 
 # ── Training data (large — LOCAL ONLY) ────────────────────────────────
 training_data/
