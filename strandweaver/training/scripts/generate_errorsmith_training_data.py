@@ -63,6 +63,37 @@ CHEMISTRY_CODES = {
 
 CHEMISTRY_NAMES = {v: k for k, v in CHEMISTRY_CODES.items()}
 
+# ── Binary feature decomposition (shared axes) ───────────────────
+# 10 binary columns derived from Flow_Cells_and_Chemistries.md.
+# Let XGBoost share signal across technology families.
+CHEMISTRY_FEATURE_NAMES = [
+    'is_ont', 'is_pacbio_hifi', 'is_pacbio_onso', 'is_illumina',
+    'is_element', 'is_long_read', 'is_short_read', 'is_r10',
+    'is_ultralong', 'is_duplex',
+]
+# fmt: off
+CHEMISTRY_FEATURES = {
+    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup
+    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_sequel2
+    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0],   # ont_lsk110_r941
+    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0],   # ont_ulk001_r941
+    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0],   # ont_lsk114_r1041
+    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041
+    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0],   # illumina_hiseq2500
+    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0],   # pacbio_onso
+    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_aviti
+    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_ultraq
+    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_revio
+    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1],   # ont_r1041_duplex
+    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_hiacc
+    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_dorado
+}
+# fmt: on
+
+def _get_chemistry_feature_dict(code: int) -> dict:
+    vec = CHEMISTRY_FEATURES.get(code, [0]*len(CHEMISTRY_FEATURE_NAMES))
+    return dict(zip(CHEMISTRY_FEATURE_NAMES, vec))
+
 # Minimap2 presets per chemistry
 CHEMISTRY_PRESETS = {
     'pacbio_hifi_sequel2':       'map-hifi',
@@ -127,6 +158,18 @@ ERROR_FEATURES = [
 
     # Sequencing chemistry (flow cell / machine / chemistry)
     'technology_encoded',        # See CHEMISTRY_CODES: 0=pacbio_hifi_sequel2, 1=ont_lsk110_r941, etc.
+
+    # Binary chemistry decomposition (shared axes)
+    'is_ont',                    # 1 if ONT Oxford Nanopore
+    'is_pacbio_hifi',            # 1 if PacBio HiFi (CCS long-read)
+    'is_pacbio_onso',            # 1 if PacBio Onso (short-read SBB)
+    'is_illumina',               # 1 if Illumina SBS
+    'is_element',                # 1 if Element Biosciences
+    'is_long_read',              # 1 if long-read platform
+    'is_short_read',             # 1 if short-read platform
+    'is_r10',                    # 1 if ONT R10.4.1 flow cell
+    'is_ultralong',              # 1 if ONT ultra-long kit
+    'is_duplex',                 # 1 if ONT Duplex basecalling
 
     # Reference context
     'ref_gc_window_50',          # GC content of ±50 bp reference window
@@ -553,6 +596,7 @@ def process_bam(
                     'trinucleotide_context': trinuc,
                     'pentanucleotide_context': pentanuc,
                     'technology_encoded': tech_code,
+                    **_get_chemistry_feature_dict(tech_code),
                     'ref_gc_window_50': round(ref_gc_50, 4),
                     'ref_repeat_flag': ref_is_repeat,
                     'ref_homopolymer_length': ref_hp_len,

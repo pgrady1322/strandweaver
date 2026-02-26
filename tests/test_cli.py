@@ -528,6 +528,140 @@ class TestChemistryModule:
             assert c.chemistry is not None
             assert c.chemistry_code is not None
 
+    # ── Chemistry binary feature decomposition tests ────────────────
+
+    def test_chemistry_features_defined_for_all_codes(self):
+        """CHEMISTRY_FEATURES should have an entry for every chemistry code."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            CHEMISTRY_CODES, CHEMISTRY_FEATURES, CHEMISTRY_FEATURE_NAMES
+        )
+        for name, code in CHEMISTRY_CODES.items():
+            assert code in CHEMISTRY_FEATURES, f"Missing features for {name} (code {code})"
+            assert len(CHEMISTRY_FEATURES[code]) == len(CHEMISTRY_FEATURE_NAMES)
+
+    def test_chemistry_features_are_binary(self):
+        """All chemistry feature values should be 0 or 1."""
+        from strandweaver.preprocessing.errorsmith_module import CHEMISTRY_FEATURES
+        for code, vec in CHEMISTRY_FEATURES.items():
+            for val in vec:
+                assert val in (0, 1), f"Non-binary value {val} in code {code}"
+
+    def test_get_chemistry_features_returns_dict(self):
+        """get_chemistry_features() should return named dict."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_FEATURE_NAMES
+        )
+        feats = get_chemistry_features(0)
+        assert isinstance(feats, dict)
+        assert set(feats.keys()) == set(CHEMISTRY_FEATURE_NAMES)
+
+    def test_get_chemistry_features_unknown_code(self):
+        """Unknown chemistry code should return all zeros."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        feats = get_chemistry_features(999)
+        assert all(v == 0 for v in feats.values())
+
+    def test_ont_codes_share_is_ont(self):
+        """All ONT chemistry codes should have is_ont=1."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_CODES
+        )
+        ont_keys = [k for k in CHEMISTRY_CODES if k.startswith('ont_')]
+        assert len(ont_keys) >= 7  # 7 ONT codes
+        for key in ont_keys:
+            feats = get_chemistry_features(CHEMISTRY_CODES[key])
+            assert feats['is_ont'] == 1, f"{key} should have is_ont=1"
+            assert feats['is_long_read'] == 1, f"{key} should have is_long_read=1"
+
+    def test_pacbio_hifi_codes_share_is_pacbio_hifi(self):
+        """PacBio HiFi codes (Sequel II + Revio) should share is_pacbio_hifi=1."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        for code in [0, 9]:  # pacbio_hifi_sequel2, pacbio_hifi_revio
+            feats = get_chemistry_features(code)
+            assert feats['is_pacbio_hifi'] == 1
+            assert feats['is_long_read'] == 1
+            assert feats['is_ont'] == 0
+
+    def test_onso_is_unique(self):
+        """PacBio Onso should be is_pacbio_onso=1, short-read, NOT is_pacbio_hifi."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        feats = get_chemistry_features(6)  # pacbio_onso
+        assert feats['is_pacbio_onso'] == 1
+        assert feats['is_short_read'] == 1
+        assert feats['is_pacbio_hifi'] == 0
+        assert feats['is_long_read'] == 0
+        assert feats['is_ont'] == 0
+
+    def test_illumina_is_short_read(self):
+        """Illumina should be is_illumina=1, is_short_read=1."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        feats = get_chemistry_features(5)  # illumina_hiseq2500
+        assert feats['is_illumina'] == 1
+        assert feats['is_short_read'] == 1
+        assert feats['is_long_read'] == 0
+
+    def test_element_is_element_and_short_read(self):
+        """Element codes should be is_element=1, is_short_read=1."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        for code in [7, 8]:  # element_aviti, element_ultraq
+            feats = get_chemistry_features(code)
+            assert feats['is_element'] == 1
+            assert feats['is_short_read'] == 1
+            assert feats['is_illumina'] == 0
+
+    def test_r10_and_ultralong_axes(self):
+        """R10 and ultra-long flags should be set correctly."""
+        from strandweaver.preprocessing.errorsmith_module import get_chemistry_features
+        # ont_ulk114_r1041 (code 4): R10 + UL
+        feats = get_chemistry_features(4)
+        assert feats['is_r10'] == 1
+        assert feats['is_ultralong'] == 1
+        # ont_lsk114_r1041 (code 3): R10 but NOT UL
+        feats = get_chemistry_features(3)
+        assert feats['is_r10'] == 1
+        assert feats['is_ultralong'] == 0
+        # ont_lsk110_r941 (code 1): R9 — no R10, no UL
+        feats = get_chemistry_features(1)
+        assert feats['is_r10'] == 0
+        assert feats['is_ultralong'] == 0
+
+    def test_duplex_flag(self):
+        """Duplex flag should only be set for ont_r1041_duplex (code 10)."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_FEATURES
+        )
+        for code, vec in CHEMISTRY_FEATURES.items():
+            feats = get_chemistry_features(code)
+            if code == 10:
+                assert feats['is_duplex'] == 1
+            else:
+                assert feats['is_duplex'] == 0, f"code {code} should not be duplex"
+
+    def test_mutual_exclusivity_company(self):
+        """Each chemistry should belong to exactly one company family."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_FEATURES
+        )
+        company_keys = ['is_ont', 'is_pacbio_hifi', 'is_pacbio_onso',
+                        'is_illumina', 'is_element']
+        for code in CHEMISTRY_FEATURES:
+            feats = get_chemistry_features(code)
+            count = sum(feats[k] for k in company_keys)
+            assert count == 1, (
+                f"Code {code} belongs to {count} company families, expected 1"
+            )
+
+    def test_long_short_read_exclusive(self):
+        """Each chemistry should be exactly one of long-read or short-read."""
+        from strandweaver.preprocessing.errorsmith_module import (
+            get_chemistry_features, CHEMISTRY_FEATURES
+        )
+        for code in CHEMISTRY_FEATURES:
+            feats = get_chemistry_features(code)
+            assert feats['is_long_read'] + feats['is_short_read'] == 1, (
+                f"Code {code}: long={feats['is_long_read']}, short={feats['is_short_read']}"
+            )
+
 
 # StrandWeaver v0.3.0
 # Any usage is subject to this software's license.

@@ -82,6 +82,65 @@ CHEMISTRY_CODES: Dict[str, int] = {
 
 CHEMISTRY_NAMES: Dict[int, str] = {v: k for k, v in CHEMISTRY_CODES.items()}
 
+# ── Binary feature decomposition (shared axes) ───────────────────
+# Derived from Flow_Cells_and_Chemistries.md.  These binary columns
+# let XGBoost learn shared error patterns within technology families
+# (e.g. all ONT chemistries share elevated indel rates) while the
+# granular ``technology_encoded`` integer distinguishes individual
+# chemistries.
+#
+# 10 binary features per chemistry code:
+CHEMISTRY_FEATURE_NAMES: List[str] = [
+    'is_ont',           # ONT Oxford Nanopore family
+    'is_pacbio_hifi',   # PacBio HiFi (CCS long-read)
+    'is_pacbio_onso',   # PacBio Onso (short-read SBB — unique)
+    'is_illumina',      # Illumina SBS
+    'is_element',       # Element Biosciences
+    'is_long_read',     # Long-read platform
+    'is_short_read',    # Short-read platform
+    'is_r10',           # ONT R10.4.1 flow cell
+    'is_ultralong',     # ONT ultra-long kit
+    'is_duplex',        # ONT Duplex basecalling
+]
+
+# Per-chemistry binary vectors (order matches CHEMISTRY_FEATURE_NAMES)
+# fmt: off
+CHEMISTRY_FEATURES: Dict[int, List[int]] = {
+    #                        ont  hifi onso ilmn elem long shrt r10  ul   dup
+    0:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_sequel2
+    1:  [1,   0,   0,   0,   0,   1,   0,   0,   0,   0],   # ont_lsk110_r941
+    2:  [1,   0,   0,   0,   0,   1,   0,   0,   1,   0],   # ont_ulk001_r941
+    3:  [1,   0,   0,   0,   0,   1,   0,   1,   0,   0],   # ont_lsk114_r1041
+    4:  [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041
+    5:  [0,   0,   0,   1,   0,   0,   1,   0,   0,   0],   # illumina_hiseq2500
+    6:  [0,   0,   1,   0,   0,   0,   1,   0,   0,   0],   # pacbio_onso
+    7:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_aviti
+    8:  [0,   0,   0,   0,   1,   0,   1,   0,   0,   0],   # element_ultraq
+    9:  [0,   1,   0,   0,   0,   1,   0,   0,   0,   0],   # pacbio_hifi_revio
+    10: [1,   0,   0,   0,   0,   1,   0,   1,   0,   1],   # ont_r1041_duplex
+    11: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_hiacc
+    12: [1,   0,   0,   0,   0,   1,   0,   1,   1,   0],   # ont_ulk114_r1041_dorado
+}
+# fmt: on
+
+
+def get_chemistry_features(chemistry_code: int) -> Dict[str, int]:
+    """Return a dict of binary features for a given chemistry code.
+
+    Args:
+        chemistry_code: Integer from :data:`CHEMISTRY_CODES`.
+
+    Returns:
+        Dict mapping each feature name in :data:`CHEMISTRY_FEATURE_NAMES`
+        to 0 or 1.
+    """
+    vec = CHEMISTRY_FEATURES.get(chemistry_code)
+    if vec is None:
+        # Unknown chemistry — all zeros
+        return {name: 0 for name in CHEMISTRY_FEATURE_NAMES}
+    return dict(zip(CHEMISTRY_FEATURE_NAMES, vec))
+
+
 # Map broad technology strings to a sensible default chemistry.
 # Users can override via ``--chemistry`` CLI flags.
 DEFAULT_CHEMISTRY: Dict[str, str] = {
