@@ -150,7 +150,7 @@ except ImportError:
         'gc_content', 'repeat_fraction', 'kmer_diversity',
         'branching_complexity', 'hic_disruption_score',
         'ul_support', 'mapping_quality',
-        'region_length', 'breakpoint_precision',
+        'region_length', 'breakpoint_clustering',
         'allele_balance', 'phase_switch_rate',
         # v2.0: coverage distribution
         'coverage_cv', 'coverage_skewness', 'coverage_kurtosis',

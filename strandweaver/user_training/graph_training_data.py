@@ -1035,6 +1035,26 @@ def compute_sv_region_features(graph: SyntheticGraph, sv_truth_table: List[Any],
                 abs(r.end_pos - region_end) < bp_tolerance)
         )
 
+        # Breakpoint clustering: how tightly read endpoints concentrate at
+        # region boundaries.  High values → sharp breakpoints (SV-like),
+        # low values → diffuse endpoints (background-like).
+        # v3: replaces the old binary label-leak 'breakpoint_precision'.
+        boundary_positions = []
+        for r in region_reads:
+            if abs(r.start_pos - region_start) < bp_tolerance:
+                boundary_positions.append(float(r.start_pos))
+            if abs(r.end_pos - region_end) < bp_tolerance:
+                boundary_positions.append(float(r.end_pos))
+            if abs(r.end_pos - region_start) < bp_tolerance:
+                boundary_positions.append(float(r.end_pos))
+            if abs(r.start_pos - region_end) < bp_tolerance:
+                boundary_positions.append(float(r.start_pos))
+        if len(boundary_positions) >= 2:
+            bp_std = float(np.std(boundary_positions))
+            breakpoint_clustering = 1.0 / (bp_std + 1.0)
+        else:
+            breakpoint_clustering = 0.0
+
         # Clip fraction: fraction of reads that partially overlap breakpoint
         # (proxy for soft-clipping signal)
         partial_reads = sum(
@@ -1091,7 +1111,7 @@ def compute_sv_region_features(graph: SyntheticGraph, sv_truth_table: List[Any],
             'ul_support': sum(1 for r in region_reads if r.technology in ('ultra_long', 'ul')),
             'mapping_quality': mapq,
             'region_length': float(window),
-            'breakpoint_precision': 1.0 if is_positive else 0.0,
+            'breakpoint_clustering': breakpoint_clustering,
             'allele_balance': allele_balance,
             'phase_switch_rate': phase_switch_rate,
             # v2.0: coverage distribution features
@@ -1393,7 +1413,7 @@ SV_DETECT_FEATURES = [
     'gc_content', 'repeat_fraction', 'kmer_diversity',
     'branching_complexity', 'hic_disruption_score',
     'ul_support', 'mapping_quality',
-    'region_length', 'breakpoint_precision',
+    'region_length', 'breakpoint_clustering',
     'allele_balance', 'phase_switch_rate',
     # v2.0: coverage distribution
     'coverage_cv', 'coverage_skewness', 'coverage_kurtosis',
