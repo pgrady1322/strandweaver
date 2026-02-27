@@ -55,6 +55,7 @@ class SVScribeDetector:
         single_scaler: Optional[Any] = None,
         single_label_encoder: Optional[Any] = None,
         feature_columns: Optional[List[str]] = None,
+        subtype_feature_columns: Optional[List[str]] = None,
         binary_threshold: float = 0.5,
     ):
         self.binary_model = binary_model
@@ -66,8 +67,25 @@ class SVScribeDetector:
         self.single_scaler = single_scaler
         self.single_label_encoder = single_label_encoder
         self.feature_columns = feature_columns
+        self.subtype_feature_columns = subtype_feature_columns
         self.binary_threshold = binary_threshold
         self.is_two_stage = binary_model is not None and subtype_model is not None
+
+        # v3.1: Precompute column index mapping if S2 uses a different feature set
+        self._s2_col_indices: Optional[List[int]] = None
+        if (self.is_two_stage
+                and self.subtype_feature_columns
+                and self.feature_columns
+                and self.subtype_feature_columns != self.feature_columns):
+            col_map = {name: i for i, name in enumerate(self.feature_columns)}
+            self._s2_col_indices = [
+                col_map[name] for name in self.subtype_feature_columns
+                if name in col_map
+            ]
+            logger.info(
+                "  S2 uses %d/%d features (metadata excluded)",
+                len(self._s2_col_indices), len(self.feature_columns),
+            )
 
     @classmethod
     def load(cls, model_dir: str | Path) -> "SVScribeDetector":
@@ -96,6 +114,7 @@ class SVScribeDetector:
         subtype_model = subtype_scaler = subtype_le = None
         single_model = single_scaler = single_le = None
         feature_columns = None
+        subtype_feature_columns = None
 
         if binary_path.exists() and subtype_path.exists():
             logger.info("Loading two-stage SVScribe models...")
@@ -105,14 +124,19 @@ class SVScribeDetector:
             binary_model = binary_bundle['model']
             binary_scaler = binary_bundle.get('scaler')
             feature_columns = binary_bundle.get('feature_columns')
-            logger.info("  Stage 1 (binary): loaded from %s", binary_path.name)
+            logger.info("  Stage 1 (binary): loaded from %s (%d features)",
+                        binary_path.name, len(feature_columns) if feature_columns else 0)
 
             with open(subtype_path, 'rb') as f:
                 subtype_bundle = pickle.load(f)
             subtype_model = subtype_bundle['model']
             subtype_scaler = subtype_bundle.get('scaler')
             subtype_le = subtype_bundle.get('label_encoder')
-            logger.info("  Stage 2 (subtype): loaded from %s", subtype_path.name)
+            # v3.1: S2 may use a different (smaller) feature set
+            subtype_feature_columns = subtype_bundle.get('feature_columns')
+            logger.info("  Stage 2 (subtype): loaded from %s (%d features)",
+                        subtype_path.name,
+                        len(subtype_feature_columns) if subtype_feature_columns else 0)
 
         # Fallback: single model
         single_path = model_dir / 'sv_detector_model.pkl'
@@ -139,6 +163,7 @@ class SVScribeDetector:
             single_scaler=single_scaler,
             single_label_encoder=single_le,
             feature_columns=feature_columns,
+            subtype_feature_columns=subtype_feature_columns,
         )
 
         mode = "two-stage" if detector.is_two_stage else "single-model"
@@ -185,7 +210,7 @@ class SVScribeDetector:
         n_samples = X.shape[0]
         results = ['none'] * n_samples
 
-        # Stage 1: Binary SV vs. no-SV
+        # Stage 1: Binary SV vs. no-SV (uses full feature set)
         X_scaled = self.binary_scaler.transform(X) if self.binary_scaler else X
         binary_proba = self.binary_model.predict_proba(X_scaled)
 
@@ -203,6 +228,11 @@ class SVScribeDetector:
 
         # Stage 2: Subtype classification on positives only
         X_sv = X[sv_indices]
+
+        # v3.1: Select S2-only features if subtype uses a smaller feature set
+        if self._s2_col_indices is not None:
+            X_sv = X_sv[:, self._s2_col_indices]
+
         X_sv_scaled = self.subtype_scaler.transform(X_sv) if self.subtype_scaler else X_sv
         subtype_preds = self.subtype_model.predict(X_sv_scaled)
 
@@ -247,7 +277,11 @@ class SVScribeDetector:
             result['binary_proba'] = binary_proba
 
             # Subtype probas on all samples (for analysis)
-            X_sub = self.subtype_scaler.transform(X) if self.subtype_scaler else X
+            # v3.1: Select S2-only features if subtype uses a smaller set
+            X_sub = X
+            if self._s2_col_indices is not None:
+                X_sub = X_sub[:, self._s2_col_indices]
+            X_sub = self.subtype_scaler.transform(X_sub) if self.subtype_scaler else X_sub
             subtype_proba = self.subtype_model.predict_proba(X_sub)
             result['subtype_proba'] = subtype_proba
 
