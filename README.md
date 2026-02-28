@@ -2,8 +2,9 @@
 
 **AI & ML-Powered Multi-Technology Genome Assembler with GPU Acceleration**
 
-[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Status](https://img.shields.io/badge/status-v0.2_Beta-green.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
+[![CI](https://github.com/pgrady1322/strandweaver/actions/workflows/ci.yml/badge.svg)](https://github.com/pgrady1322/strandweaver/actions/workflows/ci.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Status](https://img.shields.io/badge/status-v0.3_Beta-green.svg)](docs/MASTER_DEVELOPMENT_ROADMAP.md)
 [![Models](https://img.shields.io/badge/trained%20models-6%20XGBoost%20%2B%201%20GNN-orange.svg)](trained_models/TRAINING.md)
 [![License](https://img.shields.io/badge/license-Dual%20License%20(Academic/Commercial)-blue.svg)](LICENSE_ACADEMIC.md)
 
