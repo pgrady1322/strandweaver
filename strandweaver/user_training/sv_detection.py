@@ -6,10 +6,13 @@ StrandWeaver v0.3.0
 SVScribe: Two-stage SV detection inference module.
 
 Implements the S2 two-stage architecture:
-  Stage 1: Binary classifier (SV vs. no SV)
-  Stage 2: Multiclass SV-type classifier (del / ins / inv / dup)
+  Stage 1: Binary classifier (SV vs. no SV)  — XGBoost
+  Stage 2: Multiclass SV-type classifier     — XGBoost + LightGBM ensemble
 
-Falls back to single-model inference if two-stage models are not available.
+Supports three model formats:
+  v5: Ensemble bundle  (model_xgb + model_lgbm + blend_weight + class_scales)
+  v4: Single model     (model + bio_prior_rules + bio_prior_alpha)
+  Legacy: Single .pkl  (sv_detector_model.pkl)
 
 Author: StrandWeaver Development Team
 License: Dual License (Academic/Commercial)
@@ -22,6 +25,8 @@ import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 logger = logging.getLogger("strandweaver.sv_detection")
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -30,11 +35,11 @@ logger = logging.getLogger("strandweaver.sv_detection")
 
 
 class SVScribeDetector:
-    """Two-stage SV detection model with biology-informed prior calibration.
+    """Two-stage SV detection with v5 XGBoost + LightGBM ensemble.
 
     Stage 1: Binary (SV vs. no-SV) — high recall, filters out easy negatives.
-    Stage 2: Multiclass (del / ins / inv / dup) — runs on stage-1 positives,
-             with optional Bayesian calibration using biological priors.
+    Stage 2: Multiclass (del / ins / inv / dup) — XGBoost + LightGBM
+             ensemble with per-class threshold scaling.
 
     Falls back to single-model mode if only ``sv_detector_model.pkl`` exists.
 
@@ -49,33 +54,67 @@ class SVScribeDetector:
         self,
         binary_model: Optional[Any] = None,
         binary_scaler: Optional[Any] = None,
+        # v5: ensemble models
+        subtype_model_xgb: Optional[Any] = None,
+        subtype_model_lgbm: Optional[Any] = None,
+        blend_weight: float = 0.5,
+        class_scales: Optional[List[float]] = None,
+        # v4 compat: single subtype model
         subtype_model: Optional[Any] = None,
         subtype_scaler: Optional[Any] = None,
         subtype_label_encoder: Optional[Any] = None,
+        # Legacy single-model
         single_model: Optional[Any] = None,
         single_scaler: Optional[Any] = None,
         single_label_encoder: Optional[Any] = None,
+        # Feature info
         feature_columns: Optional[List[str]] = None,
         subtype_feature_columns: Optional[List[str]] = None,
         binary_threshold: float = 0.5,
+        # v4 compat: bio calibration (kept for backwards compat)
         bio_prior_rules: Optional[Dict[str, Dict[str, float]]] = None,
         bio_prior_alpha: float = 0.0,
     ):
         self.binary_model = binary_model
         self.binary_scaler = binary_scaler
+
+        # v5 ensemble
+        self.subtype_model_xgb = subtype_model_xgb
+        self.subtype_model_lgbm = subtype_model_lgbm
+        self.blend_weight = blend_weight
+        self.class_scales = (
+            np.array(class_scales, dtype=np.float64)
+            if class_scales is not None
+            else np.ones(4, dtype=np.float64)
+        )
+
+        # v4 compat or ensemble primary model
         self.subtype_model = subtype_model
         self.subtype_scaler = subtype_scaler
         self.subtype_label_encoder = subtype_label_encoder
+
+        # Legacy
         self.single_model = single_model
         self.single_scaler = single_scaler
         self.single_label_encoder = single_label_encoder
+
+        # Features
         self.feature_columns = feature_columns
         self.subtype_feature_columns = subtype_feature_columns
         self.binary_threshold = binary_threshold
-        # v4: Biology-informed prior calibration
+
+        # v4 compat
         self.bio_prior_rules = bio_prior_rules
         self.bio_prior_alpha = bio_prior_alpha
-        self.is_two_stage = binary_model is not None and subtype_model is not None
+
+        # Determine mode
+        self.is_ensemble = (
+            subtype_model_xgb is not None and subtype_model_lgbm is not None
+        )
+        self.is_two_stage = (
+            binary_model is not None
+            and (self.is_ensemble or subtype_model is not None)
+        )
 
         # v3.1: Precompute column index mapping if S2 uses a different feature set
         self._s2_col_indices: Optional[List[int]] = None
@@ -93,7 +132,13 @@ class SVScribeDetector:
                 len(self._s2_col_indices), len(self.feature_columns),
             )
 
-        if self.bio_prior_rules and self.bio_prior_alpha > 0:
+        if self.is_ensemble:
+            logger.info(
+                "  v5 ensemble: XGB(%.2f) + LGBM(%.2f), scales=%s",
+                self.blend_weight, 1 - self.blend_weight,
+                [f"{s:.2f}" for s in self.class_scales],
+            )
+        elif self.bio_prior_rules and self.bio_prior_alpha > 0:
             logger.info(
                 "  v4 bio calibration active (α=%.3f, %d type rules)",
                 self.bio_prior_alpha,
@@ -104,8 +149,7 @@ class SVScribeDetector:
     def load(cls, model_dir: str | Path) -> "SVScribeDetector":
         """Load models from the sv_detector/ directory.
 
-        Attempts to load two-stage models first. If not found, falls
-        back to single-model mode.
+        Supports v5 (ensemble), v4 (bio calibration), and legacy formats.
 
         Parameters
         ----------
@@ -124,10 +168,15 @@ class SVScribeDetector:
         subtype_path = model_dir / 'sv_subtype_model.pkl'
 
         binary_model = binary_scaler = None
+        subtype_model_xgb = subtype_model_lgbm = None
         subtype_model = subtype_scaler = subtype_le = None
         single_model = single_scaler = single_le = None
         feature_columns = None
         subtype_feature_columns = None
+        blend_weight = 0.5
+        class_scales = None
+        bio_prior_rules = None
+        bio_prior_alpha = 0.0
 
         if binary_path.exists() and subtype_path.exists():
             logger.info("Loading two-stage SVScribe models...")
@@ -137,24 +186,41 @@ class SVScribeDetector:
             binary_model = binary_bundle['model']
             binary_scaler = binary_bundle.get('scaler')
             feature_columns = binary_bundle.get('feature_columns')
-            logger.info("  Stage 1 (binary): loaded from %s (%d features)",
-                        binary_path.name, len(feature_columns) if feature_columns else 0)
+            logger.info(
+                "  Stage 1 (binary): loaded from %s (%d features)",
+                binary_path.name,
+                len(feature_columns) if feature_columns else 0,
+            )
 
             with open(subtype_path, 'rb') as f:
                 subtype_bundle = pickle.load(f)
-            subtype_model = subtype_bundle['model']
+
             subtype_scaler = subtype_bundle.get('scaler')
             subtype_le = subtype_bundle.get('label_encoder')
-            # v3.1: S2 may use a different (smaller) feature set
             subtype_feature_columns = subtype_bundle.get('feature_columns')
-            # v4: Biology-informed prior calibration
-            bio_prior_rules = subtype_bundle.get('bio_prior_rules')
-            bio_prior_alpha = subtype_bundle.get('bio_prior_alpha', 0.0)
-            logger.info("  Stage 2 (subtype): loaded from %s (%d features)",
-                        subtype_path.name,
-                        len(subtype_feature_columns) if subtype_feature_columns else 0)
-            if bio_prior_rules and bio_prior_alpha > 0:
-                logger.info("  v4 bio calibration: α=%.3f", bio_prior_alpha)
+
+            # v5 ensemble format
+            if 'model_xgb' in subtype_bundle and 'model_lgbm' in subtype_bundle:
+                subtype_model_xgb = subtype_bundle['model_xgb']
+                subtype_model_lgbm = subtype_bundle['model_lgbm']
+                blend_weight = subtype_bundle.get('blend_weight', 0.5)
+                class_scales = subtype_bundle.get('class_scales')
+                logger.info(
+                    "  Stage 2 (v5 ensemble): XGB+LGBM, blend=%.2f, "
+                    "%d features",
+                    blend_weight,
+                    len(subtype_feature_columns) if subtype_feature_columns else 0,
+                )
+            else:
+                # v4 or earlier: single model
+                subtype_model = subtype_bundle['model']
+                bio_prior_rules = subtype_bundle.get('bio_prior_rules')
+                bio_prior_alpha = subtype_bundle.get('bio_prior_alpha', 0.0)
+                logger.info(
+                    "  Stage 2 (single): loaded from %s (%d features)",
+                    subtype_path.name,
+                    len(subtype_feature_columns) if subtype_feature_columns else 0,
+                )
 
         # Fallback: single model
         single_path = model_dir / 'sv_detector_model.pkl'
@@ -174,6 +240,10 @@ class SVScribeDetector:
         detector = cls(
             binary_model=binary_model,
             binary_scaler=binary_scaler,
+            subtype_model_xgb=subtype_model_xgb,
+            subtype_model_lgbm=subtype_model_lgbm,
+            blend_weight=blend_weight,
+            class_scales=class_scales,
             subtype_model=subtype_model,
             subtype_scaler=subtype_scaler,
             subtype_label_encoder=subtype_le,
@@ -186,7 +256,9 @@ class SVScribeDetector:
             bio_prior_alpha=bio_prior_alpha if binary_model else 0.0,
         )
 
-        mode = "two-stage" if detector.is_two_stage else "single-model"
+        mode = "two-stage-ensemble" if detector.is_ensemble else (
+            "two-stage" if detector.is_two_stage else "single-model"
+        )
         logger.info("SVScribe loaded in %s mode", mode)
         return detector
 
@@ -211,8 +283,6 @@ class SVScribeDetector:
             Predicted SV types: 'none', 'deletion', 'insertion',
             'inversion', 'duplication'.
         """
-        import numpy as np
-
         X = np.asarray(X, dtype=np.float32)
         threshold = binary_threshold or self.binary_threshold
 
@@ -223,18 +293,31 @@ class SVScribeDetector:
         else:
             raise RuntimeError("No SVScribe model loaded")
 
-    # ── v4: Biology-informed prior calibration helpers ─────────────
+    # ── v5: Ensemble subtype prediction ───────────────────────────
 
-    def _compute_bio_prior(
-        self, X_scaled, feature_names: List[str],
-    ):
-        """Compute bio prior matrix from scaled features.
+    def _ensemble_predict_proba(self, X_scaled):
+        """Blended XGBoost + LightGBM probability prediction.
 
-        Returns array of shape (n_samples, 4) for
-        [deletion, insertion, inversion, duplication].
+        Returns raw blended probabilities (before class_scales).
         """
-        import numpy as np
+        xgb_proba = self.subtype_model_xgb.predict_proba(X_scaled)
+        lgbm_proba = self.subtype_model_lgbm.predict_proba(X_scaled)
+        blended = (
+            self.blend_weight * xgb_proba
+            + (1 - self.blend_weight) * lgbm_proba
+        )
+        return blended
 
+    def _ensemble_predict(self, X_scaled):
+        """Blended prediction with per-class threshold scaling."""
+        blended = self._ensemble_predict_proba(X_scaled)
+        adjusted = blended * self.class_scales[np.newaxis, :]
+        return adjusted.argmax(axis=1), blended
+
+    # ── v4 compat: Biology-informed prior calibration ─────────────
+
+    def _compute_bio_prior(self, X_scaled, feature_names: List[str]):
+        """Compute bio prior matrix from scaled features."""
         type_order = ['deletion', 'insertion', 'inversion', 'duplication']
         feat_idx = {name: i for i, name in enumerate(feature_names)}
         n = X_scaled.shape[0]
@@ -252,8 +335,6 @@ class SVScribeDetector:
 
     def _apply_bio_calibration(self, model_proba, bio_prior):
         """Bayesian calibration: P_cal ∝ P_model × exp(α × bio_prior)."""
-        import numpy as np
-
         alpha = self.bio_prior_alpha
         if alpha <= 0 or bio_prior is None:
             return model_proba
@@ -265,10 +346,10 @@ class SVScribeDetector:
         row_sums = calibrated.sum(axis=1, keepdims=True) + 1e-12
         return calibrated / row_sums
 
+    # ── Two-stage prediction ──────────────────────────────────────
+
     def _predict_two_stage(self, X, threshold: float) -> List[str]:
         """Two-stage prediction: binary filter → subtype classification."""
-        import numpy as np
-
         n_samples = X.shape[0]
         results = ['none'] * n_samples
 
@@ -276,7 +357,6 @@ class SVScribeDetector:
         X_scaled = self.binary_scaler.transform(X) if self.binary_scaler else X
         binary_proba = self.binary_model.predict_proba(X_scaled)
 
-        # binary_proba[:, 1] = P(SV)
         if binary_proba.ndim == 2 and binary_proba.shape[1] == 2:
             sv_proba = binary_proba[:, 1]
         else:
@@ -295,10 +375,16 @@ class SVScribeDetector:
         if self._s2_col_indices is not None:
             X_sv = X_sv[:, self._s2_col_indices]
 
-        X_sv_scaled = self.subtype_scaler.transform(X_sv) if self.subtype_scaler else X_sv
+        X_sv_scaled = (
+            self.subtype_scaler.transform(X_sv)
+            if self.subtype_scaler else X_sv
+        )
 
+        # v5: Ensemble predictions
+        if self.is_ensemble:
+            subtype_preds, _ = self._ensemble_predict(X_sv_scaled)
         # v4: Bio-calibrated predictions
-        if self.bio_prior_rules and self.bio_prior_alpha > 0:
+        elif self.bio_prior_rules and self.bio_prior_alpha > 0:
             feat_names = self.subtype_feature_columns or self.feature_columns
             raw_proba = self.subtype_model.predict_proba(X_sv_scaled)
             bio_prior = self._compute_bio_prior(X_sv_scaled, feat_names)
@@ -309,7 +395,9 @@ class SVScribeDetector:
 
         # Decode labels
         if self.subtype_label_encoder is not None:
-            subtype_labels = self.subtype_label_encoder.inverse_transform(subtype_preds)
+            subtype_labels = self.subtype_label_encoder.inverse_transform(
+                subtype_preds
+            )
         else:
             subtype_labels = [str(p) for p in subtype_preds]
 
@@ -337,37 +425,54 @@ class SVScribeDetector:
             'subtype_proba': array of P(type|SV) for SV-positive samples
             'labels': class labels for subtype probabilities
         """
-        import numpy as np
-
         X = np.asarray(X, dtype=np.float32)
         result: Dict[str, Any] = {}
 
         if self.is_two_stage:
-            X_scaled = self.binary_scaler.transform(X) if self.binary_scaler else X
+            X_scaled = (
+                self.binary_scaler.transform(X)
+                if self.binary_scaler else X
+            )
             binary_proba = self.binary_model.predict_proba(X_scaled)
             result['binary_proba'] = binary_proba
 
-            # Subtype probas on all samples (for analysis)
-            # v3.1: Select S2-only features if subtype uses a smaller set
+            # v3.1: Select S2-only features
             X_sub = X
             if self._s2_col_indices is not None:
                 X_sub = X_sub[:, self._s2_col_indices]
-            X_sub = self.subtype_scaler.transform(X_sub) if self.subtype_scaler else X_sub
-            subtype_proba = self.subtype_model.predict_proba(X_sub)
+            X_sub = (
+                self.subtype_scaler.transform(X_sub)
+                if self.subtype_scaler else X_sub
+            )
 
-            # v4: Apply bio calibration to subtype probabilities
-            if self.bio_prior_rules and self.bio_prior_alpha > 0:
-                feat_names = self.subtype_feature_columns or self.feature_columns
+            # v5: Ensemble probabilities
+            if self.is_ensemble:
+                subtype_proba = self._ensemble_predict_proba(X_sub)
+                result['ensemble'] = True
+                result['blend_weight'] = self.blend_weight
+            # v4: Bio calibration
+            elif self.bio_prior_rules and self.bio_prior_alpha > 0:
+                subtype_proba = self.subtype_model.predict_proba(X_sub)
+                feat_names = (
+                    self.subtype_feature_columns or self.feature_columns
+                )
                 bio_prior = self._compute_bio_prior(X_sub, feat_names)
-                subtype_proba = self._apply_bio_calibration(subtype_proba, bio_prior)
+                subtype_proba = self._apply_bio_calibration(
+                    subtype_proba, bio_prior
+                )
                 result['bio_calibrated'] = True
+            else:
+                subtype_proba = self.subtype_model.predict_proba(X_sub)
 
             result['subtype_proba'] = subtype_proba
 
             if self.subtype_label_encoder is not None:
                 result['labels'] = list(self.subtype_label_encoder.classes_)
         elif self.single_model is not None:
-            X_scaled = self.single_scaler.transform(X) if self.single_scaler else X
+            X_scaled = (
+                self.single_scaler.transform(X)
+                if self.single_scaler else X
+            )
             result['proba'] = self.single_model.predict_proba(X_scaled)
             if self.single_label_encoder is not None:
                 result['labels'] = list(self.single_label_encoder.classes_)
@@ -376,8 +481,12 @@ class SVScribeDetector:
 
     @property
     def mode(self) -> str:
-        """Return 'two_stage' or 'single'."""
-        return 'two_stage' if self.is_two_stage else 'single'
+        """Return 'ensemble', 'two_stage', or 'single'."""
+        if self.is_ensemble:
+            return 'ensemble'
+        elif self.is_two_stage:
+            return 'two_stage'
+        return 'single'
 
 
 # StrandWeaver v0.3.0
