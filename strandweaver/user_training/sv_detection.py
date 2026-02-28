@@ -30,10 +30,11 @@ logger = logging.getLogger("strandweaver.sv_detection")
 
 
 class SVScribeDetector:
-    """Two-stage SV detection model.
+    """Two-stage SV detection model with biology-informed prior calibration.
 
     Stage 1: Binary (SV vs. no-SV) — high recall, filters out easy negatives.
-    Stage 2: Multiclass (del / ins / inv / dup) — runs on stage-1 positives.
+    Stage 2: Multiclass (del / ins / inv / dup) — runs on stage-1 positives,
+             with optional Bayesian calibration using biological priors.
 
     Falls back to single-model mode if only ``sv_detector_model.pkl`` exists.
 
@@ -57,6 +58,8 @@ class SVScribeDetector:
         feature_columns: Optional[List[str]] = None,
         subtype_feature_columns: Optional[List[str]] = None,
         binary_threshold: float = 0.5,
+        bio_prior_rules: Optional[Dict[str, Dict[str, float]]] = None,
+        bio_prior_alpha: float = 0.0,
     ):
         self.binary_model = binary_model
         self.binary_scaler = binary_scaler
@@ -69,6 +72,9 @@ class SVScribeDetector:
         self.feature_columns = feature_columns
         self.subtype_feature_columns = subtype_feature_columns
         self.binary_threshold = binary_threshold
+        # v4: Biology-informed prior calibration
+        self.bio_prior_rules = bio_prior_rules
+        self.bio_prior_alpha = bio_prior_alpha
         self.is_two_stage = binary_model is not None and subtype_model is not None
 
         # v3.1: Precompute column index mapping if S2 uses a different feature set
@@ -85,6 +91,13 @@ class SVScribeDetector:
             logger.info(
                 "  S2 uses %d/%d features (metadata excluded)",
                 len(self._s2_col_indices), len(self.feature_columns),
+            )
+
+        if self.bio_prior_rules and self.bio_prior_alpha > 0:
+            logger.info(
+                "  v4 bio calibration active (α=%.3f, %d type rules)",
+                self.bio_prior_alpha,
+                sum(len(v) for v in self.bio_prior_rules.values()),
             )
 
     @classmethod
@@ -134,9 +147,14 @@ class SVScribeDetector:
             subtype_le = subtype_bundle.get('label_encoder')
             # v3.1: S2 may use a different (smaller) feature set
             subtype_feature_columns = subtype_bundle.get('feature_columns')
+            # v4: Biology-informed prior calibration
+            bio_prior_rules = subtype_bundle.get('bio_prior_rules')
+            bio_prior_alpha = subtype_bundle.get('bio_prior_alpha', 0.0)
             logger.info("  Stage 2 (subtype): loaded from %s (%d features)",
                         subtype_path.name,
                         len(subtype_feature_columns) if subtype_feature_columns else 0)
+            if bio_prior_rules and bio_prior_alpha > 0:
+                logger.info("  v4 bio calibration: α=%.3f", bio_prior_alpha)
 
         # Fallback: single model
         single_path = model_dir / 'sv_detector_model.pkl'
@@ -164,6 +182,8 @@ class SVScribeDetector:
             single_label_encoder=single_le,
             feature_columns=feature_columns,
             subtype_feature_columns=subtype_feature_columns,
+            bio_prior_rules=bio_prior_rules if binary_model else None,
+            bio_prior_alpha=bio_prior_alpha if binary_model else 0.0,
         )
 
         mode = "two-stage" if detector.is_two_stage else "single-model"
@@ -203,6 +223,48 @@ class SVScribeDetector:
         else:
             raise RuntimeError("No SVScribe model loaded")
 
+    # ── v4: Biology-informed prior calibration helpers ─────────────
+
+    def _compute_bio_prior(
+        self, X_scaled, feature_names: List[str],
+    ):
+        """Compute bio prior matrix from scaled features.
+
+        Returns array of shape (n_samples, 4) for
+        [deletion, insertion, inversion, duplication].
+        """
+        import numpy as np
+
+        type_order = ['deletion', 'insertion', 'inversion', 'duplication']
+        feat_idx = {name: i for i, name in enumerate(feature_names)}
+        n = X_scaled.shape[0]
+        bio = np.zeros((n, 4), dtype=np.float64)
+
+        for t, sv_type in enumerate(type_order):
+            rules = self.bio_prior_rules.get(sv_type, {})
+            for feat_name, weight in rules.items():
+                if feat_name not in feat_idx:
+                    continue
+                col = X_scaled[:, feat_idx[feat_name]]
+                bio[:, t] += weight * np.clip(col, 0, None)
+
+        return bio
+
+    def _apply_bio_calibration(self, model_proba, bio_prior):
+        """Bayesian calibration: P_cal ∝ P_model × exp(α × bio_prior)."""
+        import numpy as np
+
+        alpha = self.bio_prior_alpha
+        if alpha <= 0 or bio_prior is None:
+            return model_proba
+
+        bio_row_max = bio_prior.max(axis=1, keepdims=True)
+        bio_centered = bio_prior - bio_row_max
+
+        calibrated = model_proba * np.exp(alpha * bio_centered)
+        row_sums = calibrated.sum(axis=1, keepdims=True) + 1e-12
+        return calibrated / row_sums
+
     def _predict_two_stage(self, X, threshold: float) -> List[str]:
         """Two-stage prediction: binary filter → subtype classification."""
         import numpy as np
@@ -234,7 +296,16 @@ class SVScribeDetector:
             X_sv = X_sv[:, self._s2_col_indices]
 
         X_sv_scaled = self.subtype_scaler.transform(X_sv) if self.subtype_scaler else X_sv
-        subtype_preds = self.subtype_model.predict(X_sv_scaled)
+
+        # v4: Bio-calibrated predictions
+        if self.bio_prior_rules and self.bio_prior_alpha > 0:
+            feat_names = self.subtype_feature_columns or self.feature_columns
+            raw_proba = self.subtype_model.predict_proba(X_sv_scaled)
+            bio_prior = self._compute_bio_prior(X_sv_scaled, feat_names)
+            cal_proba = self._apply_bio_calibration(raw_proba, bio_prior)
+            subtype_preds = cal_proba.argmax(axis=1)
+        else:
+            subtype_preds = self.subtype_model.predict(X_sv_scaled)
 
         # Decode labels
         if self.subtype_label_encoder is not None:
@@ -283,6 +354,14 @@ class SVScribeDetector:
                 X_sub = X_sub[:, self._s2_col_indices]
             X_sub = self.subtype_scaler.transform(X_sub) if self.subtype_scaler else X_sub
             subtype_proba = self.subtype_model.predict_proba(X_sub)
+
+            # v4: Apply bio calibration to subtype probabilities
+            if self.bio_prior_rules and self.bio_prior_alpha > 0:
+                feat_names = self.subtype_feature_columns or self.feature_columns
+                bio_prior = self._compute_bio_prior(X_sub, feat_names)
+                subtype_proba = self._apply_bio_calibration(subtype_proba, bio_prior)
+                result['bio_calibrated'] = True
+
             result['subtype_proba'] = subtype_proba
 
             if self.subtype_label_encoder is not None:
