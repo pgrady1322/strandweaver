@@ -90,13 +90,13 @@ DEFAULT_BATCHES = [
         'desc': 'Focused on inversions + duplications (weakest classes)',
     },
     {
-        'name': 'sv_dense_ins_focus',
-        'sv_density': 5e-4,
-        'sv_types': ['insertion'],
+        'name': 'sv_dense_del_focus',
+        'sv_density': 4e-4,
+        'sv_types': ['deletion'],
         'genome_size': 1_000_000,
         'repeat_density': 0.30,
         'gc_content': 0.42,
-        'desc': 'Focused on insertions only (weakest class, F1=0.319)',
+        'desc': 'Focused on deletions (fewest samples in prior batches)',
     },
 ]
 
